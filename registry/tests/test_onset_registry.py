@@ -23,6 +23,8 @@ def defs() -> dict[str, dict]:
 @pytest.fixture(scope="module")
 def indicator_spec():
     """The indicator skill's rule parser, loaded by path (skills are not packages)."""
+    if not INDICATOR_SPEC.is_file():
+        pytest.skip("indicator skill is not on this branch")
     name = "_registry_test_indicator_spec"
     spec = importlib.util.spec_from_file_location(name, INDICATOR_SPEC)
     module = importlib.util.module_from_spec(spec)
@@ -490,3 +492,23 @@ def test_check_main_exits_1_on_drift(sync_tool, fake_repo, monkeypatch, capsys):
     assert sync_tool.main(["--check"]) == 1
     assert "skills/alpha/references/onset_definitions.toml: missing" in capsys.readouterr().out
     assert sync_tool.main(["--bogus"]) == 2
+
+
+# ---------------------------------------------------------------- Sheerwater's definitions
+
+
+@pytest.mark.parametrize(
+    ("name", "rule"),
+    [
+        ("sheerwater-spw-rainy-onset", "precip sum 8d > 30 and precip sum 11d > 40"),
+        ("sheerwater-icpac-onset", "precip sum 3d > 21 and precip sum 7d > 10.5 after 3d"),
+        ("sheerwater-chc-onset", "precip sum 10d > 25 and precip sum 20d > 20 after 10d"),
+        ("sheerwater-moron-robertson-onset", "precip sum 5d > 38 and precip sum 10d > 5 after 5d"),
+    ],
+)
+def test_sheerwater_definitions_compile_exactly(defs, name, rule):
+    """Rhiza's own events (sheerwater/interfaces/events.py, tasks/spw.py): strict '>' sums;
+    later windows start where the trigger window ends, except the planting window (same day)."""
+    c = onset.compile_to_indicator(name, defs[name])
+    assert c.exact, c.dropped
+    assert c.rule == rule

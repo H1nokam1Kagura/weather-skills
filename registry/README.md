@@ -24,20 +24,27 @@ explore; they are not permission to edit the entry. AGRHYMET's thresholds, compa
 dekad windows and time basis are fixed; ICPAC's maproom offers its thresholds as adjustable
 "e.g." values, so they are tunable within about half to double the defaults.
 
-## Known drift
+## Known drift: three implementations, one organisation
 
-As of 2026-09-27 (indicator on `dev`; onset-date as proposed in PR #115):
+As of 2026-09-27. Sheerwater is the team's benchmark (`sheerwater/interfaces/events.py`),
+`indicator` is on `dev`, and `onset-date` is as proposed in PR #115. None of the three refers
+to the others. This table is the reason for the registry.
 
-| definition | source | indicator alias | onset-date (PR #115) |
-|---|---|---|---|
-| ICPAC wet event | 20 mm in 3 days; boundary not stated (registry: `>=`) | `sum 3d >= 20` | `> 20` |
-| AGRHYMET/CHC first window | "at least" 25 mm in a dekad | `sum 10d > 25` | `>= 20` (default) |
-| AGRHYMET/CHC confirmation | "at least" 20 mm over the next two dekads | `sum 20d > 20 after 10d` | `> 20` |
-| AGRHYMET/CHC time basis | calendar dekads | rolling daily windows | rolling daily windows |
+| Definition | Published source | Sheerwater | `indicator` | `onset-date` (#115) |
+|---|---|---|---|---|
+| ICPAC wet event | e.g. 20 mm in 3 days (IRI maproom) | 3-day sum **> 21** | 3-day sum **≥ 20** | 3-day sum **> 20** |
+| ICPAC second condition | no 7-day dry spell within 21 days | **next 7-day sum > 10.5** | no 7-day run < 1 mm within 21 days | same as `indicator` |
+| CHC first window | at least 25 mm in a dekad | 10-day sum **> 25** | 10-day sum **> 25** | 10-day sum **≥ 20** |
+| CHC confirmation | at least 20 mm over the next two dekads | next 20-day **> 20** | next 20-day **> 20** | 20-day **> 20** |
+| CHC time basis | calendar dekads | rolling | rolling | rolling |
+| Moron-Robertson | per-cell 5-day climatology, all days wet, no 10-day window < 5 mm within 30 days | **fixed 38 mm**, next 10-day > 5 mm | — | — |
 
-`agrhymet-sos-rolling` is the registry's statement of what both skills approximate; the
-test suite pins the alias drift as a strict xfail, so regenerating the alias from the
-registry forces the test to be updated.
+The registry records every column as its own entry (`icpac-onset`, `sheerwater-icpac-onset`,
+`agrhymet-sos`, `agrhymet-sos-rolling`, `sheerwater-chc-onset`, `moron-robertson-2014`,
+`sheerwater-moron-robertson-onset`). It **changes no behaviour**: `indicator`'s legacy aliases
+resolve to the entries that reproduce exactly what they expanded to before. `chc-onset` is
+`sheerwater-chc-onset`; `icpac-onset` is `icpac-onset`. Which column should be canonical where
+they differ is a decision for the team, not something this PR makes.
 
 ## Shared contract
 
@@ -81,3 +88,19 @@ tool instead, because the definitions and their drift tests need to change along
 skills that consume them while the schema is still settling, and a core release per edit
 would slow that down. Once the schema is stable, moving the TOML and `onset.py` into core
 retires the copies and `tools/sync_definitions.py`.
+
+## Relation to Sheerwater's event registry
+
+Sheerwater (`rhiza-research/sheerwater`) already has an `EVENT_REGISTRY` in
+`sheerwater/interfaces/events.py`: decorator-registered Python event functions such as
+`above_threshold`, `below_threshold` and `accumulated_rain`. It also has the
+suitable-planting-window onset condition in `sheerwater/tasks/spw.py`. That registry is code, and
+it serves the benchmark.
+
+This file is complementary. It is declarative data, readable by self-contained skills and by
+agents, with each definition's source, status and content hash. The Sheerwater onset condition is
+registered here as `sheerwater-spw-rainy-onset` and compiles exactly to an `indicator` rule.
+
+A natural next step is to generate one from the other: for example, make Sheerwater events
+available as registry entries, or have Sheerwater read these definitions. That is a maintainer
+decision, and nothing here assumes it.
