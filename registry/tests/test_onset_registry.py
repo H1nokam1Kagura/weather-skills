@@ -85,6 +85,235 @@ def test_variant_without_registered_parent_rejected(defs):
         _validate("x", d, defs)
 
 
+# ---------------------------------------------------------------- tunables
+
+
+def test_every_non_candidate_declares_tunables_with_a_why(defs):
+    for name, d in defs.items():
+        if d["status"] != "candidate":
+            assert d["tunable"]["why"].strip(), name
+
+
+def test_agrhymet_thresholds_and_time_basis_are_fixed(defs):
+    for name in ("agrhymet-sos", "agrhymet-sos-rolling"):
+        fixed = set(onset.fixed_fields(defs[name]))
+        assert {"time_basis", "trigger.total_mm", "confirm.total_mm"} <= fixed, name
+        assert not onset.tunable_fields(defs[name]), name
+
+
+def test_icpac_thresholds_are_tunable(defs):
+    tun = onset.tunable_fields(defs["icpac-onset"])
+    assert {"trigger.total_mm", "trigger.window_days", "veto.follow_days"} <= set(tun)
+
+
+def test_missing_tunable_table_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    del d["tunable"]
+    with pytest.raises(onset.RegistryError, match="tunable"):
+        _validate("x", d, defs)
+
+
+def test_tunable_naming_missing_field_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    d["tunable"]["trigger.no_such_field"] = {"min": 1.0, "max": 2.0}
+    with pytest.raises(onset.RegistryError, match="missing parameter field"):
+        _validate("x", d, defs)
+
+
+def test_tunable_on_prose_field_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    d["tunable"]["name"] = {"choices": [d["name"]]}
+    with pytest.raises(onset.RegistryError, match="missing parameter field"):
+        _validate("x", d, defs)
+
+
+def test_fixed_naming_missing_field_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    d["tunable"]["fixed"] = [*d["tunable"]["fixed"], "confirm.total_mm"]
+    with pytest.raises(onset.RegistryError, match="fixed names missing"):
+        _validate("x", d, defs)
+
+
+def test_field_both_tunable_and_fixed_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    d["tunable"]["fixed"] = [*d["tunable"]["fixed"], "trigger.total_mm"]
+    with pytest.raises(onset.RegistryError, match="both tunable and fixed"):
+        _validate("x", d, defs)
+
+
+def test_current_value_outside_bounds_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    d["tunable"]["trigger.total_mm"] = {"min": 25.0, "max": 40.0}
+    with pytest.raises(onset.RegistryError, match="outside"):
+        _validate("x", d, defs)
+
+
+def test_current_value_not_in_choices_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    d["tunable"]["veto.follow_days"] = {"choices": [30, 45]}
+    with pytest.raises(onset.RegistryError, match="not among the choices"):
+        _validate("x", d, defs)
+
+
+def test_float_bounds_on_int_field_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    d["tunable"]["trigger.window_days"] = {"min": 3.0, "max": 7.0}
+    with pytest.raises(onset.RegistryError, match="field's type"):
+        _validate("x", d, defs)
+
+
+def test_tunable_without_why_rejected(defs):
+    d = copy.deepcopy(defs["icpac-onset"])
+    del d["tunable"]["why"]
+    with pytest.raises(onset.RegistryError, match="why"):
+        _validate("x", d, defs)
+
+
+# ---------------------------------------------------------------- candidates
+
+
+def _candidate(defs, parent="icpac-onset", **changes):
+    """A well-formed candidate derived from `parent`, with dotted-field `changes` applied."""
+    p = defs[parent]
+    d = {
+        "status": "candidate",
+        "derived_from": parent,
+        "why": "test candidate",
+        "name": "test",
+        "source": {"citation": "test optimisation", "url": "https://example.org"},
+        **{k: copy.deepcopy(p[k]) for k in onset.PARAMETER_SECTIONS if k in p},
+        "optimization": {
+            "objective": "maximise onset-date skill",
+            "data": "CHIRPS v2.0, 1991-2020",
+            "method": "grid search",
+            "validation": "leave-one-year-out",
+            "date": "2026-09-27",
+            "parent_hash": onset.content_hash(p),
+            "distance_from_parent": 0.25,
+        },
+    }
+    for dotted, value in changes.items():
+        *path, leaf = dotted.replace("__", ".").split(".")
+        node = d
+        for part in path:
+            node = node[part]
+        node[leaf] = value
+    return d
+
+
+def test_well_formed_candidate_validates(defs):
+    cand = _candidate(defs, **{"trigger__total_mm": 25.0, "veto__follow_days": 30})
+    _validate("cand", cand, defs)
+    changed = onset.validate_candidate_against_parent(cand, defs["icpac-onset"])
+    assert changed == ["trigger.total_mm", "veto.follow_days"]
+
+
+def test_candidate_missing_optimization_rejected(defs):
+    cand = _candidate(defs)
+    del cand["optimization"]
+    with pytest.raises(onset.RegistryError, match="optimization"):
+        _validate("cand", cand, defs)
+
+
+def test_candidate_missing_parent_hash_rejected(defs):
+    cand = _candidate(defs)
+    del cand["optimization"]["parent_hash"]
+    with pytest.raises(onset.RegistryError, match="parent_hash"):
+        _validate("cand", cand, defs)
+
+
+def test_candidate_non_numeric_distance_rejected(defs):
+    cand = _candidate(defs)
+    cand["optimization"]["distance_from_parent"] = "small"
+    with pytest.raises(onset.RegistryError, match="distance_from_parent"):
+        _validate("cand", cand, defs)
+
+
+def test_candidate_without_derived_from_rejected(defs):
+    cand = _candidate(defs)
+    del cand["derived_from"]
+    with pytest.raises(onset.RegistryError, match="derived_from"):
+        _validate("cand", cand, defs)
+
+
+def test_candidate_changing_fixed_field_rejected(defs):
+    cand = _candidate(defs, parent="agrhymet-sos", **{"trigger__total_mm": 20.0})
+    _validate("cand", cand, defs)  # well-formed on its own ...
+    with pytest.raises(onset.RegistryError, match="fixed"):  # ... but moves a fixed field
+        onset.validate_candidate_against_parent(cand, defs["agrhymet-sos"])
+
+
+def test_candidate_changing_untunable_field_rejected(defs):
+    cand = _candidate(defs, **{"veto__follow_anchor": "run_start_after_trigger_end"})
+    with pytest.raises(onset.RegistryError, match="not tunable"):
+        onset.validate_candidate_against_parent(cand, defs["icpac-onset"])
+
+
+def test_candidate_outside_parent_bounds_rejected(defs):
+    cand = _candidate(defs, **{"trigger__total_mm": 55.0})
+    with pytest.raises(onset.RegistryError, match="outside"):
+        onset.validate_candidate_against_parent(cand, defs["icpac-onset"])
+
+
+def test_candidate_int_field_given_float_rejected(defs):
+    cand = _candidate(defs, **{"trigger__window_days": 5.0})
+    with pytest.raises(onset.RegistryError, match="field's type"):
+        onset.validate_candidate_against_parent(cand, defs["icpac-onset"])
+
+
+def test_candidate_with_stale_parent_hash_rejected(defs):
+    cand = _candidate(defs)
+    cand["optimization"]["parent_hash"] = "000000000000"
+    with pytest.raises(onset.RegistryError, match="stale"):
+        onset.validate_candidate_against_parent(cand, defs["icpac-onset"])
+
+
+def test_load_checks_candidates_against_their_parent(defs, tmp_path):
+    import tomllib
+
+    text = onset.REGISTRY_PATH.read_text(encoding="utf-8")
+    good = onset.content_hash(defs["icpac-onset"])
+    block = f"""
+[definitions.icpac-onset-test-candidate]
+status = "candidate"
+derived_from = "icpac-onset"
+why = "test"
+name = "test"
+source.citation = "test"
+source.url = "https://example.org"
+time_basis = "rolling_daily"
+trigger.window_days = 3
+trigger.total_mm = 60.0
+trigger.total_op = ">="
+veto.mode = "consecutive_dry"
+veto.dry_days = 7
+veto.dry_day_mm = 1.0
+veto.follow_days = 21
+veto.follow_anchor = "run_start_after_trigger_start"
+search.start = ["02-01", "08-01"]
+search.window_days = 60
+
+[definitions.icpac-onset-test-candidate.optimization]
+objective = "o"
+data = "d"
+method = "m"
+validation = "v"
+date = "2026-09-27"
+parent_hash = "{good}"
+distance_from_parent = 1.0
+"""
+    path = tmp_path / "onset_definitions.toml"
+    path.write_text(text + block, encoding="utf-8")
+    assert (
+        "icpac-onset-test-candidate"
+        in tomllib.loads(path.read_text(encoding="utf-8"))["definitions"]
+    )
+    with pytest.raises(onset.RegistryError, match="icpac-onset-test-candidate.*outside"):
+        onset.load(path)
+    path.write_text(text + block.replace("60.0", "30.0"), encoding="utf-8")
+    assert "icpac-onset-test-candidate" in onset.load(path)
+
+
 # ---------------------------------------------------------------- content hash
 
 
