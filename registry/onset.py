@@ -276,9 +276,9 @@ def compile_to_indicator(
         clauses.append(f"{variable} sum {w}d {t['total_op']} {_num(t['total_mm'])}")
     c = d.get("confirm")
     if c:
+        after = f" after {c['after_days']}d" if c["after_days"] > 0 else ""  # 0 = same start day
         clauses.append(
-            f"{variable} sum {c['window_days']}d {c['total_op']} {_num(c['total_mm'])} "
-            f"after {c['after_days']}d"
+            f"{variable} sum {c['window_days']}d {c['total_op']} {_num(c['total_mm'])}{after}"
         )
     if v["mode"] == "consecutive_dry":
         clauses.append(
