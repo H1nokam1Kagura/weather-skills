@@ -44,6 +44,18 @@ Writing it corrected rules that had been taken from the docs:
 It also confirmed a silent failure: `difference` on partly overlapping grids runs and returns only
 the overlap.
 
+## Relation to what already exists
+
+- **weather-skills-core linter, rule `WSK301` ("SKILL.md drift").** `WSK301` checks that a
+  skill's *declared* arguments match its `SKILL.md`. The conformance tests here extend that idea
+  from signatures to **behaviour**: does the skill really refuse what its description, and these
+  rules, say it refuses? A behavioural check could become a linter rule later.
+- **weather-skills-chat tracing (Langfuse).** The chat already traces conversations, LLM calls
+  and tool runs, including the full tool specs the model saw. That is the natural source of
+  *real* routing data. The event log here is the typed, skill-side counterpart. It records the
+  canonical dataset state, the eligible and invalid actions with reason codes, and the outcome,
+  none of which a transcript contains. The two would join on the provenance chain.
+
 ## Scope
 
 - Eligibility is **skill-level only**. Parameter-level validity stays with each skill; for
