@@ -347,3 +347,13 @@ def test_verifier_rejects_a_perturbed_crps(tmp_path, verify_fn):
     mae_of_mean = np.abs(x.mean(0) - y)  # the silent member-averaging mistake
     with pytest.raises(AssertionError):
         np.testing.assert_allclose(ds["crps"].values, mae_of_mean, rtol=1e-5, atol=1e-6)
+
+
+def test_deterministic_metrics_score_the_ensemble_mean(tmp_path, verify_fn):
+    """Members 3 and 7 around obs 5: the ensemble mean is exact (MAE 0) while the mean member
+    error is 2. verify scores the mean, and now says so in verify_ensemble_reduction."""
+    obs = _obs(np.full(SHAPE[1:], 5.0))
+    ens = _ens(np.stack([np.full(SHAPE[1:], v) for v in (3.0, 7.0)]))
+    ds = _run(tmp_path, verify_fn, ens, obs, "--metric", "mae")
+    np.testing.assert_allclose(ds["mae"].values, 0.0)
+    assert ds["mae"].attrs["verify_ensemble_reduction"].startswith("mean over number")
