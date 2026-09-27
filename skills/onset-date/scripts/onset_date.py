@@ -43,11 +43,344 @@ from weather_skills_core.units import units_equal
 _SKILL_VERSION = "0.1.0"
 
 
-def _rainfall_onset_nd(block, wet_thresh, wet_days, dry_thresh, dry_days, search_days):
+# ---------------------------------------------------------------------------
+# Onset-definition registry
+#
+# references/onset_definitions.toml is a byte-identical copy of the repo's
+# registry/onset_definitions.toml (skills are self-contained, so this skill
+# cannot import registry/). Every definition this skill runs is resolved
+# against an entry there, and the output records which entry, its content
+# hash, and every parameter that differs from it.
+# ---------------------------------------------------------------------------
+
+_REGISTRY_FILE = "onset_definitions.toml"
+_HASHED_SECTIONS = ("time_basis", "trigger", "confirm", "veto", "search")
+
+# --definition <legacy name> -> (kernel family, registry entry it approximates)
+_LEGACY = {
+    "ICPAC": ("icpac", "icpac-onset"),
+    "CHC_start_grow_season": ("chc", "agrhymet-sos-rolling"),
+    "Moron_Robertson": ("mr", "moron-robertson-2014"),
+}
+_FAMILY_LABEL = {"icpac": "ICPAC", "chc": "CHC_start_grow_season", "mr": "Moron_Robertson"}
+
+# The legacy --definition defaults (unchanged from before the registry), plus
+# the comparison operators each kernel used to hard-code. These are what a
+# bare --definition <name> run uses; under --definition-ref the registry
+# entry supplies them instead.
+_LEGACY_DEFAULTS = {
+    "icpac": dict(
+        wet_spell_thresh=20.0,
+        wet_spell_days=3,
+        dry_spell_thresh=1.0,
+        dry_spell_days=7,
+        search_days=21,
+        wet_op=">",
+    ),
+    "chc": dict(
+        period1_days=10,
+        period1_thresh=20.0,
+        period2_days=20,
+        period2_thresh=20.0,
+        period1_op=">=",
+        period2_op=">",
+    ),
+    "mr": dict(
+        mr_window_days=5,
+        mr_wet_day_thresh=1.0,
+        mr_follow_days=30,
+        mr_veto="window_sum",
+        mr_sum_window_days=10,
+        mr_sum_thresh=5.0,
+        mr_dry_spell_days=7,
+        mr_dry_day_thresh=None,
+        mr_search_start=None,
+        mr_reject_short_followup=False,
+    ),
+}
+# CLI-settable parameters per family (the operators are not CLI flags).
+_FAMILY_FLAGS = {
+    fam: [k for k in d if not k.endswith("_op")] for fam, d in _LEGACY_DEFAULTS.items()
+}
+_LOWER_BOUND_OPS = (">", ">=")
+
+
+def _registry_path():
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent / "references" / _REGISTRY_FILE
+
+
+def _load_registry():
+    import tomllib
+
+    with _registry_path().open("rb") as f:
+        return tomllib.load(f).get("definitions", {})
+
+
+def _content_hash(entry):
+    """Hash of an entry's scientific content (same recipe as registry/onset.py)."""
+    import hashlib
+    import json
+
+    keep = {k: entry[k] for k in _HASHED_SECTIONS if k in entry}
+    return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def _flatten(entry):
+    """Dotted-key view of an entry's hashed sections (plus any ``kernel.*``
+    knob), e.g. ``{"trigger.total_mm": 25.0}``. Prose and unknown top-level
+    keys (notes, tunable, optimization, ...) are not part of the definition."""
+    flat = {}
+
+    def walk(prefix, value):
+        if isinstance(value, dict):
+            for k, v in value.items():
+                walk(f"{prefix}.{k}", v)
+        else:
+            flat[prefix] = value
+
+    for key in (*_HASHED_SECTIONS, "kernel"):
+        if key in entry:
+            walk(key, entry[key])
+    return flat
+
+
+def _diff(effective, registered):
+    """{dotted field: effective value (None = absent)} where they disagree."""
+    a, b = _flatten(effective), _flatten(registered)
+    return {k: a.get(k) for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)}
+
+
+def _family_of(ref, entry):
+    """Which kernel an entry's structure calls for."""
+    t = entry.get("trigger", {})
+    if t.get("all_days_wet") or t.get("threshold_kind") == "per_cell_climatology":
+        return "mr"
+    if "confirm" in entry:
+        return "chc"
+    if entry.get("veto", {}).get("mode") == "consecutive_dry":
+        return "icpac"
+    raise UsageError(
+        f"--definition-ref '{ref}': no kernel in this skill implements that entry's structure "
+        "(needs an all-wet trigger, a confirmation window, or a consecutive-dry veto)."
+    )
+
+
+def _params_from_entry(family, entry):
+    """Kernel parameters filled from a registry entry. Only fields the kernel
+    can honour are mapped; anything else is left at the legacy value, so the
+    round trip in _effective() exposes it as a mismatch and it is refused."""
+    p = dict(_LEGACY_DEFAULTS[family])
+    t, c, v = entry.get("trigger", {}), entry.get("confirm", {}), entry.get("veto", {})
+    s = entry.get("search", {})
+
+    def put(key, value):
+        if value is not None:
+            p[key] = value
+
+    if family == "icpac":
+        put("wet_spell_days", t.get("window_days"))
+        put("wet_spell_thresh", t.get("total_mm"))
+        if t.get("total_op") in _LOWER_BOUND_OPS:
+            p["wet_op"] = t["total_op"]
+        put("dry_spell_days", v.get("dry_days"))
+        put("dry_spell_thresh", v.get("dry_day_mm"))
+        put("search_days", v.get("follow_days"))
+    elif family == "chc":
+        put("period1_days", t.get("window_days"))
+        put("period1_thresh", t.get("total_mm"))
+        if t.get("total_op") in _LOWER_BOUND_OPS:
+            p["period1_op"] = t["total_op"]
+        put("period2_days", c.get("window_days"))
+        put("period2_thresh", c.get("total_mm"))
+        if c.get("total_op") in _LOWER_BOUND_OPS:
+            p["period2_op"] = c["total_op"]
+    else:
+        put("mr_window_days", t.get("window_days"))
+        put("mr_wet_day_thresh", t.get("wet_day_mm"))
+        mode = v.get("mode")
+        if mode == "none":
+            p["mr_follow_days"] = 0
+        elif mode in ("window_sum", "consecutive_dry"):
+            p["mr_veto"] = mode
+            put("mr_follow_days", v.get("follow_days"))
+            put("mr_sum_window_days", v.get("window_days"))
+            put("mr_sum_thresh", v.get("window_total_mm"))
+            put("mr_dry_spell_days", v.get("dry_days"))
+            put("mr_dry_day_thresh", v.get("dry_day_mm"))
+        start = s.get("start")
+        if isinstance(start, list) and len(start) == 1:
+            p["mr_search_start"] = start[0]
+    return p
+
+
+def _effective(family, p, per_cell=True):
+    """The definition a set of kernel parameters actually computes, in the
+    registry's own vocabulary -- so it can be diffed against any entry."""
+    if family == "icpac":
+        return {
+            "time_basis": "rolling_daily",
+            "trigger": {
+                "window_days": p["wet_spell_days"],
+                "total_mm": p["wet_spell_thresh"],
+                "total_op": p["wet_op"],
+            },
+            "veto": {
+                "mode": "consecutive_dry",
+                "dry_days": p["dry_spell_days"],
+                "dry_day_mm": p["dry_spell_thresh"],
+                "follow_days": p["search_days"],
+                # the kernel vetoes a dry run lying wholly INSIDE the window
+                # counted from the trigger's first day (a run that starts
+                # inside but ends after it does not veto)
+                "follow_anchor": "run_inside_window_from_trigger_start",
+            },
+        }
+    if family == "chc":
+        return {
+            "time_basis": "rolling_daily",
+            "trigger": {
+                "window_days": p["period1_days"],
+                "total_mm": p["period1_thresh"],
+                "total_op": p["period1_op"],
+            },
+            "confirm": {
+                "window_days": p["period2_days"],
+                "total_mm": p["period2_thresh"],
+                "total_op": p["period2_op"],
+                "after_days": p["period1_days"],  # immediately after the first window
+            },
+            "veto": {"mode": "none"},
+        }
+    trigger = {
+        "window_days": p["mr_window_days"],
+        "all_days_wet": True,
+        "wet_day_mm": p["mr_wet_day_thresh"],
+        "wet_day_op": ">=",
+        "total_op": ">",
+    }
+    if per_cell:
+        trigger["threshold_kind"] = "per_cell_climatology"
+    else:
+        trigger["threshold_kind"] = "scalar"
+        trigger["total_mm"] = p["mr_thresh"]
+    if p["mr_follow_days"] == 0:
+        veto = {"mode": "none"}
+    elif p["mr_veto"] == "window_sum":
+        veto = {
+            "mode": "window_sum",
+            "window_days": p["mr_sum_window_days"],
+            "window_total_mm": p["mr_sum_thresh"],
+            "follow_days": p["mr_follow_days"],
+            "follow_anchor": "window_start_after_trigger_end",
+        }
+    else:
+        veto = {
+            "mode": "consecutive_dry",
+            "dry_days": p["mr_dry_spell_days"],
+            "dry_day_mm": p["mr_dry_day_thresh"],
+            "follow_days": p["mr_follow_days"],
+            "follow_anchor": "run_start_after_trigger_end",
+        }
+    eff = {"time_basis": "rolling_daily", "trigger": trigger, "veto": veto}
+    if p["mr_search_start"] is not None:
+        eff["search"] = {"start": [p["mr_search_start"]]}
+    if p["mr_reject_short_followup"]:
+        eff["kernel"] = {"reject_short_followup": True}
+    return eff
+
+
+def _resolve_definition(definition, definition_ref, waive_fields, explicit, mr_thresh):
+    """Kernel family, filled parameters and provenance for this run.
+
+    explicit : {param: value} for every kernel flag given on the command line.
+    mr_thresh : the scalar --mr-thresh, or None (a per-cell field, or not MR).
+    Returns (family, params, provenance dict).
+    """
+    import json
+
+    registry = _load_registry()
+    waive_fields = list(dict.fromkeys(waive_fields or []))
+    if (definition is None) == (definition_ref is None):
+        raise UsageError("pass exactly one of --definition-ref <registry id> or --definition <name>.")
+
+    if definition_ref is None:
+        if waive_fields:
+            raise UsageError("--waive-field only valid with --definition-ref")
+        family, ref = _LEGACY[definition]
+        params = dict(_LEGACY_DEFAULTS[family])
+        params.update({k: v for k, v in explicit.items() if k in params})
+    else:
+        ref = definition_ref
+        if ref not in registry:
+            raise UsageError(
+                f"--definition-ref '{ref}' is not in the onset-definition registry. "
+                f"Known ids: {sorted(registry)}"
+            )
+        family = _family_of(ref, registry[ref])
+        foreign = sorted(k for k in explicit if k not in _FAMILY_FLAGS[family])
+        if foreign:
+            flags = ["--" + k.replace("_", "-") for k in foreign]
+            raise UsageError(
+                f"{flags} do not apply to '{ref}', which runs the "
+                f"{_FAMILY_LABEL[family]} kernel."
+            )
+        params = _params_from_entry(family, registry[ref])
+        if family == "mr" and params["mr_dry_day_thresh"] is None:
+            params["mr_dry_day_thresh"] = params["mr_wet_day_thresh"]
+        # Refusal rule: a registry field the kernel cannot reproduce stops the
+        # run unless the caller waives it by name (then it is an override).
+        unsupported = _diff(_effective(family, {**params, "mr_thresh": None}), registry[ref])
+        bad_waivers = [f for f in waive_fields if f not in unsupported]
+        if bad_waivers:
+            raise UsageError(
+                f"--waive-field {bad_waivers}: not an unsupported field of '{ref}' "
+                f"(unsupported: {sorted(unsupported) or 'none'})."
+            )
+        refused = {k: v for k, v in unsupported.items() if k not in waive_fields}
+        if refused:
+            reg_flat = _flatten(registry[ref])
+            detail = "; ".join(
+                f"{k} = {reg_flat.get(k)!r} (this kernel: {v!r})" for k, v in refused.items()
+            )
+            raise UsageError(
+                f"--definition-ref '{ref}' uses field(s) the {_FAMILY_LABEL[family]} kernel "
+                f"cannot reproduce: {detail}. Refusing rather than silently ignoring them; "
+                "pass --waive-field <field> for each to run without it (recorded as an "
+                "override, status unregistered-variant)."
+            )
+        params.update(explicit)
+
+    if family == "mr" and params["mr_dry_day_thresh"] is None:
+        params["mr_dry_day_thresh"] = params["mr_wet_day_thresh"]
+
+    entry = registry[ref]
+    eff_params = {**params, "mr_thresh": mr_thresh}
+    overrides = _diff(_effective(family, eff_params, per_cell=mr_thresh is None), entry)
+    provenance = {
+        "onset_definition_id": ref,
+        "onset_definition_hash": _content_hash(entry),
+        "onset_definition_status": "unregistered-variant" if overrides else entry["status"],
+        "onset_definition_overrides": json.dumps(overrides, sort_keys=True),
+    }
+    return family, params, provenance
+
+
+def _compare(values, op, thresh):
+    """values op thresh for a lower-bound operator ('>' or '>=')."""
+    return values >= thresh if op == ">=" else values > thresh
+
+
+def _rainfall_onset_nd(
+    block, wet_thresh, wet_days, dry_thresh, dry_days, search_days, wet_op=">"
+):
     """ICPAC onset search, vectorized over every leading (batch) dim at once.
 
     block : ndarray, shape (..., n_time) — time dim must be the last axis,
         daily rainfall accumulation (same units as wet_thresh/dry_thresh)
+    wet_op : '>' (the legacy default) or '>=' -- how the wet-spell total is
+        compared with wet_thresh
 
     Returns the 0-based time index of the onset day per gridpoint/member/etc
     (float, NaN where no qualifying onset was found within the series),
@@ -68,7 +401,7 @@ def _rainfall_onset_nd(block, wet_thresh, wet_days, dry_thresh, dry_days, search
         wet_window = block[..., t : t + wet_days]
         wet_sum = wet_window.sum(axis=-1)
         wet_nan = np.isnan(wet_window).any(axis=-1)
-        candidate = (wet_sum > wet_thresh) & ~wet_nan
+        candidate = _compare(wet_sum, wet_op, wet_thresh) & ~wet_nan
 
         # max consecutive dry-day run within the next search_days days
         counter = np.zeros(block.shape[:-1])
@@ -86,12 +419,22 @@ def _rainfall_onset_nd(block, wet_thresh, wet_days, dry_thresh, dry_days, search
     return onset_idx
 
 
-def _rainfall_onset_accum_nd(block, period1_days, period1_thresh, period2_days, period2_thresh):
+def _rainfall_onset_accum_nd(
+    block,
+    period1_days,
+    period1_thresh,
+    period2_days,
+    period2_thresh,
+    period1_op=">=",
+    period2_op=">",
+):
     """CHC_start_grow_season onset search, vectorized over every leading
     (batch) dim at once.
 
     block : ndarray, shape (..., n_time) — time dim must be the last axis,
         daily rainfall accumulation (same units as period1_thresh/period2_thresh)
+    period1_op, period2_op : '>' or '>=' for each window's total (legacy
+        defaults '>=' and '>')
 
     Returns the 0-based time index of the onset day per gridpoint/member/etc
     (float, NaN where no qualifying onset was found within the series),
@@ -117,8 +460,8 @@ def _rainfall_onset_accum_nd(block, period1_days, period1_thresh, period2_days, 
         second_nan = np.isnan(second_window).any(axis=-1)
 
         qualifies = (
-            (first_sum >= period1_thresh)
-            & (second_sum > period2_thresh)
+            _compare(first_sum, period1_op, period1_thresh)
+            & _compare(second_sum, period2_op, period2_thresh)
             & ~first_nan
             & ~second_nan
             & ~found
@@ -401,69 +744,89 @@ def _resolve_time_dim(ds, override):
     "every data variable carrying the time dim.",
 )
 @weather_skill.argument(
+    "--definition-ref",
+    default=None,
+    metavar="REGISTRY_ID",
+    help="Onset definition by its id in the onset-definition registry "
+    "(references/onset_definitions.toml), e.g. icpac-onset, agrhymet-sos-rolling, "
+    "moron-robertson-2014, uchicago-ethiopia-2026. Picks the kernel from the entry's "
+    "structure and fills every parameter from it; explicit flags still win and are "
+    "recorded as overrides. Exactly one of --definition-ref / --definition is required.",
+)
+@weather_skill.argument(
+    "--waive-field",
+    action="append",
+    default=None,
+    metavar="FIELD",
+    help="[--definition-ref] Run without a registry field the kernel cannot reproduce "
+    "(e.g. search.window_days), which is otherwise refused. Repeatable; each waiver is "
+    "recorded as an override.",
+)
+@weather_skill.argument(
     "--definition",
-    required=True,
-    choices=["ICPAC", "CHC_start_grow_season", "Moron_Robertson"],
-    help="Onset criterion. 'ICPAC': wet-spell-then-no-dry-spell (see "
-    "--wet-spell-* / --dry-spell-* / --search-days). "
-    "'CHC_start_grow_season': two-window cumulative rainfall check (see "
-    "--period1-* / --period2-*). 'Moron_Robertson': all-wet window over a "
-    "per-cell threshold, then no dry spell (see --mr-*; needs --mr-thresh "
-    "or --mr-thresh-field).",
+    default=None,
+    choices=list(_LEGACY),
+    help="Legacy onset criterion name, kept for backward compatibility; the output still "
+    "records the registry entry it approximates. 'ICPAC' (icpac-onset): "
+    "wet-spell-then-no-dry-spell (see --wet-spell-* / --dry-spell-* / --search-days). "
+    "'CHC_start_grow_season' (agrhymet-sos-rolling): two-window cumulative rainfall "
+    "check (see --period1-* / --period2-*). 'Moron_Robertson' (moron-robertson-2014): "
+    "all-wet window over a per-cell threshold, then no dry spell (see --mr-*; needs "
+    "--mr-thresh or --mr-thresh-field).",
 )
 @weather_skill.argument(
     "--wet-spell-thresh",
     type=float,
-    default=20.0,
-    help="[ICPAC] Total rainfall a wet spell must exceed, in the variable's own units.",
+    default=None,
+    help="[ICPAC] Total rainfall a wet spell must exceed, in the variable's own units. Default under --definition: 20.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--wet-spell-days",
     type=int,
-    default=3,
-    help="[ICPAC] Number of consecutive days summed for the wet-spell check.",
+    default=None,
+    help="[ICPAC] Number of consecutive days summed for the wet-spell check. Default under --definition: 3; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--dry-spell-thresh",
     type=float,
-    default=1.0,
-    help="[ICPAC] A day below this rainfall (in the variable's own units) counts as dry.",
+    default=None,
+    help="[ICPAC] A day below this rainfall (in the variable's own units) counts as dry. Default under --definition: 1.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--dry-spell-days",
     type=int,
-    default=7,
-    help="[ICPAC] A dry run of this many consecutive days or more disqualifies the onset.",
+    default=None,
+    help="[ICPAC] A dry run of this many consecutive days or more disqualifies the onset. Default under --definition: 7; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--search-days",
     type=int,
-    default=21,
-    help="[ICPAC] Window (from the wet spell's first day) searched for a disqualifying dry spell.",
+    default=None,
+    help="[ICPAC] Window (from the wet spell's first day) searched for a disqualifying dry spell. Default under --definition: 21; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--period1-days",
     type=int,
-    default=10,
-    help="[CHC_start_grow_season] Length of the first accumulation window, in days.",
+    default=None,
+    help="[CHC_start_grow_season] Length of the first accumulation window, in days. Default under --definition: 10; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--period1-thresh",
     type=float,
-    default=20.0,
-    help="[CHC_start_grow_season] The first window must accumulate at least this much rainfall.",
+    default=None,
+    help="[CHC_start_grow_season] The first window must accumulate at least this much rainfall. Default under --definition: 20.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--period2-days",
     type=int,
-    default=20,
-    help="[CHC_start_grow_season] Length of the second (confirmation) accumulation window, in days.",
+    default=None,
+    help="[CHC_start_grow_season] Length of the second (confirmation) accumulation window, in days. Default under --definition: 20; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--period2-thresh",
     type=float,
-    default=20.0,
-    help="[CHC_start_grow_season] The second window must accumulate more than this much rainfall.",
+    default=None,
+    help="[CHC_start_grow_season] The second window must accumulate more than this much rainfall. Default under --definition: 20.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-thresh",
@@ -491,48 +854,48 @@ def _resolve_time_dim(ds, override):
 @weather_skill.argument(
     "--mr-window-days",
     type=int,
-    default=5,
-    help="[Moron_Robertson] Trigger window length, in days; every day in it must be wet.",
+    default=None,
+    help="[Moron_Robertson] Trigger window length, in days; every day in it must be wet. Default under --definition: 5; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-wet-day-thresh",
     type=float,
-    default=1.0,
-    help="[Moron_Robertson] A day with at least this rainfall counts as wet.",
+    default=None,
+    help="[Moron_Robertson] A day with at least this rainfall counts as wet. Default under --definition: 1.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-follow-days",
     type=int,
-    default=30,
+    default=None,
     help="[Moron_Robertson] Days after the trigger window searched for a dry spell. "
-    "0 disables the veto.",
+    "0 disables the veto. Default under --definition: 30; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-veto",
     choices=["window_sum", "consecutive_dry"],
-    default="window_sum",
+    default=None,
     help="[Moron_Robertson] Dry-spell test. 'window_sum' (the original definition): a "
     "--mr-sum-window-days window inside the follow-up totals less than --mr-sum-thresh. "
     "'consecutive_dry': a run of --mr-dry-spell-days days below --mr-dry-day-thresh "
-    "starts inside the follow-up.",
+    "starts inside the follow-up. Default under --definition: window_sum; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-sum-window-days",
     type=int,
-    default=10,
-    help="[Moron_Robertson, window_sum] Length of the dry-spell window, in days.",
+    default=None,
+    help="[Moron_Robertson, window_sum] Length of the dry-spell window, in days. Default under --definition: 10; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-sum-thresh",
     type=float,
-    default=5.0,
-    help="[Moron_Robertson, window_sum] A window totaling less than this is a dry spell.",
+    default=None,
+    help="[Moron_Robertson, window_sum] A window totaling less than this is a dry spell. Default under --definition: 5.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-dry-spell-days",
     type=int,
-    default=7,
-    help="[Moron_Robertson, consecutive_dry] A dry run this many days or longer is a dry spell.",
+    default=None,
+    help="[Moron_Robertson, consecutive_dry] A dry run this many days or longer is a dry spell. Default under --definition: 7; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-dry-day-thresh",
@@ -552,6 +915,7 @@ def _resolve_time_dim(ds, override):
 @weather_skill.argument(
     "--mr-reject-short-followup",
     action="store_true",
+    default=None,
     help="[Moron_Robertson] Reject a candidate whose follow-up period runs past the end "
     "of the series. Default: check the veto over the days that are available.",
 )
@@ -563,6 +927,8 @@ def _resolve_time_dim(ds, override):
 def onset_date(
     ds,
     variable,
+    definition_ref,
+    waive_field,
     definition,
     wet_spell_thresh,
     wet_spell_days,
@@ -590,8 +956,41 @@ def onset_date(
     **kwargs,
 ):
     """Rainy season onset date along a time-like dim, via a chosen --definition."""
+    call_args = dict(locals())
     import numpy as np
     import xarray as xr
+
+    # Resolve the definition against the registry: kernel family, every
+    # kernel parameter, and the provenance attrs recorded on the output.
+    given_flags = {
+        k: v
+        for k, v in call_args.items()
+        if any(k in flags for flags in _FAMILY_FLAGS.values()) and v is not None
+    }
+    family, p, provenance = _resolve_definition(
+        definition, definition_ref, waive_field, given_flags, mr_thresh
+    )
+    definition = _FAMILY_LABEL[family]
+    wet_spell_thresh, wet_spell_days = p.get("wet_spell_thresh"), p.get("wet_spell_days")
+    dry_spell_thresh, dry_spell_days = p.get("dry_spell_thresh"), p.get("dry_spell_days")
+    search_days, wet_op = p.get("search_days"), p.get("wet_op")
+    period1_days, period1_thresh = p.get("period1_days"), p.get("period1_thresh")
+    period2_days, period2_thresh = p.get("period2_days"), p.get("period2_thresh")
+    period1_op, period2_op = p.get("period1_op"), p.get("period2_op")
+    if family == "mr":
+        mr_window_days, mr_wet_day_thresh = p["mr_window_days"], p["mr_wet_day_thresh"]
+        mr_follow_days, mr_veto = p["mr_follow_days"], p["mr_veto"]
+        mr_sum_window_days, mr_sum_thresh = p["mr_sum_window_days"], p["mr_sum_thresh"]
+        mr_dry_spell_days, mr_dry_day_thresh = p["mr_dry_spell_days"], p["mr_dry_day_thresh"]
+        mr_search_start = p["mr_search_start"]
+        mr_reject_short_followup = p["mr_reject_short_followup"]
+    print(
+        f"Onset definition {provenance['onset_definition_id']} "
+        f"(hash {provenance['onset_definition_hash']}, "
+        f"status {provenance['onset_definition_status']}, "
+        f"overrides {provenance['onset_definition_overrides']})",
+        file=sys.stderr,
+    )
 
     is_mr = definition == "Moron_Robertson"
     if is_mr:
@@ -726,6 +1125,7 @@ def onset_date(
                     dry_thresh=dry_spell_thresh,
                     dry_days=dry_spell_days,
                     search_days=search_days,
+                    wet_op=wet_op,
                 ),
                 dask="parallelized",
                 dask_gufunc_kwargs={"allow_rechunk": True},
@@ -770,6 +1170,8 @@ def onset_date(
                     period1_thresh=period1_thresh,
                     period2_days=period2_days,
                     period2_thresh=period2_thresh,
+                    period1_op=period1_op,
+                    period2_op=period2_op,
                 ),
                 dask="parallelized",
                 dask_gufunc_kwargs={"allow_rechunk": True},
@@ -787,13 +1189,13 @@ def onset_date(
 
         if definition == "ICPAC":
             label = (
-                f"{var} onset date (ICPAC: {wet_spell_thresh}{unit_suffix}/"
+                f"{var} onset date (ICPAC: {wet_op}{wet_spell_thresh}{unit_suffix}/"
                 f"{wet_spell_days}d, dry<{dry_spell_thresh}{unit_suffix} for "
                 f"{dry_spell_days}d in {search_days}d)"
             )
             description = (
                 f"first day of a {wet_spell_days}-day wet spell with "
-                f">{wet_spell_thresh}{unit_suffix} total rainfall, with no dry spell of "
+                f"{wet_op}{wet_spell_thresh}{unit_suffix} total rainfall, with no dry spell of "
                 f">={dry_spell_days} consecutive days (<{dry_spell_thresh}{unit_suffix}/day) "
                 f"in the following {search_days} days"
             )
@@ -833,13 +1235,13 @@ def onset_date(
         else:
             label = (
                 f"{var} onset date (CHC_start_grow_season: "
-                f"{period1_days}d>={period1_thresh}{unit_suffix}, "
-                f"{period2_days}d>{period2_thresh}{unit_suffix})"
+                f"{period1_days}d{period1_op}{period1_thresh}{unit_suffix}, "
+                f"{period2_days}d{period2_op}{period2_thresh}{unit_suffix})"
             )
             description = (
                 f"first day where the following {period1_days} days accumulate "
-                f">={period1_thresh}{unit_suffix} rainfall, and the {period2_days} days "
-                f"after that accumulate >{period2_thresh}{unit_suffix}"
+                f"{period1_op}{period1_thresh}{unit_suffix} rainfall, and the {period2_days} days "
+                f"after that accumulate {period2_op}{period2_thresh}{unit_suffix}"
             )
 
         # Attrs are rebuilt from scratch, NOT carried over from the source
@@ -861,6 +1263,7 @@ def onset_date(
             "long_name": label,
             "description": description,
             "standard_name": None,
+            **provenance,
         }
         del out_ds[var]
         # Sandwiched, not `{var}_onset_date` / `onset_date_{var}`:
@@ -881,6 +1284,7 @@ def onset_date(
     # pass-through variable stays.
     if dim in out_ds.dims and all(dim not in out_ds[v].dims for v in out_ds.data_vars):
         out_ds = out_ds.drop_dims(dim)
+    out_ds.attrs.update(provenance)
 
     return out_ds
 
