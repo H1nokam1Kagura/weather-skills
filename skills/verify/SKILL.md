@@ -20,8 +20,8 @@ with `--metric`:
 | `bias` | `bias` | `forecast − observation` per cell |
 | `mae` | `mae` | `\|forecast − observation\|` per cell |
 | `rmse` | `rmse` | `sqrt(mean((forecast − observation)²))` over `--reduce` dims (required) |
-| `crps` | `crps` | Ensemble CRPS, `E\|X − y\| − ½E\|X − X′\|` over members (ensemble required) |
-| `brier` | `brier_score` | `(P(X ≥ threshold) − 1[y ≥ threshold])²`, P = share of members (ensemble + `--threshold` required) |
+| `crps` | `crps` | Ensemble CRPS, `E\|X − y\| − ½E\|X − X′\|` over members (ensemble required); `--crps-estimator standard` (default, M², as properscoring) or `fair` (M(M−1), as WeatherBench 2) |
+| `brier` | `brier_score` | `(P(X > threshold) − 1[y > threshold])²`, P = share of members (ensemble + `--threshold` required) |
 
 `--reduce DIM` (repeatable) averages any metric except `hits` over that
 dimension, e.g. `--reduce time` for a per-cell score over the period.
@@ -80,7 +80,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py \
 - `--metric` — `hits`, `bias`, `mae`, `rmse`, `crps`, or `brier` (default `hits`).
 - `--variable`, `-v` — data variable in both inputs. Default: each input's
   first usable variable (names may differ).
-- `--threshold` — event cutoff (event = value ≥ threshold). `hits` defaults to
+- `--threshold` — event cutoff. `hits` counts value ≥ threshold (unchanged); `brier`
+  counts value > threshold, as Sheerwater's `above_threshold` event and WeatherBench 2 do. `hits` defaults to
   `1`; `brier` requires it; other metrics ignore it.
 - `--reduce` — dimension to average the score over (repeatable). Required
   for `rmse`; not allowed for `hits`.

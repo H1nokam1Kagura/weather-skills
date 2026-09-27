@@ -50,16 +50,17 @@ def _lead_dim(da):
 _CRPS_ESTIMATORS = ("fair", "standard")
 
 
-def crps_ensemble(fc, truth, member, estimator="fair"):
+def crps_ensemble(fc, truth, member, estimator="standard"):
     """Ensemble CRPS = E|X - y| - 0.5 E|X - X'| (Gneiting & Raftery 2007).
 
     The spread term uses the sorted-member identity
     sum_{i,j} |x_i - x_j| = 2 sum_i (2i - M - 1) x_(i), so memory stays linear in M
     (the pairwise form materialises M^2 copies of the grid).
 
+    estimator="standard" (default) divides by M^2 -- properscoring crps_ensemble, which
+    Sheerwater's benchmark and xskillscore use.
     estimator="fair" divides the pair sum by M(M-1) -- unbiased for a finite ensemble
     (Ferro 2014; Zamo & Naveau 2018), and what WeatherBench 2 reports.
-    estimator="standard" divides by M^2 -- properscoring / xskillscore crps_ensemble.
     """
     m = fc.sizes[member]
     skill = np.abs(fc - truth).mean(member)
@@ -114,10 +115,10 @@ def crps_ensemble(fc, truth, member, estimator="fair"):
 @weather_skill.argument(
     "--crps-estimator",
     choices=list(_CRPS_ESTIMATORS),
-    default="fair",
+    default="standard",
     help=(
-        "CRPS spread normalisation: fair (M(M-1), unbiased; WeatherBench 2) or "
-        "standard (M^2; properscoring/xskillscore)."
+        "CRPS spread normalisation: standard (M^2; properscoring, as Sheerwater and "
+        "xskillscore use) or fair (M(M-1), unbiased; WeatherBench 2)."
     ),
 )
 def verify(forecast, obs, variable, metric, threshold, reduce, crps_estimator, **kwargs):
@@ -244,9 +245,9 @@ def verify(forecast, obs, variable, metric, threshold, reduce, crps_estimator, *
         field = np.abs(fc - truth)
     elif metric == "crps":
         field = crps_ensemble(fc, truth, member, estimator=crps_estimator)
-    else:  # brier: event probability = share of members >= threshold
-        prob = (fc >= threshold).mean(member)
-        field = (prob - (truth >= threshold).astype(float)) ** 2
+    else:  # brier: event = value > threshold (Sheerwater above_threshold, WeatherBench 2)
+        prob = (fc > threshold).mean(member)
+        field = (prob - (truth > threshold).astype(float)) ** 2
     field = field.astype("float64").where(valid)
     if reduce:
         if metric == "rmse":
@@ -319,7 +320,7 @@ def verify(forecast, obs, variable, metric, threshold, reduce, crps_estimator, *
                 sign = "+" if value >= 0 else ""
                 summary = f"bias {sign}{value:.2g}{u_suffix}  (cos-lat mean)"
             elif metric == "brier":
-                summary = f"Brier {value:.3g}  (cos-lat mean, event >= {threshold})"
+                summary = f"Brier {value:.3g}  (cos-lat mean, event > {threshold})"
             else:
                 label = {"mae": "MAE", "rmse": "RMSE", "crps": "CRPS"}[metric]
                 summary = f"{label} {value:.2g}{u_suffix}  (cos-lat mean)"

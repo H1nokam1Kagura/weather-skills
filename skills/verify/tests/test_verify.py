@@ -205,7 +205,7 @@ def test_crps_fair_matches_the_weatherbench2_estimator(tmp_path, verify_fn):
     x = RNG.gamma(2.0, 3.0, SHAPE)
     y = RNG.gamma(2.0, 3.0, SHAPE[1:])
     m = SHAPE[0]
-    ds = _run(tmp_path, verify_fn, _ens(x), _obs(y), "--metric", "crps")
+    ds = _run(tmp_path, verify_fn, _ens(x), _obs(y), "--metric", "crps", "--crps-estimator", "fair")
     expected = np.abs(x - y).mean(0) - _pair_sum(x) / (2 * m * (m - 1))
     np.testing.assert_allclose(ds["crps"].values, expected, rtol=1e-5, atol=1e-6)
     assert ds["crps"].attrs["verify_crps_estimator"] == "fair"
@@ -257,7 +257,7 @@ def test_crps_of_one_member_is_mae_and_spread_helps(tmp_path, verify_fn):
 def test_fair_crps_refuses_a_single_member(tmp_path, verify_fn):
     with pytest.raises((Exception, SystemExit)):
         _run(tmp_path, verify_fn, _ens(np.ones((1, *SHAPE[1:]))), _obs(np.ones(SHAPE[1:])),
-             "--metric", "crps")  # fmt: skip
+             "--metric", "crps", "--crps-estimator", "fair")  # fmt: skip
 
 
 def test_crps_is_nan_where_obs_is_missing(tmp_path, verify_fn):
@@ -289,7 +289,7 @@ def test_crps_is_exact_for_a_large_ensemble(tmp_path, verify_fn):
     ).to_dataset(name="precip")
     ob = base.copy(deep=True)
     ob["precip"].values[:] = y
-    ds = _run(tmp_path, verify_fn, fc, ob, "--metric", "crps")
+    ds = _run(tmp_path, verify_fn, fc, ob, "--metric", "crps", "--crps-estimator", "fair")
     expected = np.abs(x - y).mean(0) - _pair_sum(x) / (2 * 51 * 50)
     np.testing.assert_allclose(ds["crps"].values, expected, rtol=1e-5, atol=1e-6)
 
@@ -357,3 +357,24 @@ def test_deterministic_metrics_score_the_ensemble_mean(tmp_path, verify_fn):
     ds = _run(tmp_path, verify_fn, ens, obs, "--metric", "mae")
     np.testing.assert_allclose(ds["mae"].values, 0.0)
     assert ds["mae"].attrs["verify_ensemble_reduction"].startswith("mean over number")
+
+
+def test_crps_defaults_to_the_standard_estimator(tmp_path, verify_fn):
+    """Default matches properscoring.crps_ensemble, which Sheerwater's benchmark uses."""
+    x = RNG.gamma(2.0, 3.0, SHAPE)
+    y = RNG.gamma(2.0, 3.0, SHAPE[1:])
+    m = SHAPE[0]
+    ds = _run(tmp_path, verify_fn, _ens(x), _obs(y), "--metric", "crps")
+    np.testing.assert_allclose(
+        ds["crps"].values, np.abs(x - y).mean(0) - _pair_sum(x) / (2 * m * m), rtol=1e-5, atol=1e-6
+    )
+    assert ds["crps"].attrs["verify_crps_estimator"] == "standard"
+
+
+def test_brier_event_is_strictly_above_the_threshold(tmp_path, verify_fn):
+    """A value exactly at the threshold is not an event (Sheerwater above_threshold,
+    WeatherBench 2). Members at exactly 5 give p = 0; obs at exactly 5 is a non-event."""
+    x = np.full(SHAPE, 5.0)
+    y = np.full(SHAPE[1:], 5.0)
+    ds = _run(tmp_path, verify_fn, _ens(x), _obs(y), "--metric", "brier", "--threshold", "5")
+    np.testing.assert_allclose(ds["brier_score"].values, 0.0)
