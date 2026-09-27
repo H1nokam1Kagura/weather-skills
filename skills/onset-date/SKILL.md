@@ -1,6 +1,6 @@
 ---
 name: onset-date
-description: Compute the rainy season onset date along a time/step axis, per a definition from the onset-definition registry (--definition-ref, e.g. icpac-onset, agrhymet-sos-rolling, moron-robertson-2014; every output records the definition id, content hash and any overrides) or one of three legacy names -- ICPAC's wet-spell-then-no-dry-spell criterion, the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season), or Moron-Robertson's all-wet window over a per-cell climatological threshold (Moron_Robertson). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly.
+description: Compute the rainy season onset date along a time/step axis, per a definition from the onset-definition registry (--definition-ref, e.g. icpac-onset, agrhymet-sos-rolling, moron-robertson-2014; every output records the definition id, content hash and any overrides) or one of three legacy names -- ICPAC's wet-spell-then-no-dry-spell criterion, the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season), or Moron-Robertson's all-wet window over a per-cell climatological threshold (Moron_Robertson_2014). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly.
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py *)
@@ -30,7 +30,7 @@ kernels:
   `--period1-thresh`, and the `--period2-days` days immediately after that
   accumulate more than `--period2-thresh`. No dry-spell check — the
   confirmation window's own total is the only follow-through condition.
-- `Moron_Robertson` — Moron & Robertson (2014): the first day `d` where every
+- `Moron_Robertson_2014` — Moron & Robertson (2014): the first day `d` where every
   day of `[d, d + --mr-window-days)` is wet (at least `--mr-wet-day-thresh`)
   and that window's total exceeds a per-cell threshold — canonically the
   local climatological wet-spell amount, supplied as `--mr-thresh-field` (or
@@ -39,6 +39,12 @@ kernels:
   (`--mr-veto`); a vetoed candidate does not end the search — the next
   triggering day is tried.
 
+  Not the same as Sheerwater's `moron_and_robertson_onset` (registry id
+  `sheerwater-moron-robertson-onset`). That is a simplification: one fixed 38 mm
+  5-day threshold instead of the per-cell climatology, no all-days-wet test, and
+  "next 10 days total more than 5 mm" instead of the 30-day dry-spell check. Hence
+  the `_2014` in this definition's name.
+
 ## When to use
 
 - Agromet-style onset detection on daily rainfall: `--definition ICPAC` with
@@ -46,7 +52,7 @@ kernels:
   21-day search window (the defaults).
 - A simpler two-window accumulation check: `--definition CHC_start_grow_season`.
 - Onset relative to local climatology, as in monsoon onset forecasting:
-  `--definition Moron_Robertson` with a per-cell threshold field. The
+  `--definition Moron_Robertson_2014` with a per-cell threshold field. The
   defaults are the original definition (5-day trigger, 30-day follow-up,
   no 10-day window below 5 mm). The Ethiopia/ICPAC-style variant is
   `--mr-veto consecutive_dry --mr-follow-days 21` (7 dry days). To ignore
@@ -74,7 +80,7 @@ kernels:
 uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
     --input <in.zarr> --output <out.zarr> \
     (--definition-ref REGISTRY_ID [--waive-field FIELD ...] \
-     | --definition ICPAC|CHC_start_grow_season|Moron_Robertson) \
+     | --definition ICPAC|CHC_start_grow_season|Moron_Robertson_2014) \
     [--variable VAR ...] [--time-dim DIM] \
     [--wet-spell-thresh MM] [--wet-spell-days N] \
     [--dry-spell-thresh MM] [--dry-spell-days N] [--search-days N] \
@@ -100,7 +106,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
 - `--waive-field FIELD` — repeatable, `--definition-ref` only: run without a
   registry field the kernel cannot reproduce (see the refusal rule below).
 - `--definition` — legacy name: `ICPAC`, `CHC_start_grow_season` or
-  `Moron_Robertson`. Kept for backward compatibility with its old defaults.
+  `Moron_Robertson_2014`. Kept for backward compatibility with its old defaults.
 - `--variable`, `-v` — repeatable; restricts the computation to the named
   data variable(s). Each name must be a data variable of the input and must
   carry the time dim; violations exit non-zero. Default (unset) computes
@@ -135,7 +141,7 @@ CHC_start_grow_season-only parameters (ignored under `--definition ICPAC`):
 - `--period2-thresh` — the confirmation window must accumulate more than
   this much. Default `20.0`.
 
-Moron_Robertson-only parameters (ignored under the other definitions, except
+Moron_Robertson_2014-only parameters (ignored under the other definitions, except
 that `--mr-thresh`, `--mr-thresh-field`, `--mr-thresh-field-var` and
 `--mr-search-start` are refused there rather than silently ignored):
 
@@ -172,7 +178,7 @@ that `--mr-thresh`, `--mr-thresh-field`, `--mr-thresh-field-var` and
   actually found in them — relevant for forecasts, whose horizon is often
   shorter than trigger plus follow-up.
 
-The `Moron_Robertson` search reproduces the reference implementation from
+The `Moron_Robertson_2014` search reproduces the reference implementation from
 the University of Chicago monsoon-onset work (`find_onset` in
 `github.com/amarchakitus/onset_blending`, MIT) day-for-day on gap-free
 series; the tests carry that function as an oracle. The one intended difference is missing data: here any
@@ -188,10 +194,10 @@ states one definition once, with its status (`canonical`, `variant`,
 `candidate`) and source.
 
 `--definition-ref` picks the kernel from the entry's structure (an all-wet
-trigger over a per-cell threshold: Moron_Robertson; a confirmation window:
+trigger over a per-cell threshold: Moron_Robertson_2014; a confirmation window:
 CHC; a consecutive-dry veto: ICPAC) and fills every parameter from it:
 
-| Registry field | ICPAC kernel | CHC kernel | Moron_Robertson kernel |
+| Registry field | ICPAC kernel | CHC kernel | Moron_Robertson_2014 kernel |
 |---|---|---|---|
 | `trigger.window_days` | `--wet-spell-days` | `--period1-days` | `--mr-window-days` |
 | `trigger.total_mm` / `total_op` | `--wet-spell-thresh`, `>` or `>=` | `--period1-thresh`, `>` or `>=` | must be per-cell: `--mr-thresh-field` (or `--mr-thresh`, an override); op must be `>` |
@@ -219,7 +225,7 @@ sections (`notes`, `tunable`, `optimization`, ...) are ignored.
 
 - `onset_definition_id` — the registry id (for `--definition`, the entry the
   legacy name approximates: `ICPAC` → `icpac-onset`, `CHC_start_grow_season`
-  → `agrhymet-sos-rolling`, `Moron_Robertson` → `moron-robertson-2014`);
+  → `agrhymet-sos-rolling`, `Moron_Robertson_2014` → `moron-robertson-2014`);
 - `onset_definition_hash` — the entry's content hash (first 12 hex digits of
   the SHA-256 of its `time_basis`/`trigger`/`confirm`/`veto`/`search`
   sections as sorted-key JSON), so a prose edit keeps the identity;
@@ -253,7 +259,7 @@ the lead-time axis (e.g. `step`) and prints a note naming the dim it picked.
 ### NaN handling and units
 
 Any missing value (`NaN`) inside a candidate's wet/dry-spell (or period1/
-period2, or Moron_Robertson trigger/follow-up) window marks that candidate
+period2, or Moron_Robertson_2014 trigger/follow-up) window marks that candidate
 disqualified for that gridpoint/member;
 a series with no qualifying, uncontaminated onset anywhere returns `NaT` for
 that element rather than reporting a possibly-unreliable day.
@@ -369,11 +375,11 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
 ```
 
 ```bash
-# Moron_Robertson onset on IMD daily rainfall (absolute time dim), original
+# Moron_Robertson_2014 onset on IMD daily rainfall (absolute time dim), original
 # definition, per-cell climatological threshold, search from June 2.
 uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
     -i /tmp/imd_2026.zarr -o /tmp/imd_2026_onset.zarr \
-    --definition Moron_Robertson \
+    --definition Moron_Robertson_2014 \
     --mr-thresh-field /tmp/imd_wet_spell_clim.zarr --mr-search-start 06-02
 ```
 
@@ -381,10 +387,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
 
 - Moron, V. & Robertson, A. W. (2014). Interannual variability of Indian
   summer monsoon rainfall onset date at local scale. *International Journal
-  of Climatology*, 34(4), 1050-1061. — the `Moron_Robertson` definition.
+  of Climatology*, 34(4), 1050-1061. — the `Moron_Robertson_2014` definition.
 - Masiwal, R., Aitken, C., Marchakitus, A., et al. (2026). Decision-oriented
   benchmarking to transform AI weather forecast access: Application to the
   Indian monsoon. arXiv:2602.03767 — operational monsoon onset forecasting;
   the onset code behind that work, `github.com/amarchakitus/onset_blending`
-  (MIT), is the reference this skill's `Moron_Robertson` search is tested
+  (MIT), is the reference this skill's `Moron_Robertson_2014` search is tested
   against.

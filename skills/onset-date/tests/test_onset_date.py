@@ -263,7 +263,7 @@ def test_output_variable_name_is_not_misclassified(tmp_path, onset_date):
 
 
 # ---------------------------------------------------------------------------
-# Moron_Robertson
+# Moron_Robertson_2014
 # ---------------------------------------------------------------------------
 
 
@@ -285,7 +285,7 @@ def _run_mr(onset_date, tmp_path, values_or_ds, *extra, thresh="10"):
         "-o",
         str(out),
         "--definition",
-        "Moron_Robertson",
+        "Moron_Robertson_2014",
         *thresh_args,
         *extra,
     )
@@ -318,7 +318,7 @@ def test_mr_clean_onset(tmp_path, onset_date):
     values = [0.0] * 10 + [3.0] * 5 + [2.0] * 30
     ds = _run_mr(onset_date, tmp_path, values)
     assert _onset(ds) == np.timedelta64(11, "D")  # step index 10
-    assert "Moron_Robertson" in ds["onset_tp_date"].attrs["long_name"]
+    assert "Moron_Robertson_2014" in ds["onset_tp_date"].attrs["long_name"]
     assert ds["onset_tp_date"].attrs["standard_name"] is None
     assert "step" not in ds.dims
 
@@ -861,7 +861,7 @@ def test_ref_mr_matches_legacy(tmp_path, onset_date, ref_id, legacy_args, daily)
         tmp_path / "a",
         ds,
         "--definition",
-        "Moron_Robertson",
+        "Moron_Robertson_2014",
         "--mr-thresh",
         "10",
         *legacy_args,

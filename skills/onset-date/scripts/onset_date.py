@@ -32,7 +32,7 @@ Three kernels, named by their legacy ``--definition`` values:
   definition: the first day where the following ``--period1-days`` days
   accumulate at least ``--period1-thresh``, and the ``--period2-days`` days
   immediately after that accumulate more than ``--period2-thresh``.
-- ``Moron_Robertson`` — Moron & Robertson (2014): the first day of a
+- ``Moron_Robertson_2014`` — Moron & Robertson (2014): the first day of a
   ``--mr-window-days`` run of wet days (each ``>= --mr-wet-day-thresh``)
   whose total exceeds a per-cell threshold (``--mr-thresh`` or
   ``--mr-thresh-field``), not followed within ``--mr-follow-days`` by a dry
@@ -67,9 +67,9 @@ _HASHED_SECTIONS = ("time_basis", "trigger", "confirm", "veto", "search")
 _LEGACY = {
     "ICPAC": ("icpac", "icpac-onset"),
     "CHC_start_grow_season": ("chc", "agrhymet-sos-rolling"),
-    "Moron_Robertson": ("mr", "moron-robertson-2014"),
+    "Moron_Robertson_2014": ("mr", "moron-robertson-2014"),
 }
-_FAMILY_LABEL = {"icpac": "ICPAC", "chc": "CHC_start_grow_season", "mr": "Moron_Robertson"}
+_FAMILY_LABEL = {"icpac": "ICPAC", "chc": "CHC_start_grow_season", "mr": "Moron_Robertson_2014"}
 
 # The legacy --definition defaults (unchanged from before the registry), plus
 # the comparison operators each kernel used to hard-code. These are what a
@@ -478,7 +478,7 @@ def _rainfall_onset_accum_nd(
     return onset_idx
 
 
-# The Moron_Robertson kernel below is a vectorized port of `find_onset` /
+# The Moron_Robertson_2014 kernel below is a vectorized port of `find_onset` /
 # `_find_onset_core` / `_precompute_onset` in python/prepare_data/onset_utils.py
 # of https://github.com/amarchakitus/onset_blending (commit 10ec8e3),
 # MIT License, Copyright (c) 2026 University of Chicago. Its trigger, both
@@ -503,7 +503,7 @@ def _moron_robertson_onset_nd(
     start_idx,
     reject_short_followup,
 ):
-    """Moron_Robertson onset search, vectorized over every leading (batch)
+    """Moron_Robertson_2014 onset search, vectorized over every leading (batch)
     dim at once.
 
     block : ndarray, shape (..., n_time) — time dim must be the last axis,
@@ -633,7 +633,7 @@ def _search_start_index(time_coord, search_start):
 
 
 def _threshold_field(tds, var_name, da, dim):
-    """The per-cell Moron_Robertson threshold from ``--mr-thresh-field``,
+    """The per-cell Moron_Robertson_2014 threshold from ``--mr-thresh-field``,
     checked against (and re-coordinated onto) the rainfall variable ``da``."""
     import numpy as np
 
@@ -776,7 +776,7 @@ def _resolve_time_dim(ds, override):
     "records the registry entry it approximates. 'ICPAC' (icpac-onset): "
     "wet-spell-then-no-dry-spell (see --wet-spell-* / --dry-spell-* / --search-days). "
     "'CHC_start_grow_season' (agrhymet-sos-rolling): two-window cumulative rainfall "
-    "check (see --period1-* / --period2-*). 'Moron_Robertson' (moron-robertson-2014): "
+    "check (see --period1-* / --period2-*). 'Moron_Robertson_2014' (moron-robertson-2014): "
     "all-wet window over a per-cell threshold, then no dry spell (see --mr-*; needs "
     "--mr-thresh or --mr-thresh-field).",
 )
@@ -838,7 +838,7 @@ def _resolve_time_dim(ds, override):
     "--mr-thresh",
     type=float,
     default=None,
-    help="[Moron_Robertson] One trigger threshold for every cell, in the variable's own "
+    help="[Moron_Robertson_2014] One trigger threshold for every cell, in the variable's own "
     "units: the trigger window's total must exceed it. Canonically the local "
     "climatological wet-spell amount, which varies by cell -- prefer --mr-thresh-field. "
     "Exactly one of --mr-thresh / --mr-thresh-field is required; there is no default.",
@@ -847,40 +847,40 @@ def _resolve_time_dim(ds, override):
     "--mr-thresh-field",
     type=Dataset("any"),
     default=None,
-    help="[Moron_Robertson] Zarr holding a per-cell trigger threshold on the input's grid "
+    help="[Moron_Robertson_2014] Zarr holding a per-cell trigger threshold on the input's grid "
     "(dims a subset of the variable's non-time dims, identical coordinates), in the "
     "variable's own units.",
 )
 @weather_skill.argument(
     "--mr-thresh-field-var",
     default=None,
-    help="[Moron_Robertson] Data variable in --mr-thresh-field to use. Default: its only "
+    help="[Moron_Robertson_2014] Data variable in --mr-thresh-field to use. Default: its only "
     "data variable.",
 )
 @weather_skill.argument(
     "--mr-window-days",
     type=int,
     default=None,
-    help="[Moron_Robertson] Trigger window length, in days; every day in it must be wet. Default under --definition: 5; under --definition-ref: the registry entry.",
+    help="[Moron_Robertson_2014] Trigger window length, in days; every day in it must be wet. Default under --definition: 5; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-wet-day-thresh",
     type=float,
     default=None,
-    help="[Moron_Robertson] A day with at least this rainfall counts as wet. Default under --definition: 1.0; under --definition-ref: the registry entry.",
+    help="[Moron_Robertson_2014] A day with at least this rainfall counts as wet. Default under --definition: 1.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-follow-days",
     type=int,
     default=None,
-    help="[Moron_Robertson] Days after the trigger window searched for a dry spell. "
+    help="[Moron_Robertson_2014] Days after the trigger window searched for a dry spell. "
     "0 disables the veto. Default under --definition: 30; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-veto",
     choices=["window_sum", "consecutive_dry"],
     default=None,
-    help="[Moron_Robertson] Dry-spell test. 'window_sum' (the original definition): a "
+    help="[Moron_Robertson_2014] Dry-spell test. 'window_sum' (the original definition): a "
     "--mr-sum-window-days window inside the follow-up totals less than --mr-sum-thresh. "
     "'consecutive_dry': a run of --mr-dry-spell-days days below --mr-dry-day-thresh "
     "starts inside the follow-up. Default under --definition: window_sum; under --definition-ref: the registry entry.",
@@ -889,32 +889,32 @@ def _resolve_time_dim(ds, override):
     "--mr-sum-window-days",
     type=int,
     default=None,
-    help="[Moron_Robertson, window_sum] Length of the dry-spell window, in days. Default under --definition: 10; under --definition-ref: the registry entry.",
+    help="[Moron_Robertson_2014, window_sum] Length of the dry-spell window, in days. Default under --definition: 10; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-sum-thresh",
     type=float,
     default=None,
-    help="[Moron_Robertson, window_sum] A window totaling less than this is a dry spell. Default under --definition: 5.0; under --definition-ref: the registry entry.",
+    help="[Moron_Robertson_2014, window_sum] A window totaling less than this is a dry spell. Default under --definition: 5.0; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-dry-spell-days",
     type=int,
     default=None,
-    help="[Moron_Robertson, consecutive_dry] A dry run this many days or longer is a dry spell. Default under --definition: 7; under --definition-ref: the registry entry.",
+    help="[Moron_Robertson_2014, consecutive_dry] A dry run this many days or longer is a dry spell. Default under --definition: 7; under --definition-ref: the registry entry.",
 )
 @weather_skill.argument(
     "--mr-dry-day-thresh",
     type=float,
     default=None,
-    help="[Moron_Robertson, consecutive_dry] A day below this rainfall counts as dry. "
+    help="[Moron_Robertson_2014, consecutive_dry] A day below this rainfall counts as dry. "
     "Default: --mr-wet-day-thresh.",
 )
 @weather_skill.argument(
     "--mr-search-start",
     default=None,
     metavar="MM-DD",
-    help="[Moron_Robertson] Ignore candidate onset days before this calendar date (in the "
+    help="[Moron_Robertson_2014] Ignore candidate onset days before this calendar date (in the "
     "year of the first time step; the whole series if it starts later), e.g. 06-02 for "
     "a climatological onset date. Needs an absolute time dim.",
 )
@@ -922,7 +922,7 @@ def _resolve_time_dim(ds, override):
     "--mr-reject-short-followup",
     action="store_true",
     default=None,
-    help="[Moron_Robertson] Reject a candidate whose follow-up period runs past the end "
+    help="[Moron_Robertson_2014] Reject a candidate whose follow-up period runs past the end "
     "of the series. Default: check the veto over the days that are available.",
 )
 @weather_skill.argument(
@@ -998,11 +998,11 @@ def onset_date(
         file=sys.stderr,
     )
 
-    is_mr = definition == "Moron_Robertson"
+    is_mr = definition == "Moron_Robertson_2014"
     if is_mr:
         if (mr_thresh is None) == (mr_thresh_field is None):
             raise UsageError(
-                "--definition Moron_Robertson needs exactly one of --mr-thresh (one value "
+                "--definition Moron_Robertson_2014 needs exactly one of --mr-thresh (one value "
                 "for every cell) or --mr-thresh-field (a per-cell threshold Zarr). The "
                 "canonical threshold is the local climatological wet-spell amount; this "
                 "skill does not invent one."
@@ -1031,7 +1031,7 @@ def onset_date(
             if value is not None
         ]
         if given:
-            raise UsageError(f"{given} only valid with --definition Moron_Robertson")
+            raise UsageError(f"{given} only valid with --definition Moron_Robertson_2014")
 
     dim = _resolve_time_dim(ds, time_dim)
 
@@ -1078,7 +1078,7 @@ def onset_date(
             else f"dry_spell_days={mr_dry_spell_days} dry_day_thresh={mr_dry_day_thresh}"
         )
         print(
-            f"Computing onset date dim={dim} definition=Moron_Robertson "
+            f"Computing onset date dim={dim} definition=Moron_Robertson_2014 "
             f"thresh={mr_thresh if mr_thresh is not None else 'per-cell field'} "
             f"window_days={mr_window_days} wet_day_thresh={mr_wet_day_thresh} "
             f"follow_days={mr_follow_days} veto={mr_veto} {veto_params} "
@@ -1224,7 +1224,7 @@ def onset_date(
                 )
             start_text = f", from {mr_search_start}" if mr_search_start else ""
             label = (
-                f"{var} onset date (Moron_Robertson: {mr_window_days}d wet{thresh_text}, "
+                f"{var} onset date (Moron_Robertson_2014: {mr_window_days}d wet{thresh_text}, "
                 f"{veto_short} in {mr_follow_days}d{start_text})"
             )
             description = (
