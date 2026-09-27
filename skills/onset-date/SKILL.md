@@ -1,6 +1,6 @@
 ---
 name: onset-date
-description: Compute the rainy season onset date along a time/step axis, per one of three selectable definitions -- ICPAC's wet-spell-then-no-dry-spell criterion, the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season), or Moron-Robertson's all-wet window over a per-cell climatological threshold (Moron_Robertson). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly.
+description: Compute the rainy season onset date along a time/step axis, per a definition from the onset-definition registry (--definition-ref, e.g. icpac-onset, agrhymet-sos-rolling, moron-robertson-2014; every output records the definition id, content hash and any overrides) or one of three legacy names -- ICPAC's wet-spell-then-no-dry-spell criterion, the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season), or Moron-Robertson's all-wet window over a per-cell climatological threshold (Moron_Robertson). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly.
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py *)
@@ -16,7 +16,10 @@ lead-time dim such as `step`) satisfying an onset criterion, and writes that
 day's own coordinate value to a new `onset_VAR_date` variable, replacing
 `VAR`. Data variables that don't carry the time dim pass through untouched.
 
-Three onset definitions are available via `--definition`:
+Definitions are selected by registry id with `--definition-ref` (see
+[Onset-definition registry](#onset-definition-registry-and-provenance)), or
+by one of three legacy names with `--definition`, which run the same three
+kernels:
 
 - `ICPAC` — a wet spell (`--wet-spell-days` consecutive days totaling more
   than `--wet-spell-thresh`) qualifies as onset only if no dry spell
@@ -70,7 +73,8 @@ Three onset definitions are available via `--definition`:
 ```
 uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
     --input <in.zarr> --output <out.zarr> \
-    --definition ICPAC|CHC_start_grow_season|Moron_Robertson \
+    (--definition-ref REGISTRY_ID [--waive-field FIELD ...] \
+     | --definition ICPAC|CHC_start_grow_season|Moron_Robertson) \
     [--variable VAR ...] [--time-dim DIM] \
     [--wet-spell-thresh MM] [--wet-spell-days N] \
     [--dry-spell-thresh MM] [--dry-spell-days N] [--search-days N] \
@@ -88,14 +92,26 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
 
 - `--input`, `-i` — input Zarr (any).
 - `--output`, `-o` — output Zarr.
-- `--definition` — `ICPAC`, `CHC_start_grow_season` or `Moron_Robertson`.
-  Required.
+- `--definition-ref` — an id from the onset-definition registry
+  (`references/onset_definitions.toml`), e.g. `icpac-onset`,
+  `agrhymet-sos-rolling`, `moron-robertson-2014`, `uchicago-ethiopia-2026`,
+  `moron-robertson-india-operational`. An unknown id is refused with the list
+  of known ids. Exactly one of `--definition-ref` / `--definition` is required.
+- `--waive-field FIELD` — repeatable, `--definition-ref` only: run without a
+  registry field the kernel cannot reproduce (see the refusal rule below).
+- `--definition` — legacy name: `ICPAC`, `CHC_start_grow_season` or
+  `Moron_Robertson`. Kept for backward compatibility with its old defaults.
 - `--variable`, `-v` — repeatable; restricts the computation to the named
   data variable(s). Each name must be a data variable of the input and must
   carry the time dim; violations exit non-zero. Default (unset) computes
   over every data variable carrying the time dim. Unselected or untouched
   data variables pass through unchanged (a stderr note lists them).
 - `--time-dim` — name of the time-like dim when not auto-detectable.
+
+Kernel parameters. The defaults below apply under `--definition`; under
+`--definition-ref` every one of them comes from the registry entry, and a
+flag given explicitly still wins but is recorded as an override. Under
+`--definition-ref`, a flag belonging to a different kernel is refused.
 
 ICPAC-only parameters (ignored under `--definition CHC_start_grow_season`):
 
@@ -163,6 +179,69 @@ series; the tests carry that function as an oracle. The one intended difference 
 `NaN` in a candidate's trigger or follow-up window disqualifies it (see
 below), where the reference ignores a missing follow-up day.
 
+### Onset-definition registry and provenance
+
+`references/onset_definitions.toml` is a byte-identical copy of the
+repository's `registry/onset_definitions.toml` (refresh it with
+`python tools/sync_definitions.py`; a test fails if the two drift). Each entry
+states one definition once, with its status (`canonical`, `variant`,
+`candidate`) and source.
+
+`--definition-ref` picks the kernel from the entry's structure (an all-wet
+trigger over a per-cell threshold: Moron_Robertson; a confirmation window:
+CHC; a consecutive-dry veto: ICPAC) and fills every parameter from it:
+
+| Registry field | ICPAC kernel | CHC kernel | Moron_Robertson kernel |
+|---|---|---|---|
+| `trigger.window_days` | `--wet-spell-days` | `--period1-days` | `--mr-window-days` |
+| `trigger.total_mm` / `total_op` | `--wet-spell-thresh`, `>` or `>=` | `--period1-thresh`, `>` or `>=` | must be per-cell: `--mr-thresh-field` (or `--mr-thresh`, an override); op must be `>` |
+| `trigger.wet_day_mm` / `wet_day_op` | — | — | `--mr-wet-day-thresh`; op must be `>=` |
+| `confirm.window_days` / `total_mm` / `total_op` | — | `--period2-days` / `--period2-thresh`, `>` or `>=` | — |
+| `confirm.after_days` | — | must equal `trigger.window_days` | — |
+| `veto.mode` | must be `consecutive_dry` | must be `none` | `--mr-veto` (`none` = `--mr-follow-days 0`) |
+| `veto.dry_days` / `dry_day_mm` | `--dry-spell-days` / `--dry-spell-thresh` | — | `--mr-dry-spell-days` / `--mr-dry-day-thresh` |
+| `veto.window_days` / `window_total_mm` | — | — | `--mr-sum-window-days` / `--mr-sum-thresh` |
+| `veto.follow_days` | `--search-days` | — | `--mr-follow-days` |
+| `veto.follow_anchor` | kernel: dry run wholly inside the window from the trigger's first day | — | `run_start_after_trigger_end` / `window_start_after_trigger_end` |
+| `search.start` | — | — | one date: `--mr-search-start` |
+| `search.window_days`, `time_basis = calendar_dekad` | — | — | — |
+
+**Refusal rule.** A registry field the chosen kernel cannot reproduce is
+refused with a usage error naming the field, never silently ignored — e.g.
+`time_basis = "calendar_dekad"` (`agrhymet-sos`), `search.window_days` and a
+two-season `search.start` (`icpac-onset`), and `icpac-onset`'s
+`veto.follow_anchor = "run_start_after_trigger_start"` (the ICPAC kernel only
+vetoes a dry run lying wholly inside the window). `--waive-field FIELD` runs
+without it; the waiver is recorded as an override. Keys outside the scientific
+sections (`notes`, `tunable`, `optimization`, ...) are ignored.
+
+**Provenance.** Every output variable and the output dataset carry:
+
+- `onset_definition_id` — the registry id (for `--definition`, the entry the
+  legacy name approximates: `ICPAC` → `icpac-onset`, `CHC_start_grow_season`
+  → `agrhymet-sos-rolling`, `Moron_Robertson` → `moron-robertson-2014`);
+- `onset_definition_hash` — the entry's content hash (first 12 hex digits of
+  the SHA-256 of its `time_basis`/`trigger`/`confirm`/`veto`/`search`
+  sections as sorted-key JSON), so a prose edit keeps the identity;
+- `onset_definition_status` — the entry's status, or `unregistered-variant`
+  when anything differs from it;
+- `onset_definition_overrides` — JSON object of every differing field and
+  the value actually used (`null` = not applied), `"{}"` when none. A scalar
+  `--mr-thresh` records `trigger.threshold_kind: "scalar"`, since the
+  registered Moron-Robertson threshold is a per-cell climatology.
+
+**Known divergences of the legacy names.** `--definition CHC_start_grow_season`
+keeps its 20 mm first-window default, but the AGRHYMET / FEWS NET start of
+season is "first dekad with at least 25 mm, followed by two dekads totalling
+at least 20 mm" (the registry cites Environ. Res. Lett. 2021,
+doi:10.1088/1748-9326/ac15cc). A legacy CHC run therefore records
+`{"trigger.total_mm": 20.0, "confirm.total_op": ">"}` and status
+`unregistered-variant`; `--definition-ref agrhymet-sos-rolling` runs 25 mm
+and `>=`. Changing the legacy default is a maintainer decision, not made
+here. Likewise `--definition ICPAC` compares the wet-spell total with `>`
+where the registry uses `>=` (a convention the source leaves unspecified),
+and has no search-start or search-window limit.
+
 ### Time-dim detection
 
 Without `--time-dim`, the skill first tries the dim ontology's time
@@ -185,7 +264,7 @@ variable's attrs are built fresh rather than carried over from the source
 variable: the source's `standard_name`/`long_name`/`units` describe the
 input rainfall quantity, not this derived date. `long_name`/`GRIB_name` are
 both set to a compact descriptive label naming the definition and its
-concrete parameters (e.g. `"tp onset date (ICPAC: 20.0 mm/3d, dry<1.0 mm for
+concrete parameters (e.g. `"tp onset date (ICPAC: >20.0 mm/3d, dry<1.0 mm for
 7d in 21d)"`), and `description` carries the full prose definition actually
 used. `standard_name` is set to `None` explicitly (CF has no entry for
 "rainy season onset date" to verify against). No `units` attr is set at
@@ -272,6 +351,13 @@ the `provenance` skill. There is no cache: every run recomputes and rewrites
 uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
     -i /tmp/ecmwf.zarr -o /tmp/ecmwf_onset.zarr \
     --definition ICPAC --variable tp
+```
+
+```bash
+# AGRHYMET / FEWS NET start of season on rolling daily windows, by registry id.
+uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
+    -i /tmp/chirps.zarr -o /tmp/chirps_sos.zarr \
+    --definition-ref agrhymet-sos-rolling
 ```
 
 ```bash

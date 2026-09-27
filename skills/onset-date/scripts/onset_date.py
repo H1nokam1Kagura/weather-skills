@@ -15,7 +15,14 @@ and returns that day's own coordinate value (a duration if the dim is a
 lead-time axis, an absolute date if it is already ``time``). Data variables
 that don't carry the time dim pass through untouched.
 
-Three onset definitions are supported via ``--definition``:
+A definition is chosen by registry id (``--definition-ref``, resolved against
+``references/onset_definitions.toml``: kernel, parameters, and a refusal for
+any registry field the kernel cannot reproduce) or by a legacy name
+(``--definition``). Either way the output records ``onset_definition_id``,
+``onset_definition_hash``, ``onset_definition_status`` and
+``onset_definition_overrides``.
+
+Three kernels, named by their legacy ``--definition`` values:
 
 - ``ICPAC`` — a wet spell (``--wet-spell-days`` days totaling more than
   ``--wet-spell-thresh``) with no disqualifying dry spell
@@ -303,7 +310,9 @@ def _resolve_definition(definition, definition_ref, waive_fields, explicit, mr_t
     registry = _load_registry()
     waive_fields = list(dict.fromkeys(waive_fields or []))
     if (definition is None) == (definition_ref is None):
-        raise UsageError("pass exactly one of --definition-ref <registry id> or --definition <name>.")
+        raise UsageError(
+            "pass exactly one of --definition-ref <registry id> or --definition <name>."
+        )
 
     if definition_ref is None:
         if waive_fields:
@@ -323,8 +332,7 @@ def _resolve_definition(definition, definition_ref, waive_fields, explicit, mr_t
         if foreign:
             flags = ["--" + k.replace("_", "-") for k in foreign]
             raise UsageError(
-                f"{flags} do not apply to '{ref}', which runs the "
-                f"{_FAMILY_LABEL[family]} kernel."
+                f"{flags} do not apply to '{ref}', which runs the {_FAMILY_LABEL[family]} kernel."
             )
         params = _params_from_entry(family, registry[ref])
         if family == "mr" and params["mr_dry_day_thresh"] is None:
@@ -372,9 +380,7 @@ def _compare(values, op, thresh):
     return values >= thresh if op == ">=" else values > thresh
 
 
-def _rainfall_onset_nd(
-    block, wet_thresh, wet_days, dry_thresh, dry_days, search_days, wet_op=">"
-):
+def _rainfall_onset_nd(block, wet_thresh, wet_days, dry_thresh, dry_days, search_days, wet_op=">"):
     """ICPAC onset search, vectorized over every leading (batch) dim at once.
 
     block : ndarray, shape (..., n_time) — time dim must be the last axis,

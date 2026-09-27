@@ -1,6 +1,10 @@
 """Correctness tests for onset-date."""
 
 import collections
+import hashlib
+import json
+import tomllib
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -721,3 +725,267 @@ def test_mr_batched_kernel_matches_reference(onset_module, mode):
             ref = _ref_find_onset(block[m, c], thresh[c], params)
             want = np.nan if ref is None else ref - 1
             assert np.array_equal(got[m, c], want, equal_nan=True)
+
+
+# ---------------------------------------------------------------------------
+# Onset-definition registry: --definition-ref, provenance, refusal
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SKILL_REFERENCES = Path(__file__).resolve().parents[1] / "references" / "onset_definitions.toml"
+
+
+def _registry():
+    with SKILL_REFERENCES.open("rb") as f:
+        return tomllib.load(f)["definitions"]
+
+
+def _hash(entry):
+    # The shared contract's recipe, restated here on purpose so the test does
+    # not just call the code it is checking.
+    sections = ("time_basis", "trigger", "confirm", "veto", "search")
+    keep = {k: entry[k] for k in sections if k in entry}
+    return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def _run(onset_date, tmp_path, ds, *args):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(onset_date, "-i", str(src), "-o", str(out), *args)
+    return xr.open_zarr(out, consolidated=True)
+
+
+def _overrides(ds):
+    attr = ds["onset_tp_date"].attrs["onset_definition_overrides"]
+    assert ds.attrs["onset_definition_overrides"] == attr
+    return json.loads(attr)
+
+
+ICPAC_WAIVERS = (
+    "--waive-field",
+    "search.start",
+    "--waive-field",
+    "search.window_days",
+    "--waive-field",
+    "veto.follow_anchor",
+)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [10, 10, 5] + [2.0] * 27,  # onset day 0
+        [10, 10, 5] + [0.0] * 8 + [2.0] * 19,  # day 0 vetoed by a dry spell
+        [0.0] * 5 + [9, 9, 9] + [2.0] * 30,  # later onset
+        [0.0] * 30,  # none
+    ],
+)
+def test_ref_icpac_matches_legacy(tmp_path, onset_date, values):
+    ds = _forecast_ds(values)
+    legacy = _run(onset_date, tmp_path / "a", ds, "--definition", "ICPAC")
+    ref = _run(onset_date, tmp_path / "b", ds, "--definition-ref", "icpac-onset", *ICPAC_WAIVERS)
+    assert np.array_equal(_onset(ref), _onset(legacy), equal_nan=True)
+    assert ref.attrs["onset_definition_id"] == "icpac-onset"
+    # the waived fields are recorded, so the run is not the registered definition
+    assert ref.attrs["onset_definition_status"] == "unregistered-variant"
+    assert set(_overrides(ref)) == {"search.start", "search.window_days", "veto.follow_anchor"}
+
+
+def test_ref_icpac_uses_registry_operator(tmp_path, onset_date):
+    # A wet spell totaling exactly 20mm: the registry's >= accepts it, the
+    # legacy definition's > does not -- and the legacy run records that.
+    ds = _forecast_ds([10, 5, 5] + [2.0] * 27)
+    ref = _run(onset_date, tmp_path / "a", ds, "--definition-ref", "icpac-onset", *ICPAC_WAIVERS)
+    assert _onset(ref) == np.timedelta64(1, "D")
+    legacy = _run(onset_date, tmp_path / "b", ds, "--definition", "ICPAC")
+    assert _onset(legacy) != np.timedelta64(1, "D")
+    assert _overrides(legacy)["trigger.total_op"] == ">"
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [3.0] * 10 + [1.5] * 20,  # 30mm then 30mm: onset day 0
+        [2.0] * 10 + [1.5] * 20,  # 20mm first window: below 25mm
+        [0.0] * 5 + [3.0] * 10 + [0.5] * 20,  # confirmation fails
+        [0.0] * 4 + [3.0] * 12 + [1.5] * 30,
+    ],
+)
+def test_ref_chc_matches_legacy(tmp_path, onset_date, values):
+    ds = _forecast_ds(values)
+    legacy = _run(
+        onset_date,
+        tmp_path / "a",
+        ds,
+        "--definition",
+        "CHC_start_grow_season",
+        "--period1-thresh",
+        "25",
+    )
+    ref = _run(onset_date, tmp_path / "b", ds, "--definition-ref", "agrhymet-sos-rolling")
+    assert np.array_equal(_onset(ref), _onset(legacy), equal_nan=True)
+    assert ref.attrs["onset_definition_status"] == "variant"  # the registry's own status
+    assert _overrides(ref) == {}
+
+
+def test_chc_legacy_default_surfaces_registry_divergence(tmp_path, onset_date):
+    ds = _forecast_ds([2.0] * 10 + [1.5] * 20)
+    out = _run(onset_date, tmp_path, ds, "--definition", "CHC_start_grow_season")
+    reg = _registry()["agrhymet-sos-rolling"]
+    assert reg["trigger"]["total_mm"] == 25.0  # AGRHYMET / FEWS NET
+    assert out.attrs["onset_definition_id"] == "agrhymet-sos-rolling"
+    assert out.attrs["onset_definition_hash"] == _hash(reg)
+    assert out.attrs["onset_definition_status"] == "unregistered-variant"
+    # PR #115's 20mm default is kept, and shows up as an override of 25mm
+    assert _overrides(out) == {"confirm.total_op": ">", "trigger.total_mm": 20.0}
+
+
+@pytest.mark.parametrize(
+    ("ref_id", "legacy_args", "daily"),
+    [
+        ("moron-robertson-2014", (), False),
+        (
+            "uchicago-ethiopia-2026",
+            ("--mr-veto", "consecutive_dry", "--mr-follow-days", "21"),
+            False,
+        ),
+        ("moron-robertson-india-operational", ("--mr-search-start", "06-02"), True),
+    ],
+)
+def test_ref_mr_matches_legacy(tmp_path, onset_date, ref_id, legacy_args, daily):
+    values = [3.0] * 5 + [0.0] * 12 + [3.0] * 5 + [2.0] * 25 + [0.0] * 8 + [3.0] * 5 + [2.0] * 40
+    ds = _daily_ds(values) if daily else _forecast_ds(values)
+    legacy = _run(
+        onset_date,
+        tmp_path / "a",
+        ds,
+        "--definition",
+        "Moron_Robertson",
+        "--mr-thresh",
+        "10",
+        *legacy_args,
+    )
+    ref = _run(onset_date, tmp_path / "b", ds, "--definition-ref", ref_id, "--mr-thresh", "10")
+    assert np.array_equal(_onset(ref), _onset(legacy), equal_nan=True)
+    assert not np.isnat(_onset(ref))
+    # one scalar threshold is not the registry's per-cell climatology
+    assert _overrides(ref) == {"trigger.threshold_kind": "scalar", "trigger.total_mm": 10.0}
+
+
+def _thresh_field(tmp_path):
+    field = xr.Dataset(
+        {"wet_spell_mm": (["latitude", "longitude"], np.array([[10.0]]))},
+        coords={"latitude": [1.0], "longitude": [10.0]},
+    )
+    field["wet_spell_mm"].attrs["units"] = "mm"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    return str(write_zarr(field, tmp_path / "thr.zarr"))
+
+
+def test_ref_provenance_and_hash(tmp_path, onset_date):
+    thr = _thresh_field(tmp_path)
+    ds = _run(
+        onset_date,
+        tmp_path / "a",
+        _forecast_ds([0.0] * 10 + [3.0] * 5 + [2.0] * 30),
+        "--definition-ref",
+        "moron-robertson-2014",
+        "--mr-thresh-field",
+        thr,
+    )
+    entry = _registry()["moron-robertson-2014"]
+    for attrs in (ds.attrs, ds["onset_tp_date"].attrs):
+        assert attrs["onset_definition_id"] == "moron-robertson-2014"
+        assert attrs["onset_definition_hash"] == _hash(entry)
+        assert attrs["onset_definition_status"] == "canonical"
+        assert attrs["onset_definition_overrides"] == "{}"
+    assert _onset(ds) == np.timedelta64(11, "D")
+
+
+def test_ref_explicit_flag_is_override(tmp_path, onset_date):
+    thr = _thresh_field(tmp_path)
+    ds = _run(
+        onset_date,
+        tmp_path / "a",
+        _forecast_ds([0.0] * 10 + [3.0] * 5 + [2.0] * 30),
+        "--definition-ref",
+        "moron-robertson-2014",
+        "--mr-thresh-field",
+        thr,
+        "--mr-follow-days",
+        "20",
+        "--mr-reject-short-followup",
+    )
+    assert ds.attrs["onset_definition_status"] == "unregistered-variant"
+    assert ds.attrs["onset_definition_hash"] == _hash(_registry()["moron-robertson-2014"])
+    assert _overrides(ds) == {"kernel.reject_short_followup": True, "veto.follow_days": 20}
+    assert "in 20d" in ds["onset_tp_date"].attrs["long_name"]
+
+
+def _usage_error(onset_date, tmp_path, capsys, *args):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    src = write_zarr(_forecast_ds([2.0] * 40), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(onset_date, "-i", str(src), "-o", str(tmp_path / "out.zarr"), *args)
+    assert exc.value.code == 2
+    return capsys.readouterr().err
+
+
+def test_unknown_ref_lists_known_ids(tmp_path, onset_date, capsys):
+    err = _usage_error(onset_date, tmp_path, capsys, "--definition-ref", "icpac")
+    for known in ("icpac-onset", "agrhymet-sos-rolling", "moron-robertson-2014"):
+        assert known in err
+
+
+def test_unsupported_registry_field_is_refused(tmp_path, onset_date, capsys):
+    err = _usage_error(onset_date, tmp_path / "a", capsys, "--definition-ref", "icpac-onset")
+    assert "search.window_days" in err and "--waive-field" in err
+    err = _usage_error(onset_date, tmp_path / "b", capsys, "--definition-ref", "agrhymet-sos")
+    assert "time_basis" in err and "calendar_dekad" in err
+    # a waiver must name a field that was actually refused
+    err = _usage_error(
+        onset_date,
+        tmp_path / "c",
+        capsys,
+        "--definition-ref",
+        "agrhymet-sos-rolling",
+        "--waive-field",
+        "trigger.total_mm",
+    )
+    assert "not an unsupported field" in err
+
+
+def test_ref_and_definition_are_exclusive_and_flags_must_fit(tmp_path, onset_date, capsys):
+    err = _usage_error(
+        onset_date,
+        tmp_path / "a",
+        capsys,
+        "--definition",
+        "ICPAC",
+        "--definition-ref",
+        "icpac-onset",
+    )
+    assert "exactly one" in err
+    err = _usage_error(
+        onset_date,
+        tmp_path / "b",
+        capsys,
+        "--definition-ref",
+        "agrhymet-sos-rolling",
+        "--wet-spell-days",
+        "3",
+    )
+    assert "--wet-spell-days" in err
+
+
+def test_references_copy_matches_registry():
+    registry = REPO_ROOT / "registry" / "onset_definitions.toml"
+    if not registry.is_file():
+        pytest.skip("registry/ not present in this checkout")
+    # CRLF is normalised only because a Windows checkout with core.autocrlf
+    # converts files git has checked out but not one written since; the
+    # committed blobs must be byte-identical.
+    a = registry.read_bytes().replace(b"\r\n", b"\n")
+    b = SKILL_REFERENCES.read_bytes().replace(b"\r\n", b"\n")
+    assert a == b, "run python tools/sync_definitions.py"
