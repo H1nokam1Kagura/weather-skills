@@ -392,24 +392,45 @@ def test_calendar_dekad_is_reported_as_dropped(defs):
     assert any("dekad" in reason for reason in compiled.dropped)
 
 
-# ---------------------------------------------------------------- drift vs indicator ALIASES
+# ---------------------------------------------------------------- parity with indicator
+# indicator reads the registry itself (skills/indicator/references copy) and carries its own
+# copy of the rule compiler, because a self-contained skill cannot import registry/. These
+# tests keep the two compilers identical, so drift is caught here instead of in outputs.
 
 
-def test_icpac_alias_matches_registry(defs, indicator_spec):
-    compiled = onset.compile_to_indicator("icpac-onset", defs["icpac-onset"])
-    assert compiled.rule == indicator_spec.ALIASES["icpac-onset"]
+def _compile_or_none(name, d):
+    try:
+        return onset.compile_to_indicator(name, d)
+    except onset.RegistryError:
+        return None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known drift: the source says 'at least' 25 mm / 20 mm (>=); indicator's chc-onset "
-        "alias uses strict '>'. Remove this xfail when the alias is regenerated from the registry."
-    ),
-)
-def test_chc_alias_matches_agrhymet_rolling(defs, indicator_spec):
-    compiled = onset.compile_to_indicator("agrhymet-sos-rolling", defs["agrhymet-sos-rolling"])
-    assert compiled.rule == indicator_spec.ALIASES["chc-onset"]
+def test_indicator_compiler_matches_registry_compiler(defs, indicator_spec):
+    for name, d in defs.items():
+        ours = _compile_or_none(name, d)
+        rule, dropped = indicator_spec.compile_definition(d)
+        if ours is None:
+            assert rule is None, f"{name}: registry refuses, indicator compiled {rule!r}"
+            continue
+        assert rule == ours.rule, name
+        assert list(dropped) == list(ours.dropped), name
+
+
+def test_legacy_aliases_resolve_to_registry_rules(defs, indicator_spec):
+    for alias, registry_id in indicator_spec.LEGACY_ALIASES.items():
+        assert registry_id in defs, f"{alias} -> unknown registry id {registry_id!r}"
+        expected = onset.compile_to_indicator(registry_id, defs[registry_id]).rule
+        assert indicator_spec.parse_rule(alias).expanded == expected, alias
+
+
+def test_legacy_aliases_expand_exactly_as_before_the_registry(indicator_spec):
+    """Resolving through the registry must not change what the old aliases mean."""
+    before = {
+        "icpac-onset": "precip sum 3d >= 20 and not precip consecutive-below 1 7d within 21d",
+        "chc-onset": "precip sum 10d > 25 and precip sum 20d > 20 after 10d",
+    }
+    for alias, rule in before.items():
+        assert indicator_spec.parse_rule(alias).expanded == rule, alias
 
 
 # ---------------------------------------------------------------- sync tool
@@ -492,6 +513,14 @@ def test_check_main_exits_1_on_drift(sync_tool, fake_repo, monkeypatch, capsys):
     assert sync_tool.main(["--check"]) == 1
     assert "skills/alpha/references/onset_definitions.toml: missing" in capsys.readouterr().out
     assert sync_tool.main(["--bogus"]) == 2
+
+
+def test_sheerwater_spw_onset_compiles_exactly(defs, indicator_spec):
+    """Rhiza's own onset condition: (11-day > 40 mm) & (8-day > 30 mm), same start day."""
+    c = onset.compile_to_indicator("sheerwater-spw-rainy-onset", defs["sheerwater-spw-rainy-onset"])
+    assert c.exact
+    assert c.rule == "precip sum 8d > 30 and precip sum 11d > 40"
+    assert indicator_spec.parse_rule("sheerwater-spw-rainy-onset").expanded == c.rule
 
 
 # ---------------------------------------------------------------- Sheerwater's definitions
