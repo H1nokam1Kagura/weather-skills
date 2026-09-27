@@ -23,6 +23,8 @@ def defs() -> dict[str, dict]:
 @pytest.fixture(scope="module")
 def indicator_spec():
     """The indicator skill's rule parser, loaded by path (skills are not packages)."""
+    if not INDICATOR_SPEC.is_file():
+        pytest.skip("indicator skill is not on this branch")
     name = "_registry_test_indicator_spec"
     spec = importlib.util.spec_from_file_location(name, INDICATOR_SPEC)
     module = importlib.util.module_from_spec(spec)
@@ -408,3 +410,85 @@ def test_icpac_alias_matches_registry(defs, indicator_spec):
 def test_chc_alias_matches_agrhymet_rolling(defs, indicator_spec):
     compiled = onset.compile_to_indicator("agrhymet-sos-rolling", defs["agrhymet-sos-rolling"])
     assert compiled.rule == indicator_spec.ALIASES["chc-onset"]
+
+
+# ---------------------------------------------------------------- sync tool
+
+
+@pytest.fixture(scope="module")
+def sync_tool():
+    name = "_registry_test_sync_definitions"
+    spec = importlib.util.spec_from_file_location(name, REPO / "tools" / "sync_definitions.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+        yield module
+    finally:
+        sys.modules.pop(name, None)
+
+
+@pytest.fixture
+def fake_repo(tmp_path):
+    """A throwaway repo: canonical file + skills/alpha and skills/beta (never the real skills)."""
+    canonical = tmp_path / "registry" / "onset_definitions.toml"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_bytes(b"schema_version = 1\n# line two\n")
+    skills = tmp_path / "skills"
+    (skills / "alpha").mkdir(parents=True)
+    (skills / "beta").mkdir(parents=True)
+    return canonical, skills
+
+
+def test_sync_consumers_include_indicator_and_onset_date(sync_tool):
+    assert {"indicator", "onset-date"} <= set(sync_tool.CONSUMERS)
+    assert sync_tool.CANONICAL == onset.REGISTRY_PATH
+
+
+def test_sync_writes_lf_copies_and_check_passes(sync_tool, fake_repo):
+    canonical, skills = fake_repo
+    canonical.write_bytes(b"schema_version = 1\r\n# line two\r\n")
+    consumers = ("alpha", "beta", "gamma")  # gamma does not exist on this "branch"
+    lines = sync_tool.sync(canonical, skills, consumers)
+    assert any("skip gamma" in line for line in lines)
+    for skill in ("alpha", "beta"):
+        copy_ = skills / skill / "references" / "onset_definitions.toml"
+        assert copy_.read_bytes() == b"schema_version = 1\n# line two\n"
+    assert not (skills / "gamma").exists()
+    problems, notes = sync_tool.check(canonical, skills, consumers)
+    assert problems == []
+    assert any("skip gamma" in n for n in notes)
+
+
+def test_check_detects_missing_copy(sync_tool, fake_repo):
+    canonical, skills = fake_repo
+    sync_tool.sync(canonical, skills, ("alpha",))
+    problems, _ = sync_tool.check(canonical, skills, ("alpha", "beta"))
+    assert problems == ["skills/beta/references/onset_definitions.toml: missing"]
+
+
+def test_check_detects_differing_copy(sync_tool, fake_repo):
+    canonical, skills = fake_repo
+    sync_tool.sync(canonical, skills, ("alpha", "beta"))
+    (skills / "alpha" / "references" / "onset_definitions.toml").write_bytes(b"edited\n")
+    problems, _ = sync_tool.check(canonical, skills, ("alpha", "beta"))
+    assert len(problems) == 1 and "skills/alpha/" in problems[0] and "differs" in problems[0]
+
+
+def test_check_ignores_crlf_only_difference(sync_tool, fake_repo):
+    canonical, skills = fake_repo
+    sync_tool.sync(canonical, skills, ("alpha",))
+    (skills / "alpha" / "references" / "onset_definitions.toml").write_bytes(
+        b"schema_version = 1\r\n# line two\r\n"
+    )
+    assert sync_tool.check(canonical, skills, ("alpha",)) == ([], [])
+
+
+def test_check_main_exits_1_on_drift(sync_tool, fake_repo, monkeypatch, capsys):
+    canonical, skills = fake_repo
+    monkeypatch.setattr(sync_tool, "CANONICAL", canonical)
+    monkeypatch.setattr(sync_tool, "SKILLS_DIR", skills)
+    monkeypatch.setattr(sync_tool, "CONSUMERS", ("alpha",))
+    assert sync_tool.main(["--check"]) == 1
+    assert "skills/alpha/references/onset_definitions.toml: missing" in capsys.readouterr().out
+    assert sync_tool.main(["--bogus"]) == 2
