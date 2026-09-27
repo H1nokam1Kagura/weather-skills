@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Forecast vs observation verification on a shared grid — hits (event classification), bias (forecast − obs), or MAE (|forecast − obs|). Cell-by-cell only: coarsen --obs onto the forecast lat/lon grid first, and align time with step-to-time / aggregate-temporal. The output Zarr is the metric field to plot with plot-verify. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid.
+description: Forecast vs observation verification on a shared grid — hits (event classification), bias, MAE, RMSE, and for ensembles CRPS and Brier score. Scores forecast skill; to only compute an event probability use indicator. Cell-by-cell only: coarsen --obs onto the forecast lat/lon grid first, and align time with step-to-time / aggregate-temporal. The output Zarr is the metric field to plot with plot-verify. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid.
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py *)
@@ -19,6 +19,18 @@ with `--metric`:
 | `hits` (default) | `event_hit` | Event classification at `--threshold` |
 | `bias` | `bias` | `forecast − observation` per cell |
 | `mae` | `mae` | `\|forecast − observation\|` per cell |
+| `rmse` | `rmse` | `sqrt(mean((forecast − observation)²))` over `--reduce` dims (required) |
+| `crps` | `crps` | Ensemble CRPS, `E\|X − y\| − ½E\|X − X′\|` over members (ensemble required) |
+| `brier` | `brier_score` | `(P(X ≥ threshold) − 1[y ≥ threshold])²`, P = share of members (ensemble + `--threshold` required) |
+
+`--reduce DIM` (repeatable) averages any metric except `hits` over that
+dimension, e.g. `--reduce time` for a per-cell score over the period.
+
+**Ensembles.** `crps` and `brier` use every member. The deterministic
+metrics (`hits`, `bias`, `mae`, `rmse`) score the **ensemble mean**; the
+output records this in `verify_ensemble_reduction`. `crps` and `brier`
+refuse a deterministic forecast, and `brier` refuses without an explicit
+`--threshold`.
 
 ### Hits (`--metric hits`)
 
@@ -55,7 +67,8 @@ threshold in `mm`, run `aggregate-temporal` then `convert-to-totals` first.
 ```
 uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py \
     --forecast <forecast.zarr> --obs <truth.zarr> \
-    [--metric hits|bias|mae] [--variable NAME] [--threshold 1] \
+    [--metric hits|bias|mae|rmse|crps|brier] [--variable NAME] [--threshold T] \
+    [--reduce DIM ...] \
     -o <verify.zarr>
 ```
 
@@ -64,10 +77,13 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py \
 - `--forecast` — forecast Zarr (required).
 - `--obs` — truth / observation Zarr (required). Must already be on the
   forecast's spatial resolution.
-- `--metric` — `hits`, `bias`, or `mae` (default `hits`).
+- `--metric` — `hits`, `bias`, `mae`, `rmse`, `crps`, or `brier` (default `hits`).
 - `--variable`, `-v` — data variable in both inputs. Default: each input's
   first usable variable (names may differ).
-- `--threshold` — event cutoff for `--metric hits` only (default `1`).
+- `--threshold` — event cutoff (event = value ≥ threshold). `hits` defaults to
+  `1`; `brier` requires it; other metrics ignore it.
+- `--reduce` — dimension to average the score over (repeatable). Required
+  for `rmse`; not allowed for `hits`.
 - `--output`, `-o` — output Zarr.
 
 ### Output
