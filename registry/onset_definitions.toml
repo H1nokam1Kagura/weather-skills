@@ -1,0 +1,163 @@
+# Rainy-season onset definitions: one registry, many consumers.
+#
+# DRAFT PROPOSAL. Today the same definitions are hard-coded in two skills and already disagree
+# (see registry/README.md). This file states each definition once, with its source.
+#
+# status:
+#   canonical -- an institution's or paper's published rule. Frozen and cited. Agents may
+#                select it, never edit it.
+#   variant   -- a documented re-parameterisation of a canonical rule (derived_from + why).
+#   candidate -- output of an optimisation. Must carry an [x.optimization] block (objective,
+#                data, method, validation). Never replaces a canonical entry.
+#
+# Parameter conventions: amounts in mm/day or mm; windows in days; ops are one of
+# ">", ">=", "<", "<=". Anything the source does not pin down is listed in
+# unspecified_in_source, with the value shown being the convention chosen HERE.
+
+schema_version = 1
+
+[definitions.icpac-onset]
+status = "canonical"
+name = "ICPAC rainy-season onset (wet event not followed by a dry spell)"
+source.citation = "ICPAC; operationalised in the IRI Data Library IGAD onset maprooms (CHIRPS v2.0)"
+source.url = "https://iridl.ldeo.columbia.edu/maproom/Agriculture/Historical_Onset/ICPAC_Eq_Onset.html"
+source.checked = "2026-09-27"
+time_basis = "rolling_daily"
+trigger.window_days = 3
+trigger.total_mm = 20.0
+trigger.total_op = ">="
+veto.mode = "consecutive_dry"
+veto.dry_days = 7
+veto.dry_day_mm = 1.0
+veto.follow_days = 21
+veto.follow_anchor = "run_start_after_trigger_start"
+search.start = ["02-01", "08-01"]  # equatorial IGAD: MAM and OND seasons
+search.window_days = 60
+unspecified_in_source = ["trigger.total_op", "veto.dry_day_mm", "veto.follow_anchor"]
+notes = "The maproom gives 20 mm / 3 days and 7 days / 21 days as defaults ('e.g.'); users may change them. Northern IGAD uses search.start 03-01 (see icpac-onset-north)."
+
+[definitions.icpac-onset-north]
+status = "variant"
+derived_from = "icpac-onset"
+why = "Northern IGAD countries: one rainy season (about Apr-Sep); the maproom's search starts 1 March."
+name = "ICPAC onset, northern IGAD search window"
+source.citation = "IRI Data Library, Northern IGAD Countries Historical Onset Date maproom"
+source.url = "https://iridl.ldeo.columbia.edu/maproom/Agriculture/Historical_Onset/ICPAC_North_Onset.html"
+source.checked = "2026-09-27"
+time_basis = "rolling_daily"
+trigger.window_days = 3
+trigger.total_mm = 20.0
+trigger.total_op = ">="
+veto.mode = "consecutive_dry"
+veto.dry_days = 7
+veto.dry_day_mm = 1.0
+veto.follow_days = 21
+veto.follow_anchor = "run_start_after_trigger_start"
+search.start = ["03-01"]
+search.window_days = 60
+unspecified_in_source = ["trigger.total_op", "veto.dry_day_mm", "veto.follow_anchor"]
+
+[definitions.agrhymet-sos]
+status = "canonical"
+name = "AGRHYMET start of season (as used by FEWS NET / CHC WRSI)"
+source.citation = "AGRHYMET; FEWS NET start-of-season definition, as described in 'Sending out an SOS: using start of rainy season indicators for market price forecasting to support famine early warning', Environ. Res. Lett. (2021)"
+source.url = "https://iopscience.iop.org/article/10.1088/1748-9326/ac15cc"
+source.checked = "2026-09-27"
+time_basis = "calendar_dekad"
+trigger.window_days = 10
+trigger.total_mm = 25.0
+trigger.total_op = ">="
+confirm.window_days = 20
+confirm.total_mm = 20.0
+confirm.total_op = ">="
+confirm.after_days = 10
+veto.mode = "none"
+unspecified_in_source = []
+notes = "First dekad with at least 25 mm, followed by two dekads totalling at least 20 mm; onset = first day of that first dekad. Defined on CALENDAR dekads."
+
+[definitions.agrhymet-sos-rolling]
+status = "variant"
+derived_from = "agrhymet-sos"
+why = "Daily-resolution approximation: rolling 10/20-day windows instead of calendar dekads, as both current Weather Skills implementations do."
+name = "AGRHYMET start of season on rolling daily windows"
+source.citation = "derived from agrhymet-sos"
+source.url = "https://iopscience.iop.org/article/10.1088/1748-9326/ac15cc"
+source.checked = "2026-09-27"
+time_basis = "rolling_daily"
+trigger.window_days = 10
+trigger.total_mm = 25.0
+trigger.total_op = ">="
+confirm.window_days = 20
+confirm.total_mm = 20.0
+confirm.total_op = ">="
+confirm.after_days = 10
+veto.mode = "none"
+unspecified_in_source = []
+
+[definitions.moron-robertson-2014]
+status = "canonical"
+name = "Moron & Robertson (2014) local onset"
+source.citation = "Moron V., Robertson A.W. (2014) Int. J. Climatol. 34(4):1050-1061, doi:10.1002/joc.3745"
+source.url = "https://doi.org/10.1002/joc.3745"
+source.checked = "2026-09-27"
+time_basis = "rolling_daily"
+trigger.window_days = 5
+trigger.all_days_wet = true
+trigger.wet_day_mm = 1.0
+trigger.wet_day_op = ">="
+trigger.threshold_kind = "per_cell_climatology"
+trigger.total_op = ">"
+veto.mode = "window_sum"
+veto.window_days = 10
+veto.window_total_mm = 5.0
+veto.follow_days = 30
+veto.follow_anchor = "window_start_after_trigger_end"
+unspecified_in_source = []
+notes = "Per-cell threshold = the local climatological 5-day wet-spell amount. Parameters as reproduced by the MIT-licensed reference implementation (amarchakitus/onset_blending, README 'reproduce the original Moron-Robertson definition')."
+
+[definitions.moron-robertson-india-operational]
+status = "variant"
+derived_from = "moron-robertson-2014"
+why = "Agriculturally relevant onset for India: local onset searched only after the climatological monsoon onset over Kerala."
+name = "Moron-Robertson, India operational (search after 2 June)"
+source.citation = "Masiwal et al. (2026) arXiv:2602.03767, Methods"
+source.url = "https://arxiv.org/abs/2602.03767"
+source.checked = "2026-09-27"
+time_basis = "rolling_daily"
+trigger.window_days = 5
+trigger.all_days_wet = true
+trigger.wet_day_mm = 1.0
+trigger.wet_day_op = ">="
+trigger.threshold_kind = "per_cell_climatology"
+trigger.total_op = ">"
+veto.mode = "window_sum"
+veto.window_days = 10
+veto.window_total_mm = 5.0
+veto.follow_days = 30
+veto.follow_anchor = "window_start_after_trigger_end"
+search.start = ["06-02"]
+unspecified_in_source = []
+notes = "The paper reports the operational version replaced the dry-spell check with a Kerala-onset reference; exact operational veto settings are in the unlicensed envfluids/monsoon-onset code and are not reproduced here."
+
+[definitions.uchicago-ethiopia-2026]
+status = "variant"
+derived_from = "moron-robertson-2014"
+why = "Ethiopia/ICPAC-style dry-spell veto in the University of Chicago blending pipeline."
+name = "University of Chicago Ethiopia onset (consecutive-dry veto)"
+source.citation = "amarchakitus/onset_blending README, 'Onset Definition' (MIT)"
+source.url = "https://github.com/amarchakitus/onset_blending"
+source.checked = "2026-09-27"
+time_basis = "rolling_daily"
+trigger.window_days = 5
+trigger.all_days_wet = true
+trigger.wet_day_mm = 1.0
+trigger.wet_day_op = ">="
+trigger.threshold_kind = "per_cell_climatology"
+trigger.total_op = ">"
+veto.mode = "consecutive_dry"
+veto.dry_days = 7
+veto.dry_day_mm = 1.0
+veto.follow_days = 21
+veto.follow_anchor = "run_start_after_trigger_end"
+unspecified_in_source = ["trigger.window_days"]
+notes = "The README names follow_days=21 as 'the Ethiopia/ICPAC definition' and min_dry_days=7 as the consecutive_dry default; the operational Ethiopia window length lives in onsetblending2026 specs and should be confirmed there."
