@@ -8,7 +8,17 @@
 #                select it, never edit it.
 #   variant   -- a documented re-parameterisation of a canonical rule (derived_from + why).
 #   candidate -- output of an optimisation. Must carry an [x.optimization] block (objective,
-#                data, method, validation). Never replaces a canonical entry.
+#                data, method, validation, date, parent_hash, distance_from_parent).
+#                Never replaces a canonical entry.
+#
+# [definitions.<id>.tunable] (required except on candidates):
+#   "section.field" = {min = .., max = ..} or {choices = [..]}  -- what a harness may move
+#   fixed = ["section.field", ...]  -- institutionally fixed; never tuned
+#   why = "..."                      -- one line justifying the bounds
+# On a canonical entry the bounds describe the neighbourhood a CANDIDATE may explore; they
+# are never permission to edit the canonical entry itself. A field that is neither tunable
+# nor fixed is simply not tuned. A candidate may change only fields its parent lists as
+# tunable, inside those bounds, and records the parent's content hash in parent_hash.
 #
 # Parameter conventions: amounts in mm/day or mm; windows in days; ops are one of
 # ">", ">=", "<", "<=". Anything the source does not pin down is listed in
@@ -36,6 +46,17 @@ search.window_days = 60
 unspecified_in_source = ["trigger.total_op", "veto.dry_day_mm", "veto.follow_anchor"]
 notes = "The maproom gives 20 mm / 3 days and 7 days / 21 days as defaults ('e.g.'); users may change them. Northern IGAD uses search.start 03-01 (see icpac-onset-north)."
 
+[definitions.icpac-onset.tunable]
+why = "The maproom offers 20 mm/3 d and 7 d/21 d as user-adjustable 'e.g.' values; bounds stay near those defaults (about half to double the amounts) and keep the wet-event + dry-spell structure, time basis and season starts fixed."
+"trigger.total_mm" = {min = 10.0, max = 40.0}
+"trigger.window_days" = {min = 3, max = 7}
+"trigger.total_op" = {choices = [">=", ">"]}
+"veto.dry_days" = {min = 5, max = 10}
+"veto.dry_day_mm" = {min = 0.5, max = 2.0}
+"veto.follow_days" = {choices = [21, 30]}
+"search.window_days" = {min = 30, max = 90}
+fixed = ["time_basis", "veto.mode", "search.start"]
+
 [definitions.icpac-onset-north]
 status = "variant"
 derived_from = "icpac-onset"
@@ -57,6 +78,17 @@ search.start = ["03-01"]
 search.window_days = 60
 unspecified_in_source = ["trigger.total_op", "veto.dry_day_mm", "veto.follow_anchor"]
 
+[definitions.icpac-onset-north.tunable]
+why = "Same adjustable maproom defaults and bounds as icpac-onset; the 1 March search start is what makes this variant, so it is fixed."
+"trigger.total_mm" = {min = 10.0, max = 40.0}
+"trigger.window_days" = {min = 3, max = 7}
+"trigger.total_op" = {choices = [">=", ">"]}
+"veto.dry_days" = {min = 5, max = 10}
+"veto.dry_day_mm" = {min = 0.5, max = 2.0}
+"veto.follow_days" = {choices = [21, 30]}
+"search.window_days" = {min = 30, max = 90}
+fixed = ["time_basis", "veto.mode", "search.start"]
+
 [definitions.agrhymet-sos]
 status = "canonical"
 name = "AGRHYMET start of season (as used by FEWS NET / CHC WRSI)"
@@ -74,6 +106,10 @@ confirm.after_days = 10
 veto.mode = "none"
 unspecified_in_source = []
 notes = "First dekad with at least 25 mm, followed by two dekads totalling at least 20 mm; onset = first day of that first dekad. Defined on CALENDAR dekads."
+
+[definitions.agrhymet-sos.tunable]
+why = "Institutional definition used operationally by AGRHYMET and FEWS NET: the 25/20 mm thresholds, 'at least' comparisons, dekad windows and calendar-dekad basis are the published rule, so nothing is tunable."
+fixed = ["time_basis", "trigger.window_days", "trigger.total_mm", "trigger.total_op", "confirm.window_days", "confirm.total_mm", "confirm.total_op", "confirm.after_days", "veto.mode"]
 
 [definitions.agrhymet-sos-rolling]
 status = "variant"
@@ -93,6 +129,10 @@ confirm.total_op = ">="
 confirm.after_days = 10
 veto.mode = "none"
 unspecified_in_source = []
+
+[definitions.agrhymet-sos-rolling.tunable]
+why = "An approximation of the institutional rule: thresholds, comparisons and window lengths are AGRHYMET's and the rolling basis is what defines the variant, so nothing is tunable."
+fixed = ["time_basis", "trigger.window_days", "trigger.total_mm", "trigger.total_op", "confirm.window_days", "confirm.total_mm", "confirm.total_op", "confirm.after_days", "veto.mode"]
 
 [definitions.moron-robertson-2014]
 status = "canonical"
@@ -114,6 +154,15 @@ veto.follow_days = 30
 veto.follow_anchor = "window_start_after_trigger_end"
 unspecified_in_source = []
 notes = "Per-cell threshold = the local climatological 5-day wet-spell amount. Parameters as reproduced by the MIT-licensed reference implementation (amarchakitus/onset_blending, README 'reproduce the original Moron-Robertson definition')."
+
+[definitions.moron-robertson-2014.tunable]
+why = "Published paper parameters; bounds allow modest changes to window lengths and wet/dry thresholds while keeping the per-cell climatological trigger, all-days-wet test and window-sum veto that define the method."
+"trigger.window_days" = {min = 3, max = 7}
+"trigger.wet_day_mm" = {min = 0.5, max = 2.0}
+"veto.window_days" = {min = 7, max = 15}
+"veto.window_total_mm" = {min = 2.0, max = 10.0}
+"veto.follow_days" = {choices = [21, 30]}
+fixed = ["time_basis", "trigger.threshold_kind", "trigger.all_days_wet", "veto.mode"]
 
 [definitions.moron-robertson-india-operational]
 status = "variant"
@@ -139,6 +188,15 @@ search.start = ["06-02"]
 unspecified_in_source = []
 notes = "The paper reports the operational version replaced the dry-spell check with a Kerala-onset reference; exact operational veto settings are in the unlicensed envfluids/monsoon-onset code and are not reproduced here."
 
+[definitions.moron-robertson-india-operational.tunable]
+why = "Same neighbourhood as moron-robertson-2014; the 2 June search start (climatological Kerala onset) defines the variant, so it is fixed."
+"trigger.window_days" = {min = 3, max = 7}
+"trigger.wet_day_mm" = {min = 0.5, max = 2.0}
+"veto.window_days" = {min = 7, max = 15}
+"veto.window_total_mm" = {min = 2.0, max = 10.0}
+"veto.follow_days" = {choices = [21, 30]}
+fixed = ["time_basis", "trigger.threshold_kind", "trigger.all_days_wet", "veto.mode", "search.start"]
+
 [definitions.uchicago-ethiopia-2026]
 status = "variant"
 derived_from = "moron-robertson-2014"
@@ -161,3 +219,12 @@ veto.follow_days = 21
 veto.follow_anchor = "run_start_after_trigger_end"
 unspecified_in_source = ["trigger.window_days"]
 notes = "The README names follow_days=21 as 'the Ethiopia/ICPAC definition' and min_dry_days=7 as the consecutive_dry default; the operational Ethiopia window length lives in onsetblending2026 specs and should be confirmed there."
+
+[definitions.uchicago-ethiopia-2026.tunable]
+why = "Keeps the per-cell trigger and ICPAC-style consecutive-dry veto; the unconfirmed trigger window and the dry-spell settings may move within the same neighbourhood as the ICPAC and Moron-Robertson entries."
+"trigger.window_days" = {min = 3, max = 7}
+"trigger.wet_day_mm" = {min = 0.5, max = 2.0}
+"veto.dry_days" = {min = 5, max = 10}
+"veto.dry_day_mm" = {min = 0.5, max = 2.0}
+"veto.follow_days" = {choices = [21, 30]}
+fixed = ["time_basis", "trigger.threshold_kind", "trigger.all_days_wet", "veto.mode"]

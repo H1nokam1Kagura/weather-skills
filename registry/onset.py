@@ -24,7 +24,18 @@ STATUSES = {"canonical", "variant", "candidate"}
 OPS = {">", ">=", "<", "<="}
 VETO_MODES = {"none", "consecutive_dry", "window_sum"}
 TIME_BASES = {"rolling_daily", "calendar_dekad"}
-OPTIMIZATION_FIELDS = {"objective", "data", "method", "validation", "date"}
+OPTIMIZATION_FIELDS = {
+    "objective",
+    "data",
+    "method",
+    "validation",
+    "date",
+    "parent_hash",
+    "distance_from_parent",
+}
+# The scientific sections: the ones content_hash() covers, and the only ones a tunable or
+# fixed entry may name.
+PARAMETER_SECTIONS = ("time_basis", "trigger", "confirm", "veto", "search")
 
 
 class RegistryError(ValueError):
@@ -37,6 +48,12 @@ def load(path: Path = REGISTRY_PATH) -> dict[str, dict]:
     defs = doc.get("definitions", {})
     for name, d in defs.items():
         validate(name, d, defs)
+    for name, d in defs.items():
+        if d["status"] == "candidate":
+            try:
+                validate_candidate_against_parent(d, defs[d["derived_from"]])
+            except RegistryError as exc:
+                raise RegistryError(f"{name}: {exc}") from None
     return defs
 
 
@@ -67,12 +84,131 @@ def validate(name: str, d: dict, all_defs: dict) -> None:
         need(d.get("why"), "variant/candidate needs a 'why'")
     if d["status"] == "candidate":
         opt = d.get("optimization", {})
+        missing = sorted(OPTIMIZATION_FIELDS - set(opt))
+        need(not missing, f"candidate needs optimization.{missing}")
         need(
-            OPTIMIZATION_FIELDS <= set(opt),
-            f"candidate needs optimization.{sorted(OPTIMIZATION_FIELDS)}",
+            isinstance(opt.get("parent_hash"), str) and len(opt["parent_hash"]) == 12,
+            "optimization.parent_hash must be the parent's 12-character content hash",
+        )
+        dist = opt.get("distance_from_parent")
+        need(
+            isinstance(dist, int | float) and not isinstance(dist, bool) and dist >= 0,
+            "optimization.distance_from_parent must be a non-negative number",
         )
     for key in d.get("unspecified_in_source", []):
         need(has_field(d, key), f"unspecified_in_source names missing field {key!r}")
+    if d["status"] != "candidate" or "tunable" in d:
+        need("tunable" in d, "needs a [tunable] table (it may list only 'fixed' and 'why')")
+        for problem in _tunable_problems(d):
+            need(False, problem)
+
+
+def _is_number(x) -> bool:
+    return isinstance(x, int | float) and not isinstance(x, bool)
+
+
+def _tunable_problems(d: dict) -> list[str]:
+    """Everything wrong with d's [tunable] table (empty list when it is sound)."""
+    tun = d.get("tunable")
+    if not isinstance(tun, dict):
+        return ["tunable must be a table"]
+    problems = []
+    if not isinstance(tun.get("why"), str) or not tun["why"].strip():
+        problems.append("tunable.why must justify the bounds in one line")
+    fixed = tun.get("fixed", [])
+    if not isinstance(fixed, list) or not all(isinstance(f, str) for f in fixed):
+        return [*problems, "tunable.fixed must be a list of dotted field names"]
+    for key in fixed:
+        if key.split(".")[0] not in PARAMETER_SECTIONS or not has_field(d, key):
+            problems.append(f"tunable.fixed names missing parameter field {key!r}")
+    for key, bounds in tunable_fields(d).items():
+        if key.split(".")[0] not in PARAMETER_SECTIONS or not has_field(d, key):
+            problems.append(f"tunable names missing parameter field {key!r}")
+            continue
+        if key in fixed:
+            problems.append(f"{key!r} cannot be both tunable and fixed")
+        value = get_field(d, key)
+        problems.extend(f"tunable {key!r}: {p}" for p in _bounds_problems(value, bounds))
+    return problems
+
+
+def _bounds_problems(value, bounds) -> list[str]:
+    if not isinstance(bounds, dict):
+        return ["bounds must be a table with min+max or choices"]
+    if set(bounds) == {"choices"}:
+        choices = bounds["choices"]
+        if not isinstance(choices, list) or not choices:
+            return ["choices must be a non-empty list"]
+        if any(type(c) is not type(value) for c in choices):
+            return [f"choices must all have the field's type ({type(value).__name__})"]
+        return [] if value in choices else [f"current value {value!r} is not among the choices"]
+    if set(bounds) == {"min", "max"}:
+        lo, hi = bounds["min"], bounds["max"]
+        if not _is_number(value):
+            return [f"min/max bounds need a numeric field, got {value!r}; use choices"]
+        if type(lo) is not type(value) or type(hi) is not type(value):
+            return [f"min/max must have the field's type ({type(value).__name__})"]
+        if lo > hi:
+            return ["min exceeds max"]
+        return [] if lo <= value <= hi else [f"current value {value!r} is outside [{lo}, {hi}]"]
+    return ["bounds must be exactly {min, max} or {choices}"]
+
+
+def tunable_fields(d: dict) -> dict[str, dict]:
+    """Dotted field name -> bounds, for the fields a candidate may move (excludes fixed/why)."""
+    return {k: v for k, v in d.get("tunable", {}).items() if k not in ("fixed", "why")}
+
+
+def fixed_fields(d: dict) -> list[str]:
+    return list(d.get("tunable", {}).get("fixed", []))
+
+
+def _flatten(d: dict) -> dict[str, object]:
+    """Dotted name -> value for every leaf of the parameter sections."""
+    out: dict[str, object] = {}
+
+    def walk(prefix: str, node) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(f"{prefix}.{k}" if prefix else k, v)
+        else:
+            out[prefix] = node
+
+    for section in PARAMETER_SECTIONS:
+        if section in d:
+            walk(section, d[section])
+    return out
+
+
+def validate_candidate_against_parent(candidate: dict, parent: dict) -> list[str]:
+    """Check a candidate only moves fields its parent declares tunable, within their bounds.
+
+    Also checks optimization.parent_hash still equals the parent's content hash: a parent whose
+    parameters changed after the optimisation makes the candidate stale. Returns the sorted
+    list of changed dotted fields; raises RegistryError on any violation.
+    """
+    problems = []
+    recorded = candidate.get("optimization", {}).get("parent_hash")
+    if recorded != content_hash(parent):
+        problems.append(
+            f"optimization.parent_hash {recorded!r} != parent's content hash "
+            f"{content_hash(parent)!r} (candidate is stale or mis-attributed)"
+        )
+    mine, theirs = _flatten(candidate), _flatten(parent)
+    changed = sorted(k for k in mine.keys() | theirs.keys() if mine.get(k) != theirs.get(k))
+    tunable, fixed = tunable_fields(parent), fixed_fields(parent)
+    for key in changed:
+        if key in fixed:
+            problems.append(f"{key!r} is fixed in the parent and must not change")
+        elif key not in tunable:
+            problems.append(f"{key!r} changed but is not tunable in the parent")
+        elif key not in mine:
+            problems.append(f"{key!r} is tunable in the parent but missing from the candidate")
+        else:
+            problems.extend(f"{key!r}: {p}" for p in _bounds_problems(mine[key], tunable[key]))
+    if problems:
+        raise RegistryError("; ".join(problems))
+    return changed
 
 
 _MISSING = object()
