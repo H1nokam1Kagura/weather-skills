@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Forecast vs observation verification on a shared grid — hits (event classification), bias, MAE, RMSE, and for ensembles CRPS and Brier score. Scores forecast skill; to only compute an event probability use indicator. Cell-by-cell only: coarsen --obs onto the forecast lat/lon grid first, and align time with step-to-time / aggregate-temporal. The output Zarr is the metric field to plot with plot-verify. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid.
+description: Forecast vs observation verification on a shared grid — hits (event classification), bias, MAE, RMSE, and for ensembles CRPS and Brier score. Scores forecast skill; to only compute an event probability use indicator. Cell-by-cell only: coarsen --obs onto the forecast lat/lon grid first, and align time with step-to-time / aggregate-temporal. The output Zarr is the metric field: plot-verify draws hits, bias and mae; use plot for rmse, crps and brier. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid.
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py *)
@@ -46,7 +46,8 @@ NaNs in either input stay NaN. Ensemble `number` is averaged before
 comparison. Inputs are inner-joined (overlapping coordinates only).
 
 Plot hits with `plot` (discrete red / gray / green map). For a lead-week
-grid of obs, forecast, and verification maps, use `plot-verify`.
+grid of obs, forecast, and verification maps, use `plot-verify` (it accepts `hits`, `bias`
+and `mae`; draw `rmse`, `crps` and `brier_score` fields with `plot`).
 
 ## When to use
 
