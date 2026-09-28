@@ -60,7 +60,7 @@ variable — pass `--variable sst`.
 | `chirps` | CHIRPS daily precipitation climatology (`--variable precip`) |
 | `ecmwf_ifs` | ECMWF IFS reforecast daily climatology — `precip`, `sst`, `uwind10m`, `vwind10m` |
 | `oisst` | NOAA OISST v2.1 daily sea-surface temperature climatology. Requires `--variable sst`. For live SST observations use `oisst-fetch`, not this skill. |
-| `gefs` | GEFS reforecast daily precipitation climatology (`--variable precip`) |
+| `gefs` | GEFS reforecast daily climatology — `precip`, `tmp2m` (2m temperature) |
 
 More datasets are added by mirroring a new Zarr under the same bucket
 convention — no CLI change needed once added.
@@ -132,10 +132,12 @@ comes from the cached Zarr's own `variable` global attr (e.g. `precip_avg`,
 `precip_std`, or `sst_avg` / `sst_std` for `--dataset oisst`). Recognized
 kinds (currently `precip`, air `temp`) are converted to standard display
 units (e.g. `mm day-1` for precip); anything else (e.g. `sst`, `uwind10m`,
-`vwind10m`) passes through unconverted, with units from the source
+`vwind10m`, `tmp2m`) passes through unconverted, with units from the source
 (per-variable, else dataset-level, else a small hardcoded table in
-`fetch.py` for known unitless mirrors — currently `degree_Celsius` for
-`sst`, `m/s` for `uwind10m`/`vwind10m`). Unlike variance, std shares the
+`fetch.py` — `_KNOWN_UNITS` — for mirrors with no usable units metadata,
+whether missing entirely or present but not a parseable unit string, e.g.
+gefs tmp2m's raw `"avg. daily C"`; currently `degree_Celsius` for `sst` and
+`tmp2m`, `m/s` for `uwind10m`/`vwind10m`). Unlike variance, std shares the
 mean's units and converts linearly, so both variables go through the same
 unit-conversion path safely where one applies.
 Global attrs include `weather_skills_source=sheerwater-mirror:<dataset>`,

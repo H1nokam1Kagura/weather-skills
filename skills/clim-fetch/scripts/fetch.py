@@ -28,6 +28,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pint_xarray
 import xarray as xr
 from weather_skills_core import DataError, UsageError, weather_skill
 from weather_skills_core.cf import stamp_cf_attrs
@@ -47,12 +48,26 @@ _GCS_MEDIA = f"https://storage.googleapis.com/{_BUCKET}"
 _DATASETS = ("imerg_final", "era5", "chirps", "ecmwf_ifs", "oisst", "gefs")
 
 # Some mirrors carry no units metadata at all (neither per-variable nor
-# dataset-level) — known source units for those variables, hardcoded here.
+# dataset-level), or a units string that isn't actually a parseable unit
+# (e.g. gefs tmp2m's "avg. daily C") — known source units for those
+# variables, hardcoded here.
 _KNOWN_UNITS = {
     "sst": "degree_Celsius",
     "uwind10m": "m/s",
     "vwind10m": "m/s",
+    "tmp2m": "degree_Celsius",
 }
+
+
+def _valid_units(units) -> bool:
+    """True if ``units`` is a non-empty, pint-parseable unit string."""
+    if not isinstance(units, str) or not units.strip():
+        return False
+    try:
+        pint_xarray.pint.get_application_registry().parse_units(units)
+        return True
+    except Exception:  # noqa: BLE001 — any parse failure means "not usable"
+        return False
 
 _DEFAULT_VARIABLE = "precip"
 _DEFAULT_LEAD_DAYS = 0
@@ -233,16 +248,21 @@ def fetch(dataset, start_time, end_time, variable, prediction_timedelta, window,
         {"avg": mean_name, "std": std_name, lat_name: "latitude", lon_name: "longitude"}
     )
     # Some mirrors (e.g. ecmwf_ifs) stamp units on the dataset, not per
-    # variable; others (sst, wind components) have no units anywhere at all
-    # -- fall back to the known units for those, hardcoded in _KNOWN_UNITS.
-    fallback_units = clim.attrs.get("units") or _KNOWN_UNITS.get(semantic_name)
+    # variable; others (sst, wind components) have no units anywhere at all;
+    # others (gefs tmp2m) stamp a units string that isn't actually a
+    # parseable unit ("avg. daily C") -- all three fall back to the known
+    # units hardcoded in _KNOWN_UNITS.
+    global_units = clim.attrs.get("units")
+    fallback_units = global_units if _valid_units(global_units) else _KNOWN_UNITS.get(semantic_name)
     for name in (mean_name, std_name):
-        if clim[name].attrs.get("units"):
+        existing = clim[name].attrs.get("units")
+        if _valid_units(existing):
             continue
         if fallback_units is None:
             raise UsageError(
-                f"{name!r} has no units metadata (source has none, per-variable "
-                "or dataset-level, and none hardcoded in _KNOWN_UNITS)."
+                f"{name!r} has no usable units metadata (missing or unparseable "
+                f"value {existing!r}, per-variable or dataset-level, and none "
+                "hardcoded in _KNOWN_UNITS)."
             )
         clim[name].attrs["units"] = fallback_units
     clim = to_standard_units(clim, variables=[mean_name, std_name])
