@@ -60,6 +60,7 @@ variable — pass `--variable sst`.
 | `chirps` | CHIRPS daily precipitation climatology (`--variable precip`) |
 | `ecmwf_ifs` | ECMWF IFS reforecast daily climatology — `precip`, `sst`, `uwind10m`, `vwind10m` |
 | `oisst` | NOAA OISST v2.1 daily sea-surface temperature climatology. Requires `--variable sst`. For live SST observations use `oisst-fetch`, not this skill. |
+| `gefs` | GEFS reforecast daily precipitation climatology (`--variable precip`) |
 
 More datasets are added by mirroring a new Zarr under the same bucket
 convention — no CLI change needed once added.
