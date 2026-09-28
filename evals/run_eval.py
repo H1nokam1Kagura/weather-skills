@@ -21,7 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-
 from weather_skills_core.provenance import load_figure_history, load_history, stamp_zarr
 
 REPO = Path(__file__).resolve().parents[1]
@@ -45,7 +44,9 @@ def seed_fixture(workdir: Path, spec: dict) -> None:
     kind = spec["kind"]
     out = workdir / (spec.get("path") or spec["name"])
     out.parent.mkdir(parents=True, exist_ok=True)
-    opts = {k: v for k, v in spec.items() if k not in ("kind", "path", "name")}
+    # `name` is the VARIABLE name and must reach the builders (it used to be dropped here, so every
+    # fixture variable was silently "precip").
+    opts = {k: v for k, v in spec.items() if k not in ("kind", "path")}
 
     if kind == "daily_rates":
         n_time = opts.get("n_time", 15)
@@ -120,6 +121,15 @@ def score(workdir: Path, expect: dict) -> list[tuple[bool, str]]:
     rows: list[tuple[bool, str]] = []
     skills = _skills_in(workdir)
 
+    if expect.get("expect_cannot"):
+        # Out-of-catalogue task (tier T5): the right behaviour is an explicit refusal and NO new
+        # scientific output. Improvised science would bypass every verifier, so it fails.
+        usage = workdir / "_eval" / "usage.json"
+        status = json.loads(usage.read_text()).get("status") if usage.exists() else None
+        rows.append((status == "cannot", f"expect_cannot: agent status={status!r}"))
+        made = [p for p in workdir.rglob("*.zarr") if "out" in p.relative_to(workdir).parts]
+        rows.append((not made, f"expect_cannot: no outputs (found {len(made)})"))
+
     for skill in expect.get("skills_used") or []:
         rows.append((skill in skills, f"skills_used:{skill} (have {sorted(skills)})"))
     for skill in expect.get("skills_forbidden") or []:
@@ -151,6 +161,14 @@ def score(workdir: Path, expect: dict) -> list[tuple[bool, str]]:
                     allowed = allowed if isinstance(allowed, list) else [allowed]
                     units = ds[var].attrs.get("units") if var in ds.data_vars else None
                     rows.append((units in allowed, f"{path.name}:units:{var} got={units!r}"))
+                for dim, want in (checks.get("dim_sizes") or {}).items():
+                    got = int(ds.sizes.get(dim, -1))
+                    rows.append((got == int(want), f"{path.name}:dim_size:{dim} got={got} want={want}"))
+                for var, (want, tol) in (checks.get("value_mean") or {}).items():
+                    # Oracle-derived numeric check: catches structurally valid but scientifically
+                    # wrong outputs (a mean where a total was asked for, a permuted or unscaled axis).
+                    got = float(ds[var].mean().compute()) if var in ds.data_vars else float("nan")
+                    rows.append((abs(got - want) <= tol, f"{path.name}:value_mean:{var} got={got:.6g} want={want:.6g}±{tol:g}"))
                 if "aggregation_period" in checks:
                     want = checks["aggregation_period"]
                     got = next(
@@ -242,14 +260,16 @@ def run_claude(prompt: str, workdir: Path, timeout_s: int) -> tuple[bool, str]:
 
 # --- runner -------------------------------------------------------------------
 
-def list_scenarios() -> list[Path]:
+def list_scenarios(root: Path | None = None) -> list[Path]:
+    root = root or SCENARIOS
     return sorted(
-        p for p in SCENARIOS.iterdir()
+        p for p in root.rglob("*")
         if p.is_dir() and (p / "expect.json").exists() and (p / "prompt.md").exists()
     )
 
 
-def run_one(scenario_dir: Path, *, agent: str, keep: Path | None) -> int:
+def run_one(scenario_dir: Path, *, agent: str, keep: Path | None, model: str | None = None,
+            reference: str | None = None) -> int:
     sid = scenario_dir.name
     expect = json.loads((scenario_dir / "expect.json").read_text())
     prompt = (scenario_dir / "prompt.md").read_text()
@@ -276,6 +296,12 @@ def run_one(scenario_dir: Path, *, agent: str, keep: Path | None) -> int:
             ok, detail = run_cursor(prompt, workdir, timeout_s)
         elif agent == "claude":
             ok, detail = run_claude(prompt, workdir, timeout_s)
+        elif agent in ("full", "stack"):
+            from llm_agent import run_full_agent, run_stack_agent
+            if not model:
+                return 2
+            ok, detail = (run_full_agent(prompt, workdir, model) if agent == "full"
+                          else run_stack_agent(prompt, workdir, model, reference))
         else:
             return 2
 
@@ -285,7 +311,11 @@ def run_one(scenario_dir: Path, *, agent: str, keep: Path | None) -> int:
         (workdir / "_eval").mkdir(exist_ok=True)
         (workdir / "_eval" / "score.json").write_text(
             json.dumps(
-                {"scenario": sid, "passed": passed, "checks": [{"ok": o, "detail": d} for o, d in rows]},
+                {"scenario": sid, "passed": passed, "agent": agent, "model": model, "reference": reference,
+                 "tier": expect.get("tier"), "family": expect.get("family"),
+                 "usage": (json.loads((workdir / "_eval" / "usage.json").read_text())
+                           if (workdir / "_eval" / "usage.json").exists() else None),
+                 "checks": [{"ok": o, "detail": d} for o, d in rows]},
                 indent=2,
             )
             + "\n"
@@ -302,17 +332,20 @@ def run_one(scenario_dir: Path, *, agent: str, keep: Path | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scenario", action="append", dest="scenarios")
-    p.add_argument("--agent", default="script", choices=["script", "cursor", "claude"])
+    p.add_argument("--agent", default="script", choices=["script", "cursor", "claude", "full", "stack"])
+    p.add_argument("--model", default=os.environ.get("EVAL_MODEL"), help="full: the agent model; stack: the small model")
+    p.add_argument("--reference", default=os.environ.get("EVAL_REFERENCE_MODEL"), help="stack: escalation model")
+    p.add_argument("--scenarios-dir", type=Path, default=None, help="default evals/scenarios; e.g. evals/generated/t1")
     p.add_argument("--workdir", type=Path, default=None)
     p.add_argument("--list", action="store_true")
     args = p.parse_args(argv)
 
     if args.list:
-        for s in list_scenarios():
+        for s in list_scenarios(args.scenarios_dir):
             print(s.name)
         return 0
 
-    dirs = list_scenarios()
+    dirs = list_scenarios(args.scenarios_dir)
     if args.scenarios:
         wanted = set(args.scenarios)
         dirs = [d for d in dirs if d.name in wanted]
@@ -324,7 +357,8 @@ def main(argv: list[str] | None = None) -> int:
         print("no scenarios in evals/scenarios/", file=sys.stderr)
         return 2
 
-    failures = sum(run_one(d, agent=args.agent, keep=args.workdir) for d in dirs)
+    failures = sum(run_one(d, agent=args.agent, keep=args.workdir, model=args.model,
+                           reference=args.reference) for d in dirs)
     if len(dirs) > 1:
         print(f"done: {len(dirs) - failures}/{len(dirs)} passed", file=sys.stderr)
     return 1 if failures else 0
