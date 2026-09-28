@@ -142,8 +142,11 @@ def grid(seed: int):
             fx = {"kind": "cumulative_forecast", "path": "forecast.zarr", "n_step": n, "init": init,
                   "name": rng.choice(names), "fill": round(rng.uniform(0.5, 8.0), 2)}
             spec.append((tier, fam, style, {"fixture": fx}))
-    t3 = [s for s in spec if s[0] == "t1" and s[2] == "formal"]
-    spec += [("t3", fam, "vague", p) for _, fam, _, p in rng.sample(t3, min(260, len(t3)))]
+    # T3 re-asks familiar compositions vaguely. Draw from every t1 style and de-duplicate on the
+    # underlying parameters: the pre-registered floor is >= 250 per tier (formal-only capped it at 180).
+    uniq = {json.dumps([fam, p], sort_keys=True): (fam, p) for tier, fam, _, p in spec if tier == "t1"}
+    t3 = [uniq[k] for k in sorted(uniq)]
+    spec += [("t3", fam, "vague", p) for fam, p in rng.sample(t3, min(260, len(t3)))]
     for i, (tmpl, st) in enumerate(itertools.product(T5_PROMPTS, starts[:7])):
         fx = {"kind": "daily_rates", "path": "rates.zarr", "n_time": 21, "start": st, "name": "precip", "fill": 2.0}
         spec.append(("t5", "out_of_catalogue", f"t5_{i % len(T5_PROMPTS)}", {"fixture": fx, "t5": tmpl}))
