@@ -214,6 +214,17 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --dataset nasa-imerg-analysis-late \
   --start-time 2026-07-21 --end-time 2026-08-19 --bbox 5/34/-5/42 \
   -v precipitation_surface -o /tmp/imerg.zarr
 
+# IMERG with its quality-index companion (precipitation_quality_index_surface,
+# dimensionless -- higher is better; -v precip alone does not pull it in, ask
+# by exact name). --start-time/--end-time is a date/time instant, not a
+# calendar day, on this half-hourly dataset: for a full day, --end-time must
+# be the *next* day (e.g. 2026-09-20 -> 2026-09-21 gives the 48 half-hourly
+# steps of the 20th plus the 21st's own 00:00 instant, 49 rows total).
+uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --dataset nasa-imerg-analysis-late \
+  --start-time 2026-09-20 --end-time 2026-09-21 --bbox 5/34/-5/42 \
+  -v precipitation_surface -v precipitation_quality_index_surface \
+  -o /tmp/imerg_with_quality.zarr
+
 # CHIRPS final only (prefer chirps-fetch for final+prelim merge as precip)
 uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --dataset ucsb-chc-chirps-analysis-final \
   --start-time 2026-01-01 --end-time 2026-02-15 --bbox 5/34/-5/42 \
