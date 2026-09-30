@@ -29,6 +29,7 @@ SCENARIOS = Path(__file__).resolve().parent / "scenarios"
 
 # --- fixtures -----------------------------------------------------------------
 
+
 def _write_zarr(ds: xr.Dataset, path: Path, skill: str = "eval-fixture") -> None:
     if path.exists():
         shutil.rmtree(path)
@@ -57,8 +58,17 @@ def seed_fixture(workdir: Path, spec: dict) -> None:
         lons = opts.get("lons", (36.0, 37.0))
         times = np.arange(np.datetime64(start), np.datetime64(start) + np.timedelta64(n_time, "D"))
         ds = xr.Dataset(
-            {name: (("time", "latitude", "longitude"), np.full((n_time, len(lats), len(lons)), fill))},
-            coords={"time": times.astype("datetime64[ns]"), "latitude": list(lats), "longitude": list(lons)},
+            {
+                name: (
+                    ("time", "latitude", "longitude"),
+                    np.full((n_time, len(lats), len(lons)), fill),
+                )
+            },
+            coords={
+                "time": times.astype("datetime64[ns]"),
+                "latitude": list(lats),
+                "longitude": list(lons),
+            },
         )
         ds[name].attrs.update(units="mm day-1", standard_name="lwe_precipitation_rate")
         ds["latitude"].attrs.update(standard_name="latitude", units="degrees_north", axis="Y")
@@ -99,6 +109,7 @@ def seed_fixture(workdir: Path, spec: dict) -> None:
 
 
 # --- scoring ------------------------------------------------------------------
+
 
 def _skills_in(workdir: Path) -> set[str]:
     skills: set[str] = set()
@@ -163,17 +174,27 @@ def score(workdir: Path, expect: dict) -> list[tuple[bool, str]]:
                     rows.append((units in allowed, f"{path.name}:units:{var} got={units!r}"))
                 for dim, want in (checks.get("dim_sizes") or {}).items():
                     got = int(ds.sizes.get(dim, -1))
-                    rows.append((got == int(want), f"{path.name}:dim_size:{dim} got={got} want={want}"))
+                    rows.append(
+                        (got == int(want), f"{path.name}:dim_size:{dim} got={got} want={want}")
+                    )
                 for var, (want, tol) in (checks.get("value_mean") or {}).items():
                     # Oracle-derived numeric check: catches structurally valid but scientifically
                     # wrong outputs (a mean where a total was asked for, a permuted or unscaled axis).
                     got = float(ds[var].mean().compute()) if var in ds.data_vars else float("nan")
-                    rows.append((abs(got - want) <= tol, f"{path.name}:value_mean:{var} got={got:.6g} want={want:.6g}±{tol:g}"))
+                    rows.append(
+                        (
+                            abs(got - want) <= tol,
+                            f"{path.name}:value_mean:{var} got={got:.6g} want={want:.6g}±{tol:g}",
+                        )
+                    )
                 if "aggregation_period" in checks:
                     want = checks["aggregation_period"]
                     got = next(
-                        (ds[v].attrs.get("aggregation_period") for v in ds.data_vars
-                         if ds[v].attrs.get("aggregation_period")),
+                        (
+                            ds[v].attrs.get("aggregation_period")
+                            for v in ds.data_vars
+                            if ds[v].attrs.get("aggregation_period")
+                        ),
                         None,
                     )
                     rows.append((got == want, f"{path.name}:aggregation_period got={got!r}"))
@@ -182,14 +203,13 @@ def score(workdir: Path, expect: dict) -> list[tuple[bool, str]]:
 
 # --- agents -------------------------------------------------------------------
 
+
 def run_script(scenario_dir: Path, workdir: Path, timeout_s: int) -> tuple[bool, str]:
     golden = scenario_dir / "golden.py"
     if not golden.exists():
         return False, "no golden.py"
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(REPO), str(REPO / "tests"), env.get("PYTHONPATH", "")]
-    )
+    env["PYTHONPATH"] = os.pathsep.join([str(REPO), str(REPO / "tests"), env.get("PYTHONPATH", "")])
     proc = subprocess.run(
         [sys.executable, str(golden), "--workdir", str(workdir)],
         cwd=str(REPO),
@@ -260,16 +280,24 @@ def run_claude(prompt: str, workdir: Path, timeout_s: int) -> tuple[bool, str]:
 
 # --- runner -------------------------------------------------------------------
 
+
 def list_scenarios(root: Path | None = None) -> list[Path]:
     root = root or SCENARIOS
     return sorted(
-        p for p in root.rglob("*")
+        p
+        for p in root.rglob("*")
         if p.is_dir() and (p / "expect.json").exists() and (p / "prompt.md").exists()
     )
 
 
-def run_one(scenario_dir: Path, *, agent: str, keep: Path | None, model: str | None = None,
-            reference: str | None = None) -> int:
+def run_one(
+    scenario_dir: Path,
+    *,
+    agent: str,
+    keep: Path | None,
+    model: str | None = None,
+    reference: str | None = None,
+) -> int:
     sid = scenario_dir.name
     expect = json.loads((scenario_dir / "expect.json").read_text())
     prompt = (scenario_dir / "prompt.md").read_text()
@@ -298,10 +326,14 @@ def run_one(scenario_dir: Path, *, agent: str, keep: Path | None, model: str | N
             ok, detail = run_claude(prompt, workdir, timeout_s)
         elif agent in ("full", "stack"):
             from llm_agent import run_full_agent, run_stack_agent
+
             if not model:
                 return 2
-            ok, detail = (run_full_agent(prompt, workdir, model) if agent == "full"
-                          else run_stack_agent(prompt, workdir, model, reference))
+            ok, detail = (
+                run_full_agent(prompt, workdir, model)
+                if agent == "full"
+                else run_stack_agent(prompt, workdir, model, reference)
+            )
         else:
             return 2
 
@@ -311,11 +343,21 @@ def run_one(scenario_dir: Path, *, agent: str, keep: Path | None, model: str | N
         (workdir / "_eval").mkdir(exist_ok=True)
         (workdir / "_eval" / "score.json").write_text(
             json.dumps(
-                {"scenario": sid, "passed": passed, "agent": agent, "model": model, "reference": reference,
-                 "tier": expect.get("tier"), "family": expect.get("family"),
-                 "usage": (json.loads((workdir / "_eval" / "usage.json").read_text())
-                           if (workdir / "_eval" / "usage.json").exists() else None),
-                 "checks": [{"ok": o, "detail": d} for o, d in rows]},
+                {
+                    "scenario": sid,
+                    "passed": passed,
+                    "agent": agent,
+                    "model": model,
+                    "reference": reference,
+                    "tier": expect.get("tier"),
+                    "family": expect.get("family"),
+                    "usage": (
+                        json.loads((workdir / "_eval" / "usage.json").read_text())
+                        if (workdir / "_eval" / "usage.json").exists()
+                        else None
+                    ),
+                    "checks": [{"ok": o, "detail": d} for o, d in rows],
+                },
                 indent=2,
             )
             + "\n"
@@ -332,10 +374,25 @@ def run_one(scenario_dir: Path, *, agent: str, keep: Path | None, model: str | N
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scenario", action="append", dest="scenarios")
-    p.add_argument("--agent", default="script", choices=["script", "cursor", "claude", "full", "stack"])
-    p.add_argument("--model", default=os.environ.get("EVAL_MODEL"), help="full: the agent model; stack: the small model")
-    p.add_argument("--reference", default=os.environ.get("EVAL_REFERENCE_MODEL"), help="stack: escalation model")
-    p.add_argument("--scenarios-dir", type=Path, default=None, help="default evals/scenarios; e.g. evals/generated/t1")
+    p.add_argument(
+        "--agent", default="script", choices=["script", "cursor", "claude", "full", "stack"]
+    )
+    p.add_argument(
+        "--model",
+        default=os.environ.get("EVAL_MODEL"),
+        help="full: the agent model; stack: the small model",
+    )
+    p.add_argument(
+        "--reference",
+        default=os.environ.get("EVAL_REFERENCE_MODEL"),
+        help="stack: escalation model",
+    )
+    p.add_argument(
+        "--scenarios-dir",
+        type=Path,
+        default=None,
+        help="default evals/scenarios; e.g. evals/generated/t1",
+    )
     p.add_argument("--workdir", type=Path, default=None)
     p.add_argument("--list", action="store_true")
     args = p.parse_args(argv)
@@ -357,8 +414,10 @@ def main(argv: list[str] | None = None) -> int:
         print("no scenarios in evals/scenarios/", file=sys.stderr)
         return 2
 
-    failures = sum(run_one(d, agent=args.agent, keep=args.workdir, model=args.model,
-                           reference=args.reference) for d in dirs)
+    failures = sum(
+        run_one(d, agent=args.agent, keep=args.workdir, model=args.model, reference=args.reference)
+        for d in dirs
+    )
     if len(dirs) > 1:
         print(f"done: {len(dirs) - failures}/{len(dirs)} passed", file=sys.stderr)
     return 1 if failures else 0

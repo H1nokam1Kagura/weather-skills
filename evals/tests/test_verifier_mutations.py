@@ -18,8 +18,17 @@ from gen_scenarios import OUT, chain_for, run_chain  # noqa: E402
 from run_eval import score, seed_fixture  # noqa: E402
 from weather_skills_core.provenance import HISTORY_ATTR  # noqa: E402
 
-PARAMS = {"fixture": {"kind": "daily_rates", "path": "rates.zarr", "n_time": 22, "start": "2026-08-01",
-                      "name": "precip", "fill": 3.0}, "end": "2026-08-22"}
+PARAMS = {
+    "fixture": {
+        "kind": "daily_rates",
+        "path": "rates.zarr",
+        "n_time": 22,
+        "start": "2026-08-01",
+        "name": "precip",
+        "fill": 3.0,
+    },
+    "end": "2026-08-22",
+}
 
 
 @pytest.fixture(scope="module")
@@ -30,11 +39,21 @@ def oracle(tmp_path_factory):
     run_chain(w, chain)
     with xr.open_zarr(w / OUT, consolidated=True) as ds:
         mean = float(ds["precip"].mean().compute())
-        expect = {"skills_used": sorted({s for s, _ in chain}),
-                  "outputs": [{"glob": OUT, "min_count": 1, "checks": {
-                      "has_history": True, "dim_sizes": {"time": int(ds.sizes["time"])},
-                      "var_units": {"precip": [ds["precip"].attrs.get("units")]},
-                      "value_mean": {"precip": [mean, 1e-4 * abs(mean)]}}}]}
+        expect = {
+            "skills_used": sorted({s for s, _ in chain}),
+            "outputs": [
+                {
+                    "glob": OUT,
+                    "min_count": 1,
+                    "checks": {
+                        "has_history": True,
+                        "dim_sizes": {"time": int(ds.sizes["time"])},
+                        "var_units": {"precip": [ds["precip"].attrs.get("units")]},
+                        "value_mean": {"precip": [mean, 1e-4 * abs(mean)]},
+                    },
+                }
+            ],
+        }
     return w, expect
 
 
@@ -69,13 +88,20 @@ def test_units_changed_values_unchanged(oracle, tmp_path):
 
 def test_mean_reported_as_total(oracle, tmp_path):
     w = _copy(oracle, tmp_path)
-    _rewrite(w / OUT, lambda ds: ds.assign(precip=(ds["precip"] / 7).assign_attrs(ds["precip"].attrs)))
+    _rewrite(
+        w / OUT, lambda ds: ds.assign(precip=(ds["precip"] / 7).assign_attrs(ds["precip"].attrs))
+    )
     assert not _passes(w, oracle[1])
 
 
 def test_bin_dropped(oracle, tmp_path):
     w = _copy(oracle, tmp_path)
-    _rewrite(w / OUT, lambda ds: ds.isel(time=slice(0, -1)) if ds.sizes["time"] > 1 else ds.isel(time=slice(0, 0)))
+    _rewrite(
+        w / OUT,
+        lambda ds: (
+            ds.isel(time=slice(0, -1)) if ds.sizes["time"] > 1 else ds.isel(time=slice(0, 0))
+        ),
+    )
     assert not _passes(w, oracle[1])
 
 
@@ -87,10 +113,13 @@ def test_provenance_stripped(oracle, tmp_path):
         for v in ds.variables.values():
             v.attrs.pop(HISTORY_ATTR, None)
         return ds
+
     _rewrite(w / OUT, strip)
     for p in (w / "out").glob("*.zarr"):
         if p.name != Path(OUT).name:
-            shutil.rmtree(p)          # also remove intermediates, so skills_used cannot be satisfied by them
+            shutil.rmtree(
+                p
+            )  # also remove intermediates, so skills_used cannot be satisfied by them
     assert not _passes(w, oracle[1])
 
 

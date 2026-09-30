@@ -1,5 +1,6 @@
 """Keep a realistic dataset resident during the benchmark (~0.9 GB: a year of 4 daily variables on a
 0.25-degree, Africa-sized grid). Raise N_VARS to probe the memory ceiling."""
+
 import time
 
 import numpy as np
