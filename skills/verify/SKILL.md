@@ -28,7 +28,8 @@ dimension, e.g. `--reduce time` for a per-cell score over the period.
 
 **Ensembles.** `crps` and `brier` use every member. The deterministic
 metrics (`hits`, `bias`, `mae`, `rmse`) score the **ensemble mean**; the
-output records this in `verify_ensemble_reduction`. `crps` and `brier`
+metric variable records this in its `verify_ensemble_reduction` attribute
+(`ds["mae"].attrs`, not the dataset's `ds.attrs`). `crps` and `brier`
 refuse a deterministic forecast, and `brier` refuses without an explicit
 `--threshold`.
 
