@@ -201,7 +201,7 @@ def _pair_sum(x):
 
 
 def test_crps_fair_matches_the_weatherbench2_estimator(tmp_path, verify_fn):
-    """Default estimator: spread term divided by M(M-1) (WeatherBench 2 CRPSSpread)."""
+    """Fair estimator (opt-in): spread term divided by M(M-1) (WeatherBench 2 CRPSSpread)."""
     x = RNG.gamma(2.0, 3.0, SHAPE)
     y = RNG.gamma(2.0, 3.0, SHAPE[1:])
     m = SHAPE[0]
