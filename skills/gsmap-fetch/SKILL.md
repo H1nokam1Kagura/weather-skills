@@ -5,6 +5,7 @@ license: MIT
 compatibility: Requires Python 3.12 and uv. Requires Earth Engine access -- see "Authentication" below.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
 metadata:
+  version: "0.0.1"
   catalog-group: fetchers
   variables:
     - precip
@@ -39,6 +40,7 @@ value — check the real coverage yourself:
 
 ```python
 import ee
+
 ee.Initialize()
 coll = ee.ImageCollection("JAXA/GPM_L3/GSMaP/v6/operational")
 print(coll.aggregate_min("system:time_start").getInfo())
