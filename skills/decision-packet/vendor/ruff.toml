@@ -1,0 +1,3 @@
+# build_review_ui.py is vendored byte-for-byte (see SOURCE.json) and must stay identical to its
+# source so a fix there can be re-vendored by copying; keep ruff off it.
+exclude = ["build_review_ui.py"]

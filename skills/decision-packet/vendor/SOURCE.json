@@ -1,0 +1,14 @@
+{
+  "vendored_on": "2026-10-04",
+  "file": "build_review_ui.py",
+  "copied": "byte-for-byte (cp), not retyped: the template uses invisible sentinel characters in highlight()",
+  "source_path": "C:/Users/neilha/invest-mcp-stack/scripts/hitl/build_review_ui.py",
+  "source_checkout_head": "70f254e678684fe203671fe3d22587542769c12d",
+  "source_last_commit": "21c206ee7fed908e5ea864e7a3e2818ca461e512",
+  "git_blob": "14b33065d74c674106858e5bad154994a720e1c1",
+  "sha256_committed_lf": "1dc18d435e17fc840e247de9072bb327a7e58f23e0a619ab73b032f37c9432e3",
+  "sha256_windows_crlf_worktree": "7119dc174dc56ac4d67ca9b1aa8ce309ca846db13b616763028cf6d4ded9e99e",
+  "identity_check": "git blob ids are line-ending independent: `git hash-object` of this file must equal git_blob",
+  "design_reference": "C:/Users/neilha/.agent-coordination/reviews/0178f5b37b8040acab7fa29f10c7ea04/adjudication/2026-10-01-gf-pc-conflicts/README.md",
+  "do_not_edit": "Keep it identical to the source so a fix there can be re-vendored by copying. Plugin-specific behaviour lives in ../scripts/decision_packet.py, which loads this file by path."
+}
