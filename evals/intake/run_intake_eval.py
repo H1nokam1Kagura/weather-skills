@@ -5,11 +5,11 @@
     uv run python evals/intake/run_intake_eval.py --reps 3                  # full: 60 units x 3
     uv run python evals/intake/run_intake_eval.py --backend replay --replay RUN/records.jsonl
 
-Population: `requests_sample.jsonl` -- NOT SHIPPED. The first build drew it from the
-clm-weather-skills H7 v2 compile benchmark, which is that research's FROZEN TEST SET; it was
-removed (2026-10-04) and must not be re-derived from it. Supply a sample from a source the clm
-owner clears (dev split or freshly generated requests), one JSON object per line with
-`request`, `style`, `clarity` ("clear" | "underdetermined") and the truth slots.
+Population: `requests_sample.jsonl` (gitignored; regenerate with build_sample.py), drawn from
+the population the clm owner CLEARED: clm runs/d4_distill/train.jsonl (D4 training requests),
+clarity from the gpt-oss-120b fidelity audit. NEVER the H7 v2 compile benchmark: that is the
+frozen TEST set (a first build used it; removed 2026-10-04, recorded as clm D57). See
+build_sample.py for the full do-not-use list.
 
 Per unit-run outcome (an ask is never scored as exact or as silent-wrong; clm F1 rule 4):
   asked         the card carries a question for the person (status needs_answers)
@@ -323,8 +323,13 @@ def dry_run(units: list[dict]) -> int:
     problems = []
     if len(units) < 50:
         problems.append(f"only {len(units)} units")
-    if {u["style"] for u in units} != set(STYLES):
-        problems.append("not every phrasing style is present")
+    present = {u["style"] for u in units}
+    if not present <= set(STYLES):
+        problems.append(f"unknown phrasing style(s) {sorted(present - set(STYLES))}")
+    missing_styles = sorted(set(STYLES) - present)
+    if missing_styles:
+        # The cleared D4-train population is GLM-written: no handwritten_claude style.
+        print(f"note: phrasing style(s) absent from this population: {missing_styles}")
     if not any(u["clarity"] == "underdetermined" for u in units):
         problems.append("no underdetermined (ambiguous) units")
     for u in units:
