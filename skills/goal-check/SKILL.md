@@ -3,7 +3,7 @@ name: goal-check
 description: Validate a typed analysis goal (the JSON the human-boundary agent compiles from a plain-language request) against the goal schema and the deterministic request rules, fill every rule-decidable default with its source, write the plain-language read-back, and — given 2-3 independently compiled goals for the same request — report slot-level disagreement. Exit 0 resolved, 1 invalid, 3 needs a human answer. Use before planning any pipeline from a user request, and again after every human reply that changes the goal. No model call inside; it never asks the human anything itself.
 license: MIT
 compatibility: Requires Python 3.12 and uv. Reads goal JSON files; writes nothing and makes no network call. The optional sampling recipe below calls the `claude` CLI.
-allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py *)
+allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py *), Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/sample_goals.py *)
 metadata:
   version: "0.0.1"
   catalog-group: agent-tooling
@@ -79,20 +79,22 @@ its own errors (E2/D39, H25b). Independence matters: three passes in one context
 other and anchor, so they are not samples. The recipe uses three separate headless model calls
 with no tools and this plugin's compile prompt:
 
-```bash
-P="$(cat ${CLAUDE_SKILL_DIR}/references/compile_prompt_rhiza.txt)"
-for k in 1 2 3; do
-  claude -p --model sonnet --tools "" --strict-mcp-config --setting-sources "" \
-    --no-session-persistence --system-prompt "$P" "$REQUEST" > "goal_$k.json" &
-done; wait
-uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py --goal goal_1.json --goal goal_2.json \
-  --goal goal_3.json --request "$REQUEST"
+```
+uv run ${CLAUDE_SKILL_DIR}/scripts/sample_goals.py (--request TEXT | --request-file request.txt) [--n 3] [--model sonnet] [--timeout 180] [--allow-degraded]
 ```
 
-About 9 s per call (measured once, 2026-10-04); the three run in parallel. If the `claude` CLI
-is not callable from the session, run one compile, pass it alone, and say in the goal card that
-the disagreement check did not run: a single sample can still fail on a missing required slot,
-but nothing else triggers a question.
+One command runs the three compiles in parallel (`claude -p`, same prompt file, no tools, no
+MCP, no settings), then this skill's checks over all three, and prints the goal-check report plus
+`sampling`, `samples_ok`, `compile_failures` and `compile_prompt_sha256`. It is one literal
+command so an unattended agent is not stopped by a permission prompt per compile. Before it
+existed, the agent fell back to a single in-context compile without saying so loudly enough.
+
+Exit codes add two to goal-check's 0/1/3:
+- **4 `unavailable`**: no `claude` CLI, or every compile failed. Nothing was checked.
+- **5 `degraded`**: some compiles failed. The report is complete but rests on fewer
+  samples. Pass `--allow-degraded` to get goal-check's own code instead.
+
+A degraded or single reading must be stated on the goal card, never presented as independent.
 
 ## Output (JSON)
 

@@ -22,14 +22,18 @@ at 4.4% asks).
 
 ## 1. Intake: the opening request → GOAL CARD
 
-1. **Three independent readings.** Compile the request three times in three separate headless
-   calls, exactly as in the `goal-check` skill's sampling recipe (same prompt file, no tools,
-   run in parallel). Write the request to a file first and pass it as one argument; never
-   paraphrase it. Do not substitute three reasoning passes in your own context: they see each
-   other and anchor, so they are not independent. If the `claude` CLI cannot be called, compile
-   once yourself with the same prompt, set `"sampling": "single"` in the card, and say in the
-   read-back that the disagreement check did not run.
-2. **Check.** Run `goal-check` with all three goals and `--request-file`.
+1. **Three independent readings, one command.** Write the request verbatim to a file (never
+   paraphrase it), then run the `goal-check` skill's `sample_goals.py --request-file <file>`.
+   It runs the three headless compiles in parallel and checks them in one step. Use that one
+   command, not three `claude -p` calls of your own: separate calls get stopped by permission
+   prompts when you run unattended. Do not substitute three reasoning passes in your own
+   context either; they see each other and anchor, so they are not independent. Copy its
+   `sampling` into the card. If it reports `degraded` (exit 5) or `unavailable` (exit 4), say
+   so in the read-back, set `"sampling"` to that value, and never present the result as
+   independent. Only on `unavailable` may you compile once yourself, marked `"single"`.
+2. **Check.** `sample_goals.py` already ran `goal-check` over all three readings; its exit code
+   is goal-check's (0 / 1 / 3) when sampling is independent. To re-check a goal after a human
+   reply, run `goal_check.py` with `--request-file`.
    - exit **0** → status `ready_for_approval`.
    - exit **1** (invalid) → the readings themselves are wrong: redraw all three once. If it is
      still 1, the request is outside what this assistant supports; say so plainly, naming the
@@ -130,7 +134,7 @@ Status: ready_for_approval | needs_answers | blocked_invalid | blocked_packet
 
 ### Typed goal (for the forecaster)
 ```json
-{"card": "rhiza-goal-card/1", "status": "...", "sampling": "independent|single",
+{"card": "rhiza-goal-card/1", "status": "...", "sampling": "independent|degraded|unavailable|single",
  "samples": 3, "goal_check_exit": 0, "goal": {...goal-check's filled goal...},
  "defaults": [...goal-check's defaults...],
  "questions": [...ids of goal-slot question packets ONLY, e.g. "goal-period"; [] when none...],
