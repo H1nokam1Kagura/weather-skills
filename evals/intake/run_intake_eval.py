@@ -325,6 +325,61 @@ def classify_failure(text: str) -> str:
     return "other"
 
 
+def nested_from_sampler_reports(transcript: str | None) -> list[dict]:
+    """Nested-compile records reconstructed from goal-check sample_goals.py reports found in
+    tool_result blocks of a stream-json transcript. Only the LAST report counts (a redraw replaces
+    the first). Each compile becomes a record in the shim's shape, tagged with its source."""
+    last = None
+    dec = json.JSONDecoder()
+    for line in (transcript or "").splitlines():
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = o.get("message")
+        if not isinstance(msg, dict) or not isinstance(msg.get("content"), list):
+            continue
+        for block in msg["content"]:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            content = block.get("content")
+            if isinstance(content, list):
+                content = "".join(c.get("text", "") for c in content if isinstance(c, dict))
+            text = str(content or "")
+            if '"compiles"' not in text or "compile_prompt_sha256_normalised" not in text:
+                continue
+            for i, ch in enumerate(text):
+                if ch != "{":
+                    continue
+                try:
+                    rep, _ = dec.raw_decode(text[i:])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rep, dict) and isinstance(rep.get("compiles"), list):
+                    last = rep
+                    break
+    if last is None:
+        return []
+    sha = last.get("compile_prompt_sha256_normalised")
+    return [
+        {
+            "source": "sample_goals_report",
+            "rc": 0 if c.get("ok") else 1,
+            "is_error": not c.get("ok"),
+            "parsed_goal": bool(c.get("parsed_goal")),
+            "system_prompt_sha256": sha,
+            "models": c.get("models") or [],
+            "model_arg": last.get("compile_model"),
+            "cost_usd": c.get("cost_usd"),
+            "session_id": c.get("session_id"),
+            "stderr_head": c.get("error") or "",
+            "goal": c.get("goal"),
+        }
+        for c in last["compiles"]
+        if isinstance(c, dict)
+    ]
+
+
 def nested_summary(nested: list[dict] | None) -> dict:
     nested = nested or []
     compiles = [n for n in nested if n.get("system_prompt_sha256")]
@@ -658,6 +713,11 @@ def backend_agent(unit: dict, ctx: Ctx, tag: str) -> dict:
                     "system_prompt_sha256": "unreadable-log",
                 }
             )
+    if not raw["nested"]:
+        # The PATH shim can miss calls made from inside a uv-run Python on Windows. The sampler's
+        # own per-compile report is the second witness: it is read from a TOOL RESULT in the
+        # transcript (the script's captured stdout), never from the agent's card or prose.
+        raw["nested"] = nested_from_sampler_reports(out)
     shutil.copytree(work, keep, dirs_exist_ok=True)
     (keep / "_transcript.jsonl").write_text(out or "", encoding="utf-8")
     (keep / "_stderr.txt").write_text(err or "", encoding="utf-8")

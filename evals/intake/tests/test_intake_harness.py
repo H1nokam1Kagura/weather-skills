@@ -667,3 +667,43 @@ def test_staged_plugin_path_does_not_trip_answer_key_guard(tmp_path):
         f"uv run {ctx.plugin_dir.as_posix()}/skills/goal-check/scripts/goal_check.py --goal g.json"
     )
     assert H.answer_key_hits([{"full": json.dumps({"command": cmd})}]) == []
+
+
+def test_nested_from_sampler_report_in_tool_result_only():
+    import json as _j
+
+    import run_intake_eval as R
+
+    rep = {
+        "sampling": "independent",
+        "compile_model": "sonnet",
+        "compile_prompt_sha256_normalised": R.COMPILE_SHA,
+        "compiles": [
+            {
+                "ok": True,
+                "session_id": f"s{i}",
+                "cost_usd": 0.01,
+                "models": ["m"],
+                "goal": {"task": "map"},
+                "parsed_goal": True,
+            }
+            for i in range(3)
+        ],
+    }
+    tool_result = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": _j.dumps(rep)}],
+        },
+    }
+    # The same JSON written by the agent in its own prose must NOT count.
+    prose = {
+        "type": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": _j.dumps(rep)}]},
+    }
+    only_prose = R.nested_from_sampler_reports(_j.dumps(prose))
+    assert only_prose == []
+    recs = R.nested_from_sampler_reports(_j.dumps(tool_result))
+    s = R.nested_summary(recs)
+    assert s["n_compiles"] == 3 and s["n_ok"] == 3 and s["prompt_ok"] is True

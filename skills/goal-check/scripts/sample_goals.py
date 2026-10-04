@@ -71,6 +71,8 @@ def _compile(claude: str, model: str, prompt: str, request: str, timeout: int) -
         "--setting-sources",
         "",
         "--no-session-persistence",
+        "--output-format",
+        "json",
         "--system-prompt",
         prompt,
         request,
@@ -87,10 +89,30 @@ def _compile(claude: str, model: str, prompt: str, request: str, timeout: int) -
             "error": f"exit {r.returncode}: {r.stderr.strip()[-300:]}",
             "goal": None,
         }
-    goal = _extract_json(r.stdout)
+    try:
+        env = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        env = {"result": r.stdout}
+    if not isinstance(env, dict):
+        env = {"result": r.stdout}
+    meta = {"session_id": env.get("session_id"), "cost_usd": env.get("total_cost_usd")}
+    if env.get("is_error"):
+        return {
+            "ok": False,
+            "error": f"is_error: {str(env.get('result'))[:300]}",
+            "goal": None,
+            **meta,
+        }
+    goal = _extract_json(str(env.get("result") or ""))
     # An unparsable reply is still a completed compile: goal-check scores it as an invalid sample
     # (redraw), which is visible, so it does not degrade the sampling.
-    return {"ok": True, "error": None, "goal": goal}
+    return {
+        "ok": True,
+        "error": None,
+        "goal": goal,
+        **meta,
+        "models": sorted(env.get("modelUsage") or {}),
+    }
 
 
 @weather_skill(name="goal-check", version=_SKILL_VERSION, output=False)
@@ -167,6 +189,16 @@ def sample_goals(request, request_file, n, model, timeout, allow_degraded, **kwa
             "compile_failures": failures,
             "compile_model": model,
             "compile_prompt_sha256": prompt_sha,
+            "compile_prompt_sha256_normalised": hashlib.sha256(
+                prompt.replace("\r\n", "\n").rstrip("\n").encode("utf-8")
+            ).hexdigest(),
+            # Per-compile evidence from each call's own JSON envelope, so a harness can verify
+            # the compiles happened without trusting the agent's card.
+            "compiles": [
+                {k: r.get(k) for k in ("ok", "error", "session_id", "cost_usd", "models", "goal")}
+                | {"parsed_goal": r.get("goal") is not None}
+                for r in runs
+            ],
         }
     )
     code = rep["exit_code"]

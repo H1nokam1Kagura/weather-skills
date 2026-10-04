@@ -90,3 +90,11 @@ def test_unparsable_reply_is_an_invalid_sample_not_a_degradation(sg, monkeypatch
 def test_extract_json_finds_object_in_chatter(sg):
     assert sg._extract_json('Sure! {"task": "map"} done') == {"task": "map"}
     assert sg._extract_json("no json here") is None
+
+
+def test_report_carries_per_compile_evidence(sg, monkeypatch, capsys):
+    rec = {**ok(GOAL), "session_id": "s1", "cost_usd": 0.01, "models": ["claude-sonnet-5-5"]}
+    _fake(monkeypatch, sg, [rec, rec, rec])
+    code, rep = _run(sg, capsys)
+    assert len(rep["compiles"]) == 3 and rep["compiles"][0]["session_id"] == "s1"
+    assert rep["compiles"][0]["goal"] == GOAL and rep["compile_prompt_sha256_normalised"]

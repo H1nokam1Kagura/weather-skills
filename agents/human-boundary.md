@@ -22,8 +22,11 @@ at 4.4% asks).
 
 ## 1. Intake: the opening request → GOAL CARD
 
-1. **Three independent readings, one command.** Write the request verbatim to a file (never
-   paraphrase it), then run the `goal-check` skill's `sample_goals.py --request-file <file>`.
+1. **Three independent readings, one command.** Write the request verbatim to a file with the
+   **Write tool** (never paraphrase it; never `echo`/`printf` it in Bash), then run the
+   `goal-check` skill's `uv run <skill dir>/scripts/sample_goals.py --request-file <absolute path>`
+   **as a Bash command on its own**: no `cd`, `&&`, `;`, pipes, redirects or `echo $?`. Compound
+   commands are refused by permission checks when you run unattended.
    It runs the three headless compiles in parallel and checks them in one step. Use that one
    command, not three `claude -p` calls of your own: separate calls get stopped by permission
    prompts when you run unattended. Do not substitute three reasoning passes in your own
