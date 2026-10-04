@@ -1,0 +1,34 @@
+id: bbox-west-east-swapped
+defect_class: wrong_bbox_order
+kind: plan
+skills: [resolve-region, chirps-fetch, clip-region, summarize-dim]
+task: |
+  Area-mean daily rainfall (mm/day) over the Kenya box for 2026-03-01..2026-03-31 from
+  CHIRPS, one value per day. The box is the bbox resolve-region prints for KEN, used
+  as-is; the country polygon is not wanted.
+context: |
+  resolve-region KEN printed: 5.506/33.894/-4.677/41.855
+  CHIRPS for Africa is already on disk as chirps_africa_mar.zarr
+  (precip, time: 31, latitude 0.05 deg, longitude 0.05 deg, mm day-1).
+premise:
+  - file: skills/clip-region/SKILL.md
+    quote: "`--bbox` — `N/W/S/E` in decimal degrees."
+  - file: skills/resolve-region/SKILL.md
+    quote: "script prints a `N/W/S/E` bbox suitable for the `--bbox` flag of the other"
+  - why: >-
+      The plan passes N/E/S/W. With west > east the box is read as crossing the antimeridian,
+      so clip-region keeps everything OUTSIDE 33.9-41.9 E (verified: a synthetic grid clipped
+      with 5/42/-5/34 returns only longitudes 30 and 46). It runs without error and the area
+      mean is of the wrong region.
+defect:
+  submission: |
+    1. clip-region -i chirps_africa_mar.zarr -o chirps_kenya.zarr --bbox 5.506/41.855/-4.677/33.894
+    2. summarize-dim -i chirps_kenya.zarr -o kenya_daily_mean.zarr --dim latitude --dim longitude --method mean --lat-weighted
+  expected_verdict: REJECT
+  expected_step: 1
+  match_any: ["N/W/S/E", "order", "swap", "west", "east", "antimeridian"]
+clean:
+  submission: |
+    1. clip-region -i chirps_africa_mar.zarr -o chirps_kenya.zarr --bbox 5.506/33.894/-4.677/41.855
+    2. summarize-dim -i chirps_kenya.zarr -o kenya_daily_mean.zarr --dim latitude --dim longitude --method mean --lat-weighted
+  expected_verdict: APPROVE

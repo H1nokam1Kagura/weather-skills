@@ -1,0 +1,42 @@
+id: select-before-convert-to-totals
+defect_class: select_before_convert_to_totals
+kind: plan
+skills: [dynamical-fetch, aggregate-temporal, select, convert-to-totals]
+task: |
+  Produce a Zarr, ready for mapping, of the week-3 (lead days 14-20) rainfall total in mm
+  over the Kenya box from the ECMWF 46-day forecast initialised 2026-09-28. An incomplete week
+  must not be published.
+context: |
+  The 2026-09-28 issue is missing lead days 16 and 17 (all-NaN, not yet published), so
+  week 3 has 5 of its 7 days.
+  The area of interest is the Kenya box itself (the bbox resolve-region prints for KEN, used as-is; the country polygon is not wanted): 5.506/33.894/-4.677/41.855.
+premise:
+  - file: skills/convert-to-totals/SKILL.md
+    quote: "In that case conversion uses the stamped `aggregation_period` alone; `--min-coverage` and the overlap gate do not apply."
+  - file: skills/convert-to-totals/SKILL.md
+    quote: "`aggregate-temporal` keeps incomplete bins and only stamps coverage; this flag is what filters them."
+  - why: >-
+      Selecting the single week before convert-to-totals collapses the step axis, which
+      switches off --min-coverage, so the 5-of-7-day week is multiplied by 7 days and
+      published as a total. Converting the full series first drops it at the default
+      --min-coverage 1.0. Source: weather-skills team note (convert-to-totals
+      select-before-convert hazard).
+defect:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-28 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. aggregate-temporal -i fc.zarr -o fc_weekly.zarr --period weekly --method mean
+    3. select -i fc_weekly.zarr -o fc_week3.zarr --dim step --value 14D
+    4. convert-to-totals -i fc_week3.zarr -o fc_week3_mm.zarr
+  expected_verdict: REJECT
+  expected_step: 3
+  match_any: ["coverage", "min-coverage", "incomplete", "select.*before", "convert.*first"]
+clean:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-28 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. aggregate-temporal -i fc.zarr -o fc_weekly.zarr --period weekly --method mean
+    3. convert-to-totals -i fc_weekly.zarr -o fc_weekly_mm.zarr
+    4. select -i fc_weekly_mm.zarr -o fc_week3_mm.zarr --dim step --value 14D
+  note: >-
+    With week 3 incomplete, step 3 drops it at the default --min-coverage 1.0 and step 4
+    then errors (value absent), so nothing incomplete is published: the intended outcome.
+  expected_verdict: APPROVE
