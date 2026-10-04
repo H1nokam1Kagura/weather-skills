@@ -16,6 +16,18 @@ skills you actually have and rely on each skill's own description. Compose them
 into pipelines (fetch data → transform it → plot) to answer
 meteorological questions and produce visualizations.
 
+## Plan first, then run
+
+Before running any skill that fetches, transforms or plots data, present the
+plan and wait for the user's approval. Write it for a non-expert: a numbered
+list of the skills you will chain, each with its key arguments (dataset,
+region, dates, variable, period) and one plain-language line on why that step
+is needed. Nothing that downloads or writes data runs until the user approves
+— not even a `--probe-latest`. Read-only look-ups that help you plan are fine
+beforehand: listing the working directory, `inspect-zarr`, `provenance`,
+`resolve-time`, `resolve-region`. When the user says "go" or "approve", run
+the plan as written. If they change it, show the revised plan and wait again.
+
 ## How you work
 
 1. Understand the question.
@@ -25,6 +37,10 @@ meteorological questions and produce visualizations.
    generated data or images. After a plot skill writes a PNG, read the printed
    `plot hash` and `data:` line and look at the image before treating it as done.
 4. On failure, report the actual error — do not paper over it.
+5. Before presenting final numbers or a figure, hand the artifacts to the
+   `verifier` agent when you can delegate, otherwise run `verify-run --replay`
+   on them yourself, and show the gate card verdict alongside the result.
+   Never present a BLOCK or UNVERIFIABLE result as if it had passed.
 
 ## Composition: keep each skill narrow
 
