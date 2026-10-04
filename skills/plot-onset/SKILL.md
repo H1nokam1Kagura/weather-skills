@@ -1,10 +1,11 @@
 ---
 name: plot-onset
-description: Render a rainy-season onset map PNG showing ensemble-mean onset date AND per-cell member agreement in one figure -- cells where few members found an onset are faded, and the percentage of members is drawn over the map (per-cell text on a coarse grid, contour lines on a fine one). Use this for any onset map instead of plot, since a plain mean onset map silently hides how many members it rests on. Takes onset-date's output directly; it derives the day-of-year, mean, and member coverage itself.
+description: "Render a rainy-season onset map PNG showing ensemble-mean onset date AND per-cell member agreement in one figure -- cells where few members found an onset are faded, and the percentage of members is drawn over the map (per-cell text on a coarse grid, contour lines on a fine one). Use this for any onset map instead of plot, since a plain mean onset map silently hides how many members it rests on. Takes onset-date's output directly; it derives the day-of-year, mean, and member coverage itself."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/plot_onset.py *)
 metadata:
+  version: "0.1.0"
   catalog-group: figure
 ---
 

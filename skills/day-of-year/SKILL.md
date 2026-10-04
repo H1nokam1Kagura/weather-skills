@@ -1,10 +1,11 @@
 ---
 name: day-of-year
-description: Extract calendar day-of-year (1-366) from a datetime64 data variable, replacing it with an integer that can be averaged and thresholded -- a raw date/duration cannot. Use downstream of onset-date (or any other date-producing skill) before summarize-dim or exceedance-probability, since averaging a raw datetime64 value is not meaningful. NOT needed to map an onset result: plot-onset takes onset-date's output directly and derives this itself.
+description: "Extract calendar day-of-year (1-366) from a datetime64 data variable, replacing it with an integer that can be averaged and thresholded -- a raw date/duration cannot. Use downstream of onset-date (or any other date-producing skill) before summarize-dim or exceedance-probability, since averaging a raw datetime64 value is not meaningful. NOT needed to map an onset result: plot-onset takes onset-date's output directly and derives this itself."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/day_of_year.py *)
 metadata:
+  version: "0.1.0"
   catalog-group: transforms
 ---
 
@@ -52,8 +53,18 @@ Use it when an onset result needs to become a plain number:
 ```
 uv run ${CLAUDE_SKILL_DIR}/scripts/day_of_year.py \
     --input <in.zarr> --output <out.zarr> \
-    [--variable VAR ...]
+    [--variable VAR ...] [--since YYYY-MM-DD]
 ```
+
+**New Year.** Day-of-year wraps at 1 January, so a single season that straddles
+it (a Nov–Feb onset over southern Africa, say) can't be averaged as
+day-of-year. 28 Dec (363) and 3 Jan (3) average to 183. When the selected
+dates span two calendar years within one season (range under a year), the
+skill exits non-zero and asks for `--since`. With `--since`, it writes whole
+days since that date (`VAR_days_since`), which averages correctly; use the
+forecast's first day. A multi-year stack of onsets (range of a year or more,
+e.g. one onset per season over 1981–2020) is allowed: that is a climatology,
+and day-of-year is the intended unit. Leap years shift dates after 28 Feb by one.
 
 ### Arguments
 
@@ -66,6 +77,9 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/day_of_year.py \
   computes over every `datetime64`-typed data variable; if none exist, exits
   non-zero. Unselected or untouched data variables pass through unchanged (a
   stderr note lists them).
+- `--since YYYY-MM-DD` — write whole days since this date (`VAR_days_since`,
+  may be negative) instead of day-of-year. Required for a season that crosses
+  1 January.
 
 ### Output
 

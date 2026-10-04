@@ -107,6 +107,12 @@ Prefer small steps over stuffing every filter into one call:
   `S2S precip`), not a sentence. Colorbar text (`--cbar-label` / `--label`)
   is the variable and units (`Total precipitation [mm]`, `SST anomaly [°C]`),
   not a valid-time or init date — panel titles already show dates.
+- **Onset definitions:** pick a cited registry entry with `--definition-ref`
+  (`agrhymet-sos-rolling` for the CHC/FEWS NET 25/20 mm start-of-season rule,
+  `icpac-onset`, `moron-robertson-2014`) rather than a legacy `--definition`
+  name; the output then records which definition it is. Feed `onset-date` a
+  daily series with gaps left as `NaN` (never filled with 0). For a season that
+  crosses 1 January, use `day-of-year --since <first day>`.
 - **Onset dates:** to *map* an onset result, use `plot-onset` — it takes
   `onset-date`'s output directly and draws mean onset date and per-cell
   member agreement in one figure. Do not build that by hand, and do not

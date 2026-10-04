@@ -1,10 +1,11 @@
 ---
 name: onset-date
-description: Compute the rainy season onset date along a time/step axis, per a definition from the onset-definition registry (--definition-ref, e.g. icpac-onset, agrhymet-sos-rolling, moron-robertson-2014; every output records the definition id, content hash and any overrides) or one of three legacy names -- ICPAC's wet-spell-then-no-dry-spell criterion, the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season), or Moron-Robertson's all-wet window over a per-cell climatological threshold (Moron_Robertson_2014). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly.
+description: "Compute the rainy season onset date along a time/step axis, per a definition from the onset-definition registry (--definition-ref, e.g. icpac-onset, agrhymet-sos-rolling, moron-robertson-2014; every output records the definition id, content hash and any overrides) or one of three legacy names -- ICPAC's wet-spell-then-no-dry-spell criterion, the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season), or Moron-Robertson's all-wet window over a per-cell climatological threshold (Moron_Robertson_2014). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py *)
 metadata:
+  version: "0.1.0"
   catalog-group: transforms
 ---
 
@@ -39,18 +40,47 @@ kernels:
   (`--mr-veto`); a vetoed candidate does not end the search — the next
   triggering day is tried.
 
+  **`CHC_start_grow_season`'s legacy defaults are not a published rule.** Its
+  first-window default is 20 mm. The AGRHYMET / FEWS NET start-of-season
+  definition (used in CHC's WRSI work) and Sheerwater's `chc_onset` both use
+  **25 mm** in 10 days, then 20 mm in the next 20. For a cited definition use
+  `--definition-ref agrhymet-sos-rolling` (25/20 mm, both "at least") rather than
+  the legacy name.
+
   Not the same as Sheerwater's `moron_and_robertson_onset` (registry id
   `sheerwater-moron-robertson-onset`). That is a simplification: one fixed 38 mm
   5-day threshold instead of the per-cell climatology, no all-days-wet test, and
   "next 10 days total more than 5 mm" instead of the 30-day dry-spell check. Hence
   the `_2014` in this definition's name.
 
+## Input requirements (checked; violations exit non-zero)
+
+- **Daily steps.** Every window is counted in time steps, so the time dim must
+  be exactly one day apart. Sub-daily or gappy input is refused: aggregate it
+  to daily sums first (`aggregate-temporal`). Before this check, 6-hourly input
+  silently returned no onset.
+- **Millimetres.** Thresholds are daily totals in mm. Recognised precipitation
+  in other units (`m`, `kg m-2 s-1`) is converted to `mm` / `mm day-1` with a
+  note. Anything else is refused. Before this check, ERA5 `tp` in metres or a
+  `kg m-2 s-1` flux silently returned no onset, because 20 m is never reached.
+- **Do not fill `NaN` with 0 before this skill.** A `NaN` inside a candidate's
+  window disqualifies it. A pipeline that pre-cleans with
+  `.where(tp >= 0, 0.0)` or a fill turns every gap into a dry day, so the
+  disqualification never fires and gaps count as dry spells (ICPAC) or as
+  no rain (CHC). Leave missing days as `NaN`.
+- Non-standard (`cftime`) calendars are accepted. Onset dates are written as
+  `datetime64` (exact for `noleap`/standard calendars, and what `day-of-year`
+  and `plot-onset` read); a date with no real-calendar equivalent (360-day
+  30 February) is refused.
+
 ## When to use
 
 - Agromet-style onset detection on daily rainfall: `--definition ICPAC` with
   the classic 20mm/3-day wet spell and a 7-day dry-spell disqualifier over a
   21-day search window (the defaults).
-- A simpler two-window accumulation check: `--definition CHC_start_grow_season`.
+- A two-window accumulation check: prefer `--definition-ref agrhymet-sos-rolling`
+  (the published 25/20 mm rule). `--definition CHC_start_grow_season` keeps
+  its unsourced 20/20 mm legacy defaults.
 - Onset relative to local climatology, as in monsoon onset forecasting:
   `--definition Moron_Robertson_2014` with a per-cell threshold field. The
   defaults are the original definition (5-day trigger, 30-day follow-up,

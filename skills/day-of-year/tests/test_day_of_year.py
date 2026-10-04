@@ -83,3 +83,37 @@ def test_no_datetime_variable_errors(tmp_path, day_of_year):
     with pytest.raises(SystemExit) as exc:
         run_skill(day_of_year, "-i", str(src), "-o", str(out))
     assert exc.value.code != 0
+
+
+def _member_ds(dates):
+    data = np.array(dates, dtype="datetime64[ns]").reshape(len(dates), 1, 1)
+    ds = xr.Dataset(
+        {"onset_date": (["number", "latitude", "longitude"], data)},
+        coords={"number": list(range(len(dates))), "latitude": [1.0], "longitude": [10.0]},
+    )
+    ds["latitude"].attrs.update(standard_name="latitude", units="degrees_north", axis="Y")
+    ds["longitude"].attrs.update(standard_name="longitude", units="degrees_east", axis="X")
+    return ds
+
+
+def test_new_year_wrap_refused_without_since(tmp_path, day_of_year):
+    src = write_zarr(_member_ds(["2024-12-28", "2025-01-03"]), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(day_of_year, "-i", str(src), "-o", str(tmp_path / "o.zarr"))
+    assert exc.value.code != 0
+
+
+def test_since_gives_wrap_safe_offset(tmp_path, day_of_year):
+    src = write_zarr(_member_ds(["2024-12-28", "2025-01-03"]), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(day_of_year, "-i", str(src), "-o", str(out), "--since", "2024-12-01")
+    v = xr.open_zarr(out)["onset_date_days_since"].values[:, 0, 0]
+    assert list(v) == [27.0, 33.0]
+    assert float(np.mean(v)) == 30.0  # 31 Dec, not "day 183"
+
+
+def test_multi_year_climatology_allowed(tmp_path, day_of_year):
+    src = write_zarr(_member_ds(["2001-03-10", "2002-03-20", "2003-03-15"]), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(day_of_year, "-i", str(src), "-o", str(out))
+    assert list(xr.open_zarr(out)["onset_date_dayofyear"].values[:, 0, 0]) == [69, 79, 74]

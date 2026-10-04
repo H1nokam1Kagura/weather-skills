@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@main",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
 #   "cftime>=1.6",
 #   "numpy",
 #   "xarray",
@@ -705,10 +705,88 @@ def _onset_idx_to_date(onset_idx, time_values):
     idx = onset_idx.values
     valid = ~np.isnan(idx)
     idx_int = np.where(valid, idx, 0).astype(int)
-    nat = np.array("NaT", dtype=time_values.dtype)
-    onset_values = np.where(valid, time_values[idx_int], nat)
+    if time_values.dtype == object:
+        # cftime (non-standard calendar) coordinates. The old path built
+        # np.array("NaT", object) -- the *string* 'NaT' -- mixing str with cftime
+        # objects, which crashed at write time; xarray can't encode None in a
+        # cftime array either. Onset dates are real calendar days, so express
+        # them as datetime64 (exact for noleap/standard calendars, and what
+        # day-of-year and plot-onset require); refuse a date that has no
+        # real-calendar equivalent (e.g. 360_day's 30 February).
+        picked = time_values[idx_int]
+        out = np.full(idx.shape, np.datetime64("NaT", "ns"))
+        for pos in zip(*np.nonzero(valid), strict=True):
+            d = picked[pos]
+            try:
+                out[pos] = np.datetime64(f"{d.year:04d}-{d.month:02d}-{d.day:02d}", "ns")
+            except ValueError:
+                raise UsageError(
+                    f"onset date {d} ({getattr(d, 'calendar', 'non-standard')} calendar) has "
+                    "no real-calendar equivalent; convert the input to a standard calendar first."
+                ) from None
+        onset_values = out
+    else:
+        nat = np.array("NaT", dtype=time_values.dtype)
+        onset_values = np.where(valid, time_values[idx_int], nat)
     return xr.DataArray(
         onset_values, dims=onset_idx.dims, coords=onset_idx.coords, name="onset_date"
+    )
+
+
+def _require_daily_steps(coord):
+    """Every kernel counts time *steps* as days, so the time dim must be
+    strictly daily. Sub-daily or irregular input would silently shrink every
+    window (3 six-hourly steps are not a 3-day wet spell) and return NaT or a
+    wrong date with exit 0."""
+    import numpy as np
+
+    vals = coord.values
+    if vals.size < 2:
+        return
+    if vals.dtype == object:  # cftime
+        steps = {(b - a).total_seconds() for a, b in zip(vals[:-1], vals[1:], strict=True)}
+    else:
+        steps = set((np.diff(vals) / np.timedelta64(1, "s")).tolist())
+    if steps != {86400.0}:
+        found = sorted(steps)[:3]
+        raise UsageError(
+            f"onset-date needs a daily series on '{coord.name}', but its steps are "
+            f"{[f'{s / 3600:g}h' for s in found]}. Every window length is counted in "
+            "time steps, so sub-daily or gappy input gives wrong onsets. Run "
+            "aggregate-temporal (daily sums) or convert-to-totals first."
+        )
+
+
+def _as_daily_mm(da, var):
+    """Thresholds are daily rainfall in mm. A variable in metres (ERA5 ``tp``)
+    or a flux (``kg m-2 s-1``: dynamical.org, IMERG) compared against 20 'mm'
+    never triggers, so every onset came back NaT with exit 0. Convert
+    recognised precip to ``mm`` (amount) or ``mm day-1`` (rate; on the daily
+    series _require_daily_steps enforces, numerically the daily total), and
+    refuse anything else rather than compare it against mm thresholds."""
+    from weather_skills_core.units import to_standard_units
+
+    units = da.attrs.get("units")
+    if not units:
+        print(
+            f"Warning: '{var}' has no units attr; thresholds are assumed to be daily "
+            "totals in mm. If it is in metres or a flux, every onset will be wrong.",
+            file=sys.stderr,
+        )
+        return da
+    if units_equal(units, "mm") or units_equal(units, "mm day-1"):
+        return da
+    converted = to_standard_units(da.to_dataset(name=var), variables=[var])[var]
+    if getattr(converted, "pint", None) is not None and converted.pint.units is not None:
+        converted = converted.pint.dequantify()
+    new_units = converted.attrs.get("units", "")
+    if new_units and (units_equal(new_units, "mm") or units_equal(new_units, "mm day-1")):
+        print(f"Note: converted '{var}' from '{units}' to '{new_units}'.", file=sys.stderr)
+        return converted
+    raise UsageError(
+        f"'{var}' is in '{units}', which is not a recognised precipitation amount or "
+        "rate; onset thresholds are daily totals in mm. Convert it first "
+        "(unit-convert --to-units mm, or mm day-1 for a rate)."
     )
 
 
@@ -1095,6 +1173,7 @@ def onset_date(
             file=sys.stderr,
         )
 
+    _require_daily_steps(ds[dim])
     time_values = ds[dim].values
     start_idx = 0
     if is_mr and mr_search_start is not None:
@@ -1119,6 +1198,7 @@ def onset_date(
         # attr for the label).
         if getattr(da, "pint", None) is not None and da.pint.units is not None:
             da = da.pint.dequantify()
+        da = _as_daily_mm(da, var)
 
         if definition == "ICPAC":
             onset_idx = xr.apply_ufunc(
