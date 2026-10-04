@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--point", choices=["escalate", "review_verdict", "next_skill"])
     r.set_defaults(fn=cmd_record)
 
-    rp = sub.add_parser("report", help="agreement + clm E2 escalation bar")
+    rp = sub.add_parser("report", help="agreement + E2-style recall diagnostic (bar of record: clm D58, offline)")
     rp.add_argument("--log")
     rp.set_defaults(fn=cmd_report)
 

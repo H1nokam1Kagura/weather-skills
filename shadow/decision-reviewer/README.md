@@ -19,6 +19,17 @@ off to a larger model or a human. It cannot, yet
 - Disagreement between two cheap scorers caught 90% of errors, but the scorers disagreed on
   **72%** of decisions, more than three times the 20% escalation cap.
 
+**Correction (clm D58, 2026-10-04).** E2's bar was unreachable for *any* trigger. Lev's base error
+(0.287) exceeds the 20% escalation budget, so even a perfect error oracle gets recall 0.696 and
+kept error 0.109. The FAILs above are therefore partly arithmetic. The bar of record is now D58:
+the tiered system at <=20% escalation must be **no worse than the big model alone** (lower 90%
+bound of the difference >= -0.02). Against that bar, **B0a**, a 34-feature CPU logistic head
+trained on archived signals with no new model, **passes**: system 0.788 vs Sonnet 4.6 0.763,
+d +0.025 [0.013, 0.037]. It trails Sonnet on change_map, bias_map and map, and all of it is on
+synthetic workflows. So the decision models now have a baseline to beat, not just a bar. This
+report's E2-style recall is kept as a diagnostic, and it now says "unreachable" instead of FAIL
+when even a perfect detector could not pass.
+
 Fast "System-1" decision models (Laya, Kev, CLM-8B) are being promoted for exactly this job. This
 component lets us measure them on our own decisions without letting them touch a result.
 

@@ -59,12 +59,21 @@ def escalate_bar(rows: list[dict]) -> dict[str, Any]:
     kept = [i for i in range(n) if i not in flagged]
     kept_err = (sum(1 for i in kept if rows[i]["actual"] == "escalate") / len(kept)) if kept else 0.0
     recall = (caught / positives) if positives else None
+    # Ceiling a PERFECT detector reaches at this base rate (clm D58 premise finding: E2's bar was
+    # unreachable for any trigger because the base error exceeded the 20% escalation budget).
+    best_recall = min(1.0, k / positives) if positives else None
+    best_kept_err = (max(0, positives - k) / (n - k)) if (positives and n > k) else 0.0
+    reachable = (best_recall is not None and best_recall >= RECALL_BAR
+                 and best_kept_err <= KEPT_ERR_BAR)
     if recall is None:
         verdict = "n/a (no actual escalations)"
+    elif not reachable:
+        verdict = "n/a (bar unreachable at this base rate; even a perfect detector fails)"
     else:
         verdict = "PASS" if (recall >= RECALL_BAR and kept_err <= KEPT_ERR_BAR) else "FAIL"
     return {"n": n, "k": k, "positives": positives, "caught": caught, "recall": recall,
-            "kept_err": kept_err, "verdict": verdict}
+            "kept_err": kept_err, "best_recall": best_recall, "best_kept_err": best_kept_err,
+            "verdict": verdict}
 
 
 def summarize(records: list[dict]) -> dict[tuple[str, str], dict[str, Any]]:
@@ -118,6 +127,14 @@ def render(records: list[dict]) -> str:
         lines.append(f"  n={b['n']}  flagged={b['k']}  actual escalations={b['positives']}  "
                      f"caught={b.get('caught', 0)}  recall={_fmt(b['recall'], True)}  "
                      f"kept error={_fmt(b['kept_err'], True)}  -> {b['verdict']}")
+        lines.append(f"  perfect-detector ceiling: recall={_fmt(b.get('best_recall'), True)}  "
+                     f"kept error={_fmt(b.get('best_kept_err'), True)}")
+    lines.append("")
+    lines.append("This E2-style recall bar is a diagnostic. The bar of record is clm D58: the tiered "
+                 "system at <=20% escalation must be no worse than the big model alone (lower 90% bound "
+                 ">= -0.02). It needs a big-model-alone arm and is measured offline in clm, not here. "
+                 "Baseline to beat there: B0a, a 34-feature CPU logistic head (system 0.788 vs Sonnet "
+                 "4.6 0.763; synthetic workflows).")
     for (point, backend), s in summary.items():
         if s["insufficient_n"]:
             need = f"n>={MIN_N}" + (f" and >={MIN_POSITIVES} actual escalations" if point == "escalate" else "")

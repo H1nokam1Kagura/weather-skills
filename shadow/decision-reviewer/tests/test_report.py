@@ -35,13 +35,21 @@ def test_missed_escalation_fails_both_bars():
     assert b["kept_err"] == pytest.approx(1 / 8) and b["verdict"] == "FAIL"
 
 
-def test_recall_ok_but_kept_error_too_high_fails():
-    # 50 decisions, 15 actual escalations: top 10 are all escalations (recall 10/15 = 0.667 < 0.70)
+def test_perfect_detector_at_high_base_rate_is_unreachable_not_fail():
+    # 50 decisions, 15 actual escalations: the top 10 are ALL escalations (a perfect detector),
+    # yet recall is 10/15 = 0.667 < 0.70. That is the clm D58 premise finding: the bar, not the
+    # detector, fails. Previously reported as FAIL.
     rows = [esc(i, 1 - i / 100, "escalate" if i < 15 else "proceed") for i in range(50)]
     b = report.escalate_bar(rows)
     assert b["k"] == 10 and b["caught"] == 10
     assert b["recall"] == pytest.approx(10 / 15) and b["kept_err"] == pytest.approx(5 / 40)
-    assert b["verdict"] == "FAIL"
+    assert b["verdict"].startswith("n/a (bar unreachable")
+
+
+def test_reachable_bar_still_fails_a_bad_detector():
+    # 50 decisions, 7 escalations (reachable), but the shadow ranks them last.
+    rows = [esc(i, i / 100, "escalate" if i < 7 else "proceed") for i in range(50)]
+    assert report.escalate_bar(rows)["verdict"] == "FAIL"
 
 
 def test_sufficient_n_pass_has_no_advisory_line():
@@ -90,3 +98,12 @@ def test_agreement_for_choice_points_and_backends_kept_apart():
 
 def test_empty_log():
     assert "No shadow decisions logged" in report.render([])
+
+
+def test_unreachable_bar_is_not_reported_as_fail():
+    # 50 decisions, 20 actual escalations (40% base rate): a 20% flag budget (10) cannot reach
+    # 70% recall even with a perfect detector, so the verdict must say so instead of FAIL.
+    rows = [esc(i, 1.0 - i / 100, "escalate" if i < 20 else "proceed") for i in range(50)]
+    b = report.escalate_bar(rows)
+    assert b["best_recall"] == 0.5
+    assert b["verdict"].startswith("n/a (bar unreachable")
