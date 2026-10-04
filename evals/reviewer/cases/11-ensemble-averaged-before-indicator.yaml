@@ -1,0 +1,30 @@
+id: ensemble-averaged-before-indicator
+defect_class: ensemble_averaged_before_per_member_rule
+kind: plan
+skills: [dynamical-fetch, summarize-dim, indicator]
+task: |
+  Probability, per grid cell and day, that the next-8-day rainfall reaches 25 mm over the Kenya box, from the ECMWF 46-day ensemble initialised 2026-10-01.
+context: |
+  The area of interest is the Kenya box itself (the bbox resolve-region prints for KEN, used as-is; the country polygon is not wanted): 5.506/33.894/-4.677/41.855.
+  The fetched forecast has a number (ensemble member) dim and daily steps.
+premise:
+  - file: skills/indicator/SKILL.md
+    quote: "Apply the rule **per ensemble member** (do not average"
+  - why: >-
+      Averaging members first smooths the rainfall, so the 8-day sum of the mean crosses
+      25 mm in a different set of cells than the members do, and the result is a 0/1 mask
+      of the mean, not a probability. indicator says to apply the rule per member and
+      reduce with --probability.
+defect:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-10-01 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. summarize-dim -i fc.zarr -o fc_mean.zarr --dim number --method mean
+    3. indicator -i fc_mean.zarr -o p25.zarr --rule "precipitation_surface sum 8d >= 25" --probability
+  expected_verdict: REJECT
+  expected_step: 2
+  match_any: ["per ensemble member", "per member", "member", "average", "number"]
+clean:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-10-01 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. indicator -i fc.zarr -o p25.zarr --rule "precipitation_surface sum 8d >= 25" --probability
+  expected_verdict: APPROVE

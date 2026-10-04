@@ -1,0 +1,37 @@
+id: summing-cumulative-amounts
+defect_class: summing_cumulative_amounts
+kind: plan
+skills: [select, summarize-dim, deaccumulate, aggregate-temporal, convert-to-totals]
+task: |
+  Report the first-two-weeks (lead days 0-13) rainfall total in mm per grid cell from an
+  archived forecast a colleague shared.
+context: |
+  archive_tp.zarr (not written by a catalog fetcher):
+    tp (step: 46, latitude: 8, longitude: 6) float32 [mm]
+    long_name: "Total precipitation accumulated since forecast initialisation"
+    sample at one cell, steps 0..4: 0.0, 4.1, 9.8, 9.8, 15.2   (non-decreasing)
+    data_interval: 1 day
+premise:
+  - file: skills/deaccumulate/SKILL.md
+    quote: "Do not aggregate a still-accumulated variable — deaccumulate first."
+  - file: skills/summarize-dim/SKILL.md
+    quote: "(For temporal totals specifically, use `aggregate-temporal` then `convert-to-totals`.)"
+  - why: >-
+      Each step of a cumulative-since-init field already holds the running total, so summing
+      14 steps adds the total to itself many times over. The skill text says to deaccumulate
+      first, and to make temporal totals with aggregate-temporal then convert-to-totals.
+      End-to-end benchmark tests explicitly reject summing cumulative amounts directly.
+defect:
+  submission: |
+    1. select -i archive_tp.zarr -o tp_2wk.zarr --dim step --index 0 --index 1 --index 2 --index 3 --index 4 --index 5 --index 6 --index 7 --index 8 --index 9 --index 10 --index 11 --index 12 --index 13
+    2. summarize-dim -i tp_2wk.zarr -o tp_2wk_total.zarr --dim step --method sum
+  expected_verdict: REJECT
+  expected_step: 2
+  match_any: ["cumulative", "accumulat", "deaccumulate"]
+clean:
+  submission: |
+    1. deaccumulate -i archive_tp.zarr -o tp_rates.zarr --variable tp
+    2. aggregate-temporal -i tp_rates.zarr -o tp_14d.zarr --period '14 day' --method mean
+    3. convert-to-totals -i tp_14d.zarr -o tp_14d_mm.zarr
+    4. select -i tp_14d_mm.zarr -o tp_2wk_total.zarr --dim step --index 0
+  expected_verdict: APPROVE

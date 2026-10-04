@@ -1,0 +1,31 @@
+id: threshold-in-wrong-units
+defect_class: wrong_units
+kind: plan
+skills: [unit-convert, onset-date]
+task: |
+  ICPAC onset date per grid cell (20 mm in 3 days, then no 7-day dry spell under 1 mm/day)
+  from a daily-mean GFS precipitation archive a colleague shared.
+context: |
+  gfs_daily.zarr (not written by a catalog fetcher):
+    precipitation_surface (time: 120, latitude: 41, longitude: 33) float32 [kg m-2 s-1]
+    min 0, max 0.00093, mean 0.000041; data_interval: 1 day
+premise:
+  - file: skills/onset-date/SKILL.md
+    quote: "total rainfall a wet spell must exceed, in the variable's own units."
+  - file: skills/onset-date/SKILL.md
+    quote: "No unit conversion happens in this skill; use `unit-convert` upstream"
+  - why: >-
+      onset-date compares its thresholds (20 mm, 1 mm) with the values in the variable's
+      own units. In kg m-2 s-1 the daily values are about 1e-4, so a 20 threshold is never
+      reached and every cell returns no onset. Convert to mm day-1 first.
+defect:
+  submission: |
+    1. onset-date -i gfs_daily.zarr -o onset.zarr --definition ICPAC --variable precipitation_surface --wet-spell-thresh 20 --dry-spell-thresh 1
+  expected_verdict: REJECT
+  expected_step: 1
+  match_any: ["unit", "kg m-2 s-1", "mm day-1", "mm/day"]
+clean:
+  submission: |
+    1. unit-convert -i gfs_daily.zarr -o gfs_daily_mm.zarr --variable precipitation_surface --to-standard
+    2. onset-date -i gfs_daily_mm.zarr -o onset.zarr --definition ICPAC --variable precipitation_surface --wet-spell-thresh 20 --dry-spell-thresh 1
+  expected_verdict: APPROVE
