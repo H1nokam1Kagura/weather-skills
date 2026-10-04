@@ -952,9 +952,13 @@ def execute(jobs: list[dict], ctx: Ctx) -> tuple[list[dict], str | None]:
                         continue
                     records[job["key"]] = rec
                     cost = rec.get("cost_usd")
-                    ctx.spent += cost if isinstance(cost, (int, float)) and rec.get("cost_known") else (
-                        ctx.est_cost if rec["outcome"] != ERROR else (cost or 0.0)
-                    )
+                    if isinstance(cost, (int, float)) and cost > 0 and rec.get("cost_known"):
+                        ctx.spent += cost
+                    elif rec["outcome"] != ERROR or rec.get("error_kind") in ("timeout", "no_result", "cli_error"):
+                        # Unreported cost: a killed or crashed run may still have been billed,
+                        # so charge the estimate rather than $0 (the ceiling must not under-count).
+                        ctx.spent += ctx.est_cost
+                        rec["cost_charged_as_estimate"] = True
                     ctx.log(
                         f"{job['case']:<36} {job['variant']:<6} rep {job['rep']}: {rec['outcome']:<11}"
                         f" (expected {job['expected']}){'  located' if rec['located'] else ''}"

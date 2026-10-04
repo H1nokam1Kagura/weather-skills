@@ -377,3 +377,19 @@ def test_prompt_never_contains_answer_key():
     for c in CASES:
         for v in ("defect", "clean"):
             assert not ev.LEAK_CONTENT_RE.search(ev.build_prompt(c, v, ev.REPO, True))
+
+
+def test_timeout_without_reported_cost_is_charged_the_estimate(tmp_path):
+    # A killed run reports no cost but may have been billed: the ceiling must count it
+    # at the per-run estimate, never as $0.
+    inv = Recorder(lambda c, p, t: (None, "", "", True, 600.0))
+    code, logs = run_main(
+        tmp_path,
+        ["--skip-preflight", "--case", "omitted-clip", "--variant", "defect", "--n", "1",
+         "--est-cost-per-run", "0.45"],
+        inv,
+    )
+    assert code == ev.EXIT_INCONCLUSIVE  # 1/1 runs errored
+    assert any("[spent $0.45/35.00]" in str(line) for line in logs)
+    rec = json.loads(next((tmp_path / "out" / "runs").glob("*.json")).read_text(encoding="utf-8"))
+    assert rec["outcome"] == ev.ERROR and rec["error_kind"] == "timeout"
