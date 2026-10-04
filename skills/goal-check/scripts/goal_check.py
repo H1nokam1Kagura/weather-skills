@@ -746,7 +746,7 @@ def _human(rep: dict) -> str:
     "--request-file", default=None, metavar="PATH", help="Read the request text from a file."
 )
 @weather_skill.argument(
-    "--format", choices=["json", "text"], default="json", help="Report format on stdout."
+    "--format", choices=["human", "json"], default="json", help="Report format on stdout."
 )
 def goal_check(goal, request, request_file, format, **kwargs):
     """Validate a typed goal JSON, fill rule-decidable defaults, and flag what only a human can settle."""

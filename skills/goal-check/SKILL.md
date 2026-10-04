@@ -28,14 +28,14 @@ model compiled from the request and answers three questions without a model:
 
 ```
 uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py --goal G1.json [--goal G2.json --goal G3.json] \
-    (--request "<the user's words>" | --request-file REQ.txt) [--format json|text]
+    (--request "<the user's words>" | --request-file REQ.txt) [--format json|human]
 ```
 
 - `--goal` — goal JSON; repeat with 2-3 **independently** compiled samples for the disagreement
   check. A sample that is not JSON counts as one invalid sample, not a usage error.
 - `--request` / `--request-file` — the user's own words. Without them the v3rr rules cannot run
   and the report says so.
-- `--format` — `json` (default; the agent reads this) or `text`.
+- `--format` — `json` (default; the agent reads this) or `human`.
 
 ### Exit codes
 
@@ -109,7 +109,7 @@ steps each slot implies, for the forecaster).
 ```bash
 # One goal, resolved: exit 0 and a read-back.
 uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py --goal goal.json \
-  --request "Weekly rainfall map for Ethiopia for the next month." --format text
+  --request "Weekly rainfall map for Ethiopia for the next month." --format human
 
 # Three samples that disagree on period: exit 3 with one question packet.
 uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py --goal g1.json --goal g2.json --goal g3.json \
