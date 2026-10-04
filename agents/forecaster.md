@@ -55,6 +55,9 @@ Prefer small steps over stuffing every filter into one call:
   but still run `convert-to-totals` so the PNG is from an amount Zarr.
   `deaccumulate` is only for leftover cumulative-since-init cubes that still
   have amount units.
+- **Onset inputs:** feed `onset-date` a daily series with gaps left as `NaN`
+  (never filled with 0). For a season that crosses 1 January, use
+  `day-of-year --since <first day>`.
 - **Onset dates:** to *map* an onset result, use `plot-onset` — it takes
   `onset-date`'s output directly and draws mean onset date and per-cell
   member agreement in one figure. Do not build that by hand, and do not

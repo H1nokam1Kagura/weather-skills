@@ -254,3 +254,108 @@ def test_output_variable_name_is_not_misclassified(tmp_path, onset_date):
     ds = xr.open_zarr(out, consolidated=True)
     assert "onset_tp_date" in ds.data_vars
     assert classify_variable("onset_tp_date") is None
+
+
+def _daily_ds(values, start="2026-05-01"):
+    """Single-gridpoint daily series on an absolute `time` dim."""
+    n = len(values)
+    times = np.arange(np.datetime64(start), np.datetime64(start) + np.timedelta64(n, "D"))
+    data = np.asarray(values, dtype=np.float64).reshape(n, 1, 1)
+    ds = xr.Dataset(
+        {"tp": (["time", "latitude", "longitude"], data)},
+        coords={"time": times.astype("datetime64[ns]"), "latitude": [1.0], "longitude": [10.0]},
+    )
+    ds["tp"].attrs.update(units="mm", long_name="Total precipitation")
+    ds["latitude"].attrs.update(standard_name="latitude", units="degrees_north", axis="Y")
+    ds["longitude"].attrs.update(standard_name="longitude", units="degrees_east", axis="X")
+    ds["time"].attrs.update(standard_name="time", axis="T")
+    return ds
+
+
+def _onset(ds):
+    return ds["onset_tp_date"].isel(latitude=0, longitude=0).values
+
+
+# --- Regressions for silent-wrong input classes (demo deep dive, 2026-10-04) ---
+
+_WET = [2.0] * 9 + [10.0, 10.0, 10.0] + [2.0] * 38  # onset at index 8 (2+10+10 > 20)
+
+
+def test_metres_converted_not_silently_nat(tmp_path, onset_date):
+    ds = _daily_ds([v / 1000.0 for v in _WET])
+    ds["tp"].attrs["units"] = "m"
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(onset_date, "-i", str(src), "-o", str(out), "--definition", "ICPAC")
+    assert str(_onset(xr.open_zarr(out)))[:10] == "2026-05-09"
+
+
+def test_flux_converted_not_silently_nat(tmp_path, onset_date):
+    ds = _daily_ds([v / 86400.0 for v in _WET])
+    ds["tp"].attrs["units"] = "kg m-2 s-1"
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(onset_date, "-i", str(src), "-o", str(out), "--definition", "ICPAC")
+    assert str(_onset(xr.open_zarr(out)))[:10] == "2026-05-09"
+
+
+def test_non_precip_units_refused(tmp_path, onset_date):
+    ds = _daily_ds(_WET)
+    ds["tp"].attrs["units"] = "K"
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            onset_date, "-i", str(src), "-o", str(tmp_path / "o.zarr"), "--definition", "ICPAC"
+        )
+    assert exc.value.code != 0
+
+
+def test_subdaily_steps_refused(tmp_path, onset_date):
+    n = len(_WET) * 4
+    times = np.arange(
+        np.datetime64("2026-05-01T00"),
+        np.datetime64("2026-05-01T00") + np.timedelta64(6 * n, "h"),
+        np.timedelta64(6, "h"),
+    )
+    ds = _daily_ds(_WET)
+    ds = xr.Dataset(
+        {
+            "tp": (
+                ["time", "latitude", "longitude"],
+                np.repeat(np.asarray(_WET) / 4, 4).reshape(n, 1, 1),
+            )
+        },
+        coords={
+            "time": times.astype("datetime64[ns]"),
+            "latitude": ds.latitude,
+            "longitude": ds.longitude,
+        },
+    )
+    ds["tp"].attrs.update(units="mm", long_name="Total precipitation")
+    ds["time"].attrs.update(standard_name="time", axis="T")
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            onset_date, "-i", str(src), "-o", str(tmp_path / "o.zarr"), "--definition", "ICPAC"
+        )
+    assert exc.value.code != 0
+
+
+def test_cftime_calendar_no_onset_cell_writes(tmp_path, onset_date):
+    n = len(_WET)
+    tc = xr.date_range("2026-05-01", periods=n, freq="D", calendar="noleap", use_cftime=True)
+    data = np.stack([np.asarray(_WET), np.full(n, 2.0)], axis=1).reshape(n, 2, 1)
+    ds = xr.Dataset(
+        {"tp": (["time", "latitude", "longitude"], data)},
+        coords={"time": tc, "latitude": [1.0, 2.0], "longitude": [10.0]},
+    )
+    ds["tp"].attrs.update(units="mm", long_name="Total precipitation")
+    ds["latitude"].attrs.update(standard_name="latitude", units="degrees_north", axis="Y")
+    ds["longitude"].attrs.update(standard_name="longitude", units="degrees_east", axis="X")
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(onset_date, "-i", str(src), "-o", str(out), "--definition", "ICPAC")
+    res = xr.open_zarr(out)["onset_tp_date"].values[:, 0]
+    assert np.issubdtype(res.dtype, np.datetime64)  # usable by day-of-year / plot-onset
+    assert str(res[0])[:10] == "2026-05-09"
+    assert np.isnat(res[1])

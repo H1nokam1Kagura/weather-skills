@@ -1,6 +1,6 @@
 ---
 name: onset-date
-description: Compute the rainy season onset date along a time/step axis, per one of two selectable definitions -- ICPAC's wet-spell-then-no-dry-spell criterion, or the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly.
+description: "Compute the rainy season onset date along a time/step axis, per one of two selectable definitions -- ICPAC's wet-spell-then-no-dry-spell criterion, or the Climate Hazards Center's two-window cumulative-rainfall criterion (CHC_start_grow_season). Use whenever a dataset needs a per-gridpoint (or per-ensemble-member) onset date derived from a daily rainfall accumulation series. To MAP the result, use plot-onset, which takes this output directly and shows mean onset and member agreement together. The output is otherwise a raw date/duration -- run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py *)
@@ -27,6 +27,32 @@ Two onset definitions are available via `--definition`:
   `--period1-thresh`, and the `--period2-days` days immediately after that
   accumulate more than `--period2-thresh`. No dry-spell check — the
   confirmation window's own total is the only follow-through condition.
+
+## Input requirements (checked; violations exit non-zero)
+
+- **Daily steps.** Every window is counted in time steps, so the time dim must
+  be exactly one day apart. Sub-daily or gappy input is refused; aggregate to
+  daily sums first (`aggregate-temporal`). (Before this check, 6-hourly input
+  silently returned no onset.)
+- **Millimetres.** Thresholds are daily totals in mm. Recognised precipitation
+  in other units (`m`, `kg m-2 s-1`) is converted to `mm` / `mm day-1` with a
+  note; anything else is refused. (Before this check, ERA5 `tp` in metres or a
+  `kg m-2 s-1` flux silently returned no onset.)
+- **Do not fill `NaN` with 0 before this skill.** A `NaN` inside a candidate's
+  window disqualifies it. Pre-cleaning with `.where(tp >= 0, 0.0)` or a fill
+  turns every gap into a dry day, so the disqualification never fires. Leave
+  missing days as `NaN`.
+- Non-standard (`cftime`) calendars are accepted. Onset dates are written as
+  `datetime64` (exact for `noleap`/standard calendars, and what `day-of-year`
+  and `plot-onset` read); a date with no real-calendar equivalent (360-day
+  30 February) is refused.
+
+
+**Note on `CHC_start_grow_season` defaults.** The first-window default here is
+20 mm. The AGRHYMET / FEWS NET start-of-season rule (as used in CHC's WRSI work;
+Environ. Res. Lett. 2021, doi:10.1088/1748-9326/ac15cc) and Sheerwater's
+`chc_onset` (`sheerwater/interfaces/events.py`) both use **25 mm** in 10 days,
+then 20 mm in the next 20. Pass `--period1-thresh 25` to match them.
 
 ## When to use
 

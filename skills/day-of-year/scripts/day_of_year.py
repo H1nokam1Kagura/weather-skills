@@ -48,7 +48,16 @@ def _is_datetime64(da):
     "selected variable must be datetime64-typed. Default (unset): every "
     "datetime64-typed data variable.",
 )
-def day_of_year(ds, variable, **kwargs):
+@weather_skill.argument(
+    "--since",
+    default=None,
+    metavar="YYYY-MM-DD",
+    help="Instead of calendar day-of-year, write whole days since this date "
+    "(VAR_days_since). Required when the dates span more than one calendar "
+    "year: day-of-year wraps at 1 January, so a mean of 28 Dec (363) and 3 Jan "
+    "(3) comes out as day 183.",
+)
+def day_of_year(ds, variable, since, **kwargs):
     """Extract day-of-year (1-366) from a datetime64 data variable."""
     # Variable selection, mirroring `spell-length`/`onset-date`: explicit
     # --variable names must be data variables and must each be
@@ -85,13 +94,48 @@ def day_of_year(ds, variable, **kwargs):
             file=sys.stderr,
         )
 
-    print(f"Computing day-of-year for variables={selected}", file=sys.stderr)
+    import numpy as np
+
+    ref = None
+    if since is not None:
+        from weather_skills_core.standard_utils import parse_date
+
+        ref = np.datetime64(parse_date(since), "ns")
+    mode = f"days since {since}" if ref is not None else "day-of-year"
+    print(f"Computing {mode} for variables={selected}", file=sys.stderr)
 
     out_ds = ds.copy()
     for var in selected:
         da = ds[var]
         if getattr(da, "pint", None) is not None and da.pint.units is not None:
             da = da.pint.dequantify()
+
+        if ref is not None:
+            result = ((da - ref) / np.timedelta64(1, "D")).astype("float64")
+            result = np.floor(result)
+            result.attrs = {
+                "GRIB_name": f"{var} days since {since}",
+                "long_name": f"{var} days since {since}",
+                "description": f"whole days since {since} (NaT -> NaN) extracted from {var}",
+                "standard_name": None,
+                "units": "1",
+            }
+            del out_ds[var]
+            out_ds[f"{var}_days_since"] = result
+            continue
+
+        valid = da.values[~np.isnat(da.values)]
+        years = np.unique(da.dt.year.values[~np.isnat(da.values)])
+        span_days = (valid.max() - valid.min()) / np.timedelta64(1, "D") if valid.size else 0
+        # One season straddling 1 January is the hazard. A multi-year stack of
+        # onsets (a climatology, span >= a year) is the intended day-of-year use.
+        if years.size > 1 and span_days < 365:
+            raise UsageError(
+                f"'{var}' spans calendar years {years.tolist()}: day-of-year wraps at "
+                "1 January, so averaging or thresholding it across the boundary is wrong "
+                "(28 Dec and 3 Jan average to day 183). Pass --since YYYY-MM-DD (e.g. the "
+                "forecast's first day) to get a wrap-safe day offset instead."
+            )
 
         result = da.dt.dayofyear
         # Attrs are rebuilt from scratch, NOT carried over from the source
