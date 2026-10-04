@@ -28,12 +28,17 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pint_xarray
 import xarray as xr
 from weather_skills_core import DataError, UsageError, weather_skill
 from weather_skills_core.cf import stamp_cf_attrs
 from weather_skills_core.standard_dataset import detect_spatial_dims
 from weather_skills_core.standard_utils import bbox_subset, roll_and_agg
-from weather_skills_core.units import AGGREGATION_PERIOD_ATTR, stamp_data_interval, to_standard_units
+from weather_skills_core.units import (
+    AGGREGATION_PERIOD_ATTR,
+    stamp_data_interval,
+    to_standard_units,
+)
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.1"
@@ -44,15 +49,30 @@ _BUCKET = "sheerwater-public-datalake"
 _GCS_MEDIA = f"https://storage.googleapis.com/{_BUCKET}"
 
 # Valid --dataset ids — exactly the bucket's product prefix, no aliasing.
-_DATASETS = ("imerg_final", "era5", "chirps", "ecmwf_ifs", "oisst")
+_DATASETS = ("imerg_final", "era5", "chirps", "ecmwf_ifs", "oisst", "gefs")
 
 # Some mirrors carry no units metadata at all (neither per-variable nor
-# dataset-level) — known source units for those variables, hardcoded here.
+# dataset-level), or a units string that isn't actually a parseable unit
+# (e.g. gefs tmp2m's "avg. daily C") — known source units for those
+# variables, hardcoded here.
 _KNOWN_UNITS = {
     "sst": "degree_Celsius",
     "uwind10m": "m/s",
     "vwind10m": "m/s",
+    "tmp2m": "degree_Celsius",
 }
+
+
+def _valid_units(units) -> bool:
+    """True if ``units`` is a non-empty, pint-parseable unit string."""
+    if not isinstance(units, str) or not units.strip():
+        return False
+    try:
+        pint_xarray.pint.get_application_registry().parse_units(units)
+        return True
+    except Exception:  # noqa: BLE001 — any parse failure means "not usable"
+        return False
+
 
 _DEFAULT_VARIABLE = "precip"
 _DEFAULT_LEAD_DAYS = 0
@@ -98,8 +118,7 @@ def _open_remote(dataset: str, variable: str, window: int) -> tuple[xr.Dataset, 
 
 
 def _select_lead(clim: xr.Dataset, lead_days: int) -> xr.Dataset:
-    """Select one --prediction-timedelta lead and realize valid time = init_time + lead.
-    """
+    """Select one --prediction-timedelta lead and realize valid time = init_time + lead."""
     available = clim["prediction_timedelta"].values.astype("timedelta64[D]").astype(int).tolist()
     if lead_days not in available:
         raise UsageError(
@@ -107,9 +126,9 @@ def _select_lead(clim: xr.Dataset, lead_days: int) -> xr.Dataset:
             f"available (days): {sorted(available)}"
         )
     clim = clim.isel(prediction_timedelta=available.index(lead_days), drop=True)
-    clim = clim.assign_coords(
-        init_time=clim["init_time"] + np.timedelta64(lead_days, "D")
-    ).rename({"init_time": "time"})
+    clim = clim.assign_coords(init_time=clim["init_time"] + np.timedelta64(lead_days, "D")).rename(
+        {"init_time": "time"}
+    )
     return clim
 
 
@@ -127,7 +146,9 @@ def _pad_circular(clim: xr.Dataset, window: int) -> xr.Dataset:
     return xr.concat([before, clim, after], dim="time")
 
 
-def _roll_climatology(clim: xr.Dataset, mean_name: str, std_name: str, window: int, align: str) -> xr.Dataset:
+def _roll_climatology(
+    clim: xr.Dataset, mean_name: str, std_name: str, window: int, align: str
+) -> xr.Dataset:
     """Roll a daily climatology up to a coarser --window, correctly handling different
     aggregation approach for mean and std.
     """
@@ -214,7 +235,9 @@ def _expand_climatology(clim: xr.Dataset, start, end) -> xr.Dataset:
     ),
 )
 @weather_skill.argument("--bbox")
-def fetch(dataset, start_time, end_time, variable, prediction_timedelta, window, align, bbox, **kwargs):
+def fetch(
+    dataset, start_time, end_time, variable, prediction_timedelta, window, align, bbox, **kwargs
+):
     """Fetch a cached daily climatology and expand it to the requested date range."""
     if window < 1:
         raise UsageError(f"--window must be >= 1; got {window}")
@@ -233,16 +256,21 @@ def fetch(dataset, start_time, end_time, variable, prediction_timedelta, window,
         {"avg": mean_name, "std": std_name, lat_name: "latitude", lon_name: "longitude"}
     )
     # Some mirrors (e.g. ecmwf_ifs) stamp units on the dataset, not per
-    # variable; others (sst, wind components) have no units anywhere at all
-    # -- fall back to the known units for those, hardcoded in _KNOWN_UNITS.
-    fallback_units = clim.attrs.get("units") or _KNOWN_UNITS.get(semantic_name)
+    # variable; others (sst, wind components) have no units anywhere at all;
+    # others (gefs tmp2m) stamp a units string that isn't actually a
+    # parseable unit ("avg. daily C") -- all three fall back to the known
+    # units hardcoded in _KNOWN_UNITS.
+    global_units = clim.attrs.get("units")
+    fallback_units = global_units if _valid_units(global_units) else _KNOWN_UNITS.get(semantic_name)
     for name in (mean_name, std_name):
-        if clim[name].attrs.get("units"):
+        existing = clim[name].attrs.get("units")
+        if _valid_units(existing):
             continue
         if fallback_units is None:
             raise UsageError(
-                f"{name!r} has no units metadata (source has none, per-variable "
-                "or dataset-level, and none hardcoded in _KNOWN_UNITS)."
+                f"{name!r} has no usable units metadata (missing or unparseable "
+                f"value {existing!r}, per-variable or dataset-level, and none "
+                "hardcoded in _KNOWN_UNITS)."
             )
         clim[name].attrs["units"] = fallback_units
     clim = to_standard_units(clim, variables=[mean_name, std_name])

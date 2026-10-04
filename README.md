@@ -35,6 +35,7 @@ credentialed or source-specific fetcher only when it does not.
 | `kenya-forecast-fetch` | Kenya forecasts archive grids (`gs://kenya-forecasting-data/<date>/data/`) — native S2S Zarr or CHIRPS-resolution weekly / daily downscaled precip → standard dataset (compose with `plot` for figures) |
 | `cumulus-fetch` | Cumulus AI operational ensemble precip (`gs://sheerwater-datalake/cumulus-data/v0.0.1-op/pf/…`) — 1° global, 29 members, 46 daily leads → Zarr. Requires GCS credentials. |
 | `neuralgcm-fetch` | NeuralGCM S2S ensemble from `gs://neuralgcm-s2s/staging/realtime/tomorrow_now_2026/v1/<init>/` (IMERG precip `tp`, ERA5 surface `t2m`/`d2m`) — 48 members, 6-hour leads to 60 days, ~2.8° → Zarr. Requires GCS credentials. |
+| `weathernext-fetch` | Google WeatherNext 2 ensemble from `gs://weathernext/weathernext_2_0_0/zarr/2025_to_present/<init>/` (realtime archive only) — 64 members, 6-hour leads to 15 days, 0.25° global, 13 pressure levels → Zarr. Pass `-v` and `--member` (full cube ~1 TB). Requires GCS credentials. |
 | `pbc-fetch` | PBC / StillLearning AI Weather Quest precip **quintile probabilities** from private `gs://sheerwater-datalake/pbc-data` (`era5-p_pr_19` week 3, `era5-p_pr_26` week 4) → Zarr. GCS credentials. |
 
 ### Generic middle (operate on any standard dataset)
@@ -44,7 +45,7 @@ credentialed or source-specific fetcher only when it does not.
 | `resolve-time` | Resolve relative calendar dates ("the last two weeks", `latest`, `now-3d`) to `--start-time`/`--end-time` or `--date`. Latest published day is the fetcher's `--probe-latest`, not this skill. |
 | `inspect-zarr` | Print dimension sizes, coordinate values, and a bounded data-variable summary (min/max/mean, finite/NaN, truncated sample) of a Zarr (stdout only; never dumps full arrays) |
 | `clip-region` | Subset a gridded Zarr to a `--bbox N/W/S/E` (use `resolve-region` for a country's bbox) |
-| `aggregate-temporal` | Resample rates along `time`/`step` (mean/min/max); duration-weights CF bounds; keeps `data_interval` when uniform; stamps `aggregation_period` + `aggregation_coverage` + `cell_methods` |
+| `aggregate-temporal` | Resample rates along `time`/`step` (mean/min/max); duration-weights CF bounds; stamps `data_interval` = the output spacing (the `--period`), plus `aggregation_period` + `aggregation_coverage` + `cell_methods` |
 | `convert-to-totals` | Terminal: rate × stamped `aggregation_period` → amount (100% coverage default; refuses overlapping Δt < period — `select` first) |
 | `deaccumulate` | Convert a leftover cumulative-since-init forecast variable into per-step diffs along the `step` axis (fetchers already write rates) |
 | `step-to-time` | Realize a forecast's `step` lead-time axis as wall-clock valid times (`time = init + step`) so it can be compared against time-based observations |
@@ -54,6 +55,7 @@ credentialed or source-specific fetcher only when it does not.
 | `rename` | Rename a data variable to a new name |
 | `concat` | Join Zarr stores along a named dim (incl. new dims with coord values) |
 | `summarize-dim` | Summarize named dims with a statistic (mean/std/min/max/sum/median) — e.g. ensemble spread as the std across `number`, or a time-mean baseline |
+| `point-value` | Sample a gridded dataset at point locations (station Zarr, `--point LAT,LON[,ID]`, or CSV) into a `station_id` point_obs dataset — nearest, bilinear, or N×N cell-mean — for grid-vs-station `difference` / `verify` |
 | `difference` | Subtract one dataset from another (A − B) with inner-join alignment and broadcasting — anomalies vs a baseline, scenario-minus-historical change maps |
 | `standardize-anomaly` | Standardized anomaly aka z-score: `(field − clim_avg) / clim_std` against a climatology (e.g. `clim-fetch`) — dimensionless output, errors on units mismatch. For a plain physical-unit anomaly, use `difference` instead. |
 | `zonal-moisture-transport` | Eastward moisture flux `q·u`, default column-integrated to IVT (`viwve`, kg m-1 s-1). Compose after `ecmwf-fetch -v q -v u` |

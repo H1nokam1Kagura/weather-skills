@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Forecast vs observation verification on a shared grid — hits (event classification), bias, MAE, RMSE, and for ensembles CRPS and Brier score. Scores forecast skill; to only compute an event probability use indicator. Cell-by-cell only: coarsen --obs onto the forecast lat/lon grid first, and align time with step-to-time / aggregate-temporal. The output Zarr is the metric field: plot-verify draws hits, bias and mae; use plot for rmse, crps and brier. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid.
+description: "Forecast vs observation verification on a shared grid — hits (event classification), bias, MAE, RMSE, and for ensembles CRPS and Brier score. Scores forecast skill; to only compute an event probability use indicator. Cell-by-cell only: coarsen --obs onto the forecast lat/lon grid first, and align time with step-to-time / aggregate-temporal. The output Zarr is the metric field: plot-verify draws hits, bias and mae; use plot for rmse, crps and brier. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py *)
