@@ -507,7 +507,7 @@ class Ctx:
         isolate: bool = True,
         unit_budget: float | None = None,
     ):
-        self.out = out
+        self.out = out = Path(out).resolve()
         self.model = model
         self.timeout = timeout
         self.real_claude = real_claude
@@ -1438,7 +1438,11 @@ def main(argv: list[str] | None = None) -> int:
     if a.backend == "agent" and real is None:
         print("REFUSED: `claude` CLI not on PATH")
         return EXIT_REFUSED
-    out = Path(a.resume or a.out or HERE / "runs" / dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    # Absolute: the agent runs with a temp cwd, so a relative --plugin-dir / log path would
+    # silently point nowhere (measured 2026-10-04: "agent not found" on a relative --out).
+    out = Path(
+        a.resume or a.out or HERE / "runs" / dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    ).resolve()
     out.mkdir(parents=True, exist_ok=True)
     stamp = build_stamp(a, real)
     if a.backend == "agent":

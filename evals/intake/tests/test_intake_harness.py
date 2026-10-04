@@ -640,3 +640,10 @@ def test_staged_plugin_has_no_eval_tree(tmp_path):
     d = H.stage_plugin(tmp_path / "p")
     assert (d / "agents" / "human-boundary.md").exists() and not (d / "evals").exists()
     assert (d / "skills" / "goal-check" / "references" / "compile_prompt_rhiza.txt").exists()
+
+
+def test_ctx_paths_are_absolute(tmp_path, monkeypatch):
+    # regression: a relative --out made --plugin-dir relative to the agent's temp cwd
+    monkeypatch.chdir(tmp_path)
+    ctx = H.Ctx(Path("rel_run"), None, 10, sys.executable)
+    assert ctx.out.is_absolute() and ctx.plugin_dir.is_absolute() and ctx.shim_dir.is_absolute()
