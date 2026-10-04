@@ -506,6 +506,7 @@ class Ctx:
         real_claude: str | None,
         isolate: bool = True,
         unit_budget: float | None = None,
+        permission_mode: str | None = None,
     ):
         self.out = out = Path(out).resolve()
         self.model = model
@@ -514,9 +515,14 @@ class Ctx:
         self.isolate = isolate
         self.unit_budget = unit_budget
         self.shim_dir = claude_shim.install(out / "_shim") if real_claude else None
+        # Staged OUTSIDE the repo (system temp): a path under evals/ would both sit next to the
+        # truth and trip the answer-key guard on the skill's own path (measured 2026-10-04).
         self.plugin_dir = (
-            stage_plugin(out / "_plugin" / "rhiza-forecasting") if real_claude else None
+            stage_plugin(Path(tempfile.mkdtemp(prefix="rhiza_plugin_")) / "rhiza-forecasting")
+            if real_claude
+            else None
         )
+        self.permission_mode = permission_mode
         self.sleep = time.sleep
 
 
@@ -589,6 +595,8 @@ def backend_agent(unit: dict, ctx: Ctx, tag: str) -> dict:
         cmd += ["--max-budget-usd", f"{ctx.unit_budget:.2f}"]
     if ctx.model:
         cmd += ["--model", ctx.model]
+    if ctx.permission_mode:  # explicit, stamped, in the run key: never a silent default
+        cmd += ["--permission-mode", ctx.permission_mode]
     cmd += ["--allowedTools", *ALLOWED]
     t0 = time.time()
     raw = {
@@ -812,6 +820,7 @@ def build_stamp(args: argparse.Namespace, real: str | None, sample: Path = SAMPL
         "env_stripped_for_child": [k for k in STRIP_ENV if k in os.environ],
         "args": {k: v for k, v in vars(args).items()},
         "isolated_session": not getattr(args, "no_isolate", False),
+        "permission_mode": getattr(args, "permission_mode", None),
     }
     key_src = {
         k: stamp[k]
@@ -826,6 +835,7 @@ def build_stamp(args: argparse.Namespace, real: str | None, sample: Path = SAMPL
             "claude_version",
             "sample_sha256",
             "isolated_session",
+            "permission_mode",
         )
     }
     stamp["run_key"] = sha256_bytes(json.dumps(key_src, sort_keys=True).encode())[:16]
@@ -1414,6 +1424,14 @@ def main(argv: list[str] | None = None) -> int:
         help="let the agent session load user settings, hooks and MCP servers (not reproducible)",
     )
     ap.add_argument(
+        "--permission-mode",
+        default=None,
+        help="passed to the agent session (e.g. bypassPermissions). Default: none, so the "
+        "--allowedTools list governs; measured 2026-10-04 that list DENIES the goal-check "
+        "3-compile recipe (compound command), which forces single-reading = DEGRADED. Choosing "
+        "a mode is a security decision for the operator; it is stamped and in the run key.",
+    )
+    ap.add_argument(
         "--unit-budget",
         type=float,
         default=5.0,
@@ -1485,7 +1503,15 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     ctx = (
-        Ctx(out, a.model, a.timeout, real, isolate=not a.no_isolate, unit_budget=a.unit_budget)
+        Ctx(
+            out,
+            a.model,
+            a.timeout,
+            real,
+            isolate=not a.no_isolate,
+            unit_budget=a.unit_budget,
+            permission_mode=a.permission_mode,
+        )
         if a.backend == "agent"
         else None
     )

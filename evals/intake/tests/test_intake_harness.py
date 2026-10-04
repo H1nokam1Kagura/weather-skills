@@ -647,3 +647,23 @@ def test_ctx_paths_are_absolute(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ctx = H.Ctx(Path("rel_run"), None, 10, sys.executable)
     assert ctx.out.is_absolute() and ctx.plugin_dir.is_absolute() and ctx.shim_dir.is_absolute()
+
+
+def test_measured_single_reading_fallback_is_degraded_not_exact():
+    # Regression from the 2026-10-04 preflight: the recipe was permission-denied, the agent
+    # compiled once itself and returned a CORRECT goal with sampling=single. The old scorer
+    # counted this as exact / no ask / silent-wrong 0.
+    pos = H.CONTROLS[0]
+    raw = with_card(good_raw(pos), sampling="single", samples=1, goal_check_exit=0)
+    raw = raw | {"nested": [], "envelope": raw["envelope"] | {"permission_denials": [{}] * 4}}
+    rec = H.classify(pos, raw)
+    assert rec["outcome"] == "degraded" and rec["shadow_outcome"] == "exact"
+    assert rec["permission_denials"] == 4 and rec["exact"] is None
+
+
+def test_staged_plugin_path_does_not_trip_answer_key_guard(tmp_path):
+    ctx = H.Ctx(tmp_path / "run", None, 10, sys.executable)
+    cmd = (
+        f"uv run {ctx.plugin_dir.as_posix()}/skills/goal-check/scripts/goal_check.py --goal g.json"
+    )
+    assert H.answer_key_hits([{"full": json.dumps({"command": cmd})}]) == []
