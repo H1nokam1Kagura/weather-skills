@@ -13,12 +13,37 @@ with enough information to decide, and their answers actually change outcomes.
 
 ## 1. Offline, before release: `run_intake_eval.py`
 
-On the vendored 60-request sample (5 phrasing styles, 13 underdetermined requests), repeated
-`--reps 3`:
+On the cleared 79-request sample (D4 training population: 48 clear + 31 audit-"unfaithful";
+4 phrasing styles present), repeated `--reps 3`.
+
+**Every unit-run gets exactly one outcome.** Two of them are never scored and never enter a rate:
+
+- **error**: no usable card (timeout, non-zero exit, auth / rate limit, agent error envelope,
+  empty or unparseable card, unknown status, a ready card with no goal, answer-key access).
+- **degraded**: a card, but not from the measured design: the card says `sampling` is not
+  `independent` or `samples < 3`; fewer than 3 nested compile calls succeeded (each nested
+  `claude -p` is observed through a PATH wrapper that logs exit code, model, cost and the compile
+  prompt's hash); a nested call used a different compile prompt; or the plugin was not loaded
+  from the staged repo copy.
+
+If error + degraded exceed 10% of a population, or any phrasing style is entirely error /
+degraded, or identical cards come back for requests with different truths, or the run aborted,
+the headline is **INCONCLUSIVE** and the exit code is non-zero. Before any full run two controls
+must pass (`--preflight`): a fully specified request that must compile exact with no ask, and a
+rainfall request with no period that must ask about `period`.
+
+**What "underdetermined" means here.** It is the fidelity auditor's `faithful=false`, not "the
+right behaviour is to ask". Read by hand on 2026-10-04: 21 of the 31 are accumulated-archive
+requests that state every slot; 5 say "gauge" / "in-situ" while their truth says gridded
+observations (the request contradicts the truth); the rest are complete. So the population has
+no verdict and no ask-correctness rule: asks there are neither credited nor penalised, exact /
+mismatch is reported against the truth, and where a station cue contradicts the truth the
+scorer uses the request-implied value (the v3rr station rule's reading) and records it. The
+verdict is read on CLEAR only.
 
 | metric | definition | bar | source of the bar |
 |---|---|---|---|
-| **silent-wrong rate** | not asked, goal valid, goal ≠ truth; over ALL unit-runs | upper 90% bound ≤ **0.02** | clm H24 / H7; F1 rule (D47) |
+| **silent-wrong rate** | not asked, goal valid, goal ≠ truth; over all SCORED unit-runs | upper 90% bound ≤ **0.02** | clm H24 / H7; F1 rule (D47) |
 | ask rate | unit-runs with a goal question | ≤ **0.15** | clm F1 rule (D47) |
 | exact among non-asked | goal = truth, among unit-runs not asked | lower 90% bound ≥ **0.90** | clm H7 bar at 90% |
 | unnecessary-ask rate | asked on a CLEAR request (both fidelity auditors agree it conveys its goal) | report; it equals the ask rate on the clear population | — |
@@ -26,9 +51,10 @@ On the vendored 60-request sample (5 phrasing styles, 13 underdetermined request
 | loud failures | invalid goal or unparseable card | report | — |
 | repeat stability | units whose outcome changes across reps | report | — |
 
-Verdicts are read on the CLEAR population; ALL is reported beside it. An ask is never scored as
-exact or as silent-wrong. Below 30 goals the runner prints *not decidable* whatever the numbers:
-a smoke is not a verdict. For reference, clm's confirmed design (Qwen3-8B, v3rr rules, 3
+Verdicts are read on the CLEAR population; UNDERDETERMINED is reported beside it as a diagnostic.
+An ask is never scored as exact or as silent-wrong. Below 30 scored goals the runner prints
+*not decidable* whatever the numbers: a smoke is not a verdict. A rule-decidable ask also fails
+the bar (it must be 0). For reference, clm's confirmed design (Qwen3-8B, v3rr rules, 3
 samples, ask on disagreement) measured 0.5% silent-wrong at 4.4% asks on a fresh held-out set;
 Sonnet 4.6 alone, 0.8% at no asks (D47). **This plugin's compile prompt adds extension slots to
 the validated v3 prompt, so those figures are a target, not a property of this build.**

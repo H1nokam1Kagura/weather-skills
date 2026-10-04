@@ -25,6 +25,24 @@ from pathlib import Path
 
 N_CLEAR = 48  # stratified over task x variable
 SEED = 20261004
+# Frozen test / held-out locations in the clm repo. Nothing this script reads may sit under one.
+FORBIDDEN = (
+    "results/h7_v2_2w/",
+    "runs/f1_holdout/",
+    "results/f1/",
+    "runs/o1_devset/",
+    "results/o0",
+    "runs/s1/",
+    "results/d4_serve/",
+    "/preds.jsonl",
+)
+
+
+def _guard(clm: Path, p: Path) -> Path:
+    rel = p.resolve().relative_to(clm.resolve()).as_posix()
+    if any(f in rel or rel.startswith(f) for f in FORBIDDEN):
+        raise SystemExit(f"refusing to read {rel}: a frozen test / held-out location")
+    return p
 
 
 def main() -> int:
@@ -33,12 +51,16 @@ def main() -> int:
     ap.add_argument("--out", default=str(Path(__file__).with_name("requests_sample.jsonl")))
     a = ap.parse_args()
     clm = Path(a.clm)
-    train_p = clm / "runs" / "d4_distill" / "train.jsonl"
-    audit_p = clm / "runs" / "o0_audit" / "d4" / "databricks-gpt-oss-120b" / "records.jsonl"
+    train_p = _guard(clm, clm / "runs" / "d4_distill" / "train.jsonl")
+    audit_p = _guard(
+        clm, clm / "runs" / "o0_audit" / "d4" / "databricks-gpt-oss-120b" / "records.jsonl"
+    )
     train = [json.loads(x) for x in train_p.read_text(encoding="utf-8").splitlines() if x.strip()]
     audit = {
         r["unit"]: r
-        for r in (json.loads(x) for x in audit_p.read_text(encoding="utf-8").splitlines() if x.strip())
+        for r in (
+            json.loads(x) for x in audit_p.read_text(encoding="utf-8").splitlines() if x.strip()
+        )
     }
     for i, t in enumerate(train):
         if i not in audit or audit[i]["cluster"] != t["meta"]["cluster"]:
@@ -78,13 +100,26 @@ def main() -> int:
                 "truth": t["meta"]["truth"],
             }
         )
-    Path(a.out).write_text(
-        "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in out), encoding="utf-8"
+    body = "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in out).encode("utf-8")
+    Path(a.out).write_bytes(body)
+    manifest = {
+        "sample_sha256": hashlib.sha256(body).hexdigest(),
+        "n_units": len(out),
+        "n_clear": len(picked),
+        "n_underdetermined": len(unclear),
+        "seed": SEED,
+        "train_path": "runs/d4_distill/train.jsonl",
+        "train_sha256": hashlib.sha256(train_p.read_bytes()).hexdigest(),
+        "audit_path": "runs/o0_audit/d4/databricks-gpt-oss-120b/records.jsonl",
+        "audit_sha256": hashlib.sha256(audit_p.read_bytes()).hexdigest(),
+        "build_sample_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+    }
+    Path(a.out).with_suffix(".manifest.json").write_text(
+        json.dumps(manifest, indent=1) + "\n", encoding="utf-8"
     )
     print(
         f"{len(out)} units ({len(picked)} clear, {len(unclear)} underdetermined) -> {a.out}\n"
-        f"train sha256 {hashlib.sha256(train_p.read_bytes()).hexdigest()}\n"
-        f"audit sha256 {hashlib.sha256(audit_p.read_bytes()).hexdigest()}"
+        + "\n".join(f"{k} {v}" for k, v in manifest.items() if k.endswith("sha256"))
     )
     return 0
 
