@@ -26,6 +26,6 @@ defect:
   match_any: ["unit", "kg m-2 s-1", "mm day-1", "mm/day"]
 clean:
   submission: |
-    1. unit-convert -i gfs_daily.zarr -o gfs_daily_mm.zarr --variable precipitation_surface --to-units 'mm day-1'
+    1. unit-convert -i gfs_daily.zarr -o gfs_daily_mm.zarr --variable precipitation_surface --to-standard
     2. onset-date -i gfs_daily_mm.zarr -o onset.zarr --definition ICPAC --variable precipitation_surface --wet-spell-thresh 20 --dry-spell-thresh 1
   expected_verdict: APPROVE
