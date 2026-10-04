@@ -99,6 +99,7 @@ dataset output.
 | `resolve-time` | Resolve relative calendar dates to absolute `--start-time`/`--end-time` or `--date`. |
 | `inspect-zarr` | Print dims, coordinate values, and a bounded data-variable summary of a Zarr (stdout; no write). Data arrays can be huge — this skill never dumps them in full. |
 | `provenance` | Inspect `weather_skills_history` on a Zarr or plot PNG (DAG lineage, JSON, or a commit-pinned reproduction script). |
+| `verify-run` | Deterministic gate over an artifact's provenance: re-hash every recorded input, optionally replay the recorded steps and compare data fingerprints; prints a gate card with VERDICT PASS / BLOCK / UNVERIFIABLE (exit 0 / 1 / 2). |
 | `submit-feedback` | Build a length-checked prefilled GitHub new-issue URL the user clicks to file feedback under their own account. Holds no token, makes no network call, creates no issue itself. |
 
 ## Install
