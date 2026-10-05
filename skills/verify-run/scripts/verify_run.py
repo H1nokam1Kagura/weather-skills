@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cftime",
 #   "numpy",
 #   "xarray",
@@ -22,7 +22,7 @@ import json
 import re
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -497,6 +497,27 @@ def _render(artifact: Path, kind: str, chains: dict, scope: str, gate: Gate) -> 
     return "\n".join(lines)
 
 
+def _emit(artifact, kind, chains, scope, gate, output_format):
+    if output_format == "json":
+        verdict, reason = gate.verdict()
+        print(
+            json.dumps(
+                {
+                    "schema": "verify-run.gate/1",
+                    "artifact": str(artifact.resolve()),
+                    "kind": kind,
+                    "scope": scope,
+                    "verdict": verdict,
+                    "exit_code": EXIT_CODES[verdict],
+                    "reason": reason,
+                    "checks": [asdict(c) for c in gate.checks],
+                }
+            )
+        )
+    else:
+        print(_render(artifact, kind, chains, scope, gate))
+
+
 @weather_skill(
     name="verify-run",
     version=_SKILL_VERSION,
@@ -514,6 +535,11 @@ def _render(artifact: Path, kind: str, chains: dict, scope: str, gate: Gate) -> 
     help="Also re-run the recorded transform steps in a temp dir and compare data fingerprints.",
 )
 @weather_skill.argument(
+    "--require-replay",
+    action="store_true",
+    help="Final-result gate: implies --replay and requires a successful final data comparison.",
+)
+@weather_skill.argument(
     "--rtol",
     type=float,
     default=0.0,
@@ -525,16 +551,24 @@ def _render(artifact: Path, kind: str, chains: dict, scope: str, gate: Gate) -> 
     default=None,
     help="Extra directory to look for recorded inputs (repeatable; artifact's dir is first).",
 )
-def verify_run(input, replay, rtol, search_dir, **kwargs):
+@weather_skill.argument(
+    "--format", dest="output_format", choices=["human", "json"], default="human"
+)
+def verify_run(
+    input, replay, rtol, search_dir, require_replay=False, output_format="human", **kwargs
+):
     """Deterministic evaluation gate for a weather-skills artifact (writes only to a temp dir)."""
     artifact = Path(input)
     gate = Gate()
+    replay = replay or require_replay
     scope = "provenance + recorded-input sha256" + (
         f" + replay (rtol={rtol:g})" if replay else " (replay not requested)"
     )
+    if require_replay:
+        scope += " (final data comparison required)"
     if rtol < 0:
         gate.add("usage", "--rtol", UNVERIFIABLE, f"rtol={rtol:g}", "rtol >= 0")
-        print(_render(artifact, "?", {}, scope, gate))
+        _emit(artifact, "?", {}, scope, gate, output_format)
         raise GateUnverifiable("verify-run: VERDICT UNVERIFIABLE", prefix=False)
 
     kind, raws, error = _read_histories(artifact)
@@ -606,7 +640,16 @@ def verify_run(input, replay, rtol, search_dir, **kwargs):
         else:
             _replay(gate, next(iter(valid.values())), kind, artifact, verified, rtol)
 
-    print(_render(artifact, kind, chains, scope, gate))
+    if require_replay and not any(c.kind == "replay" and c.status == PASS for c in gate.checks):
+        gate.add(
+            "required-replay",
+            artifact.name,
+            UNVERIFIABLE,
+            "no successful final data comparison; input hashes alone do not verify output values",
+            "a PASS replay comparison of the final dataset or the figure's plotted data",
+        )
+
+    _emit(artifact, kind, chains, scope, gate, output_format)
     verdict, _reason = gate.verdict()
     if verdict == BLOCK:
         raise GateBlock("verify-run: VERDICT BLOCK", prefix=False)

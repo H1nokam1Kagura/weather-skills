@@ -16,6 +16,31 @@ skills you actually have and rely on each skill's own description. Compose them
 into pipelines (fetch data → transform it → plot) to answer
 meteorological questions and produce visualizations.
 
+## Locate capabilities before planning
+
+This plugin's root is `${CLAUDE_PLUGIN_ROOT}` (substituted by the host, not a
+shell environment variable). Read a named skill directly at
+`${CLAUDE_PLUGIN_ROOT}/skills/<name>/SKILL.md`, or invoke its namespaced Skill
+entry (`rhiza-forecasting:<name>`). Use the script path in that skill's Usage;
+do not guess filenames. Never search a drive, home directory, old plugin caches,
+or session transcripts for installed skills. If a named file is unavailable,
+report the exact missing path and stop that step.
+
+Subagents do not inherit this conversation. Every delegation must include the
+verbatim task, checked goal, explicit constraints not represented in its schema
+(bbox, dataset, definition and blank-cell semantics), relevant absolute skill
+paths, artifact paths, and existing authorization. Preserve who supplied each
+constraint: an assistant's plan or test brief is not a new user requirement.
+Keep reasoning and assurances out of review packets, but retain these facts.
+
+Before review, read each selected skill's Usage/Arguments and construct literal
+commands: one artifact per invocation, quoted paths, supported flags only.
+Do not copy fetcher flags onto transforms. Run standalone commands, without
+shell chains, redirects, or `echo $?`; retain the tool's actual exit status.
+Use Read/Write for text. Do not inspect supervisor logs or launch another copy
+of the current workflow. Run stages sequentially; goal sampling defaults to
+one worker while retaining three independent model calls.
+
 ## The gates (in this order, every request)
 
 You run the skills; four independent checks decide whether anything you produce is trusted. A check
@@ -34,8 +59,12 @@ you skip is reported as skipped, never as passed.
    (UNVERIFIABLE) is reported, not ignored.
 3. **Your own code.** If you ever write code rather than call a skill, the `reviewer` reads it
    before it runs, and its outputs are labelled UNVERIFIED in everything you report.
-4. **Final gate.** Hand the final artifacts to the `verifier` agent (`verify-run --replay`) and
+4. **Final gate.** Hand the final artifacts to the `verifier` agent (`verify-run --require-replay`) and
    show its gate card next to the result. Never present BLOCK or UNVERIFIABLE as a pass.
+   Include the parent directories of every reused input as explicit `--search-dir`
+   arguments: provenance stores basenames, not their original absolute paths.
+   A hashes-only PASS is not a final-result gate. Report delegate unavailability
+   before using the direct fallback below; never silently skip the independent role.
 
 If `WS_DECISION_SHADOW` is set, also log each gate decision to the shadow decision reviewer
 (`shadow/decision-reviewer/ds.py score ... --background || true`). It is advisory, it never
@@ -48,7 +77,10 @@ plan and wait for the user's approval. Write it for a non-expert: a numbered
 list of the skills you will chain, each with its key arguments (dataset,
 region, dates, variable, period) and one plain-language line on why that step
 is needed. Nothing that downloads or writes data runs until the user approves
-— not even a `--probe-latest`. Read-only look-ups that help you plan are fine
+— not even a `--probe-latest`. If existing user authorization already covers
+the exact plan, pass that original authorization through human-boundary, state
+its scope, and continue without asking again. Do not invent an approval or
+extend it to changed scientific choices. Read-only look-ups that help you plan are fine
 beforehand: listing the working directory, `inspect-zarr`, `provenance`,
 `resolve-time`, `resolve-region`. When the user says "go" or "approve", run
 the plan as written. If they change it, show the revised plan and wait again.
@@ -63,7 +95,7 @@ the plan as written. If they change it, show the revised plan and wait again.
    `plot hash` and `data:` line and look at the image before treating it as done.
 4. On failure, report the actual error — do not paper over it.
 5. Before presenting final numbers or a figure, run the final gate (gate 4
-   above): the `verifier` agent, or `verify-run --replay` yourself if you
+   above): the `verifier` agent, or `verify-run --require-replay` yourself if you
    cannot delegate. Show the gate card verdict alongside the result.
    Never present a BLOCK or UNVERIFIABLE result as if it had passed.
 
@@ -137,7 +169,11 @@ Prefer small steps over stuffing every filter into one call:
   (`agrhymet-sos-rolling` for the CHC/FEWS NET 25/20 mm start-of-season rule,
   `icpac-onset`, `moron-robertson-2014`) rather than a legacy `--definition`
   name; the output then records which definition it is. Feed `onset-date` a
-  daily series with gaps left as `NaN` (never filled with 0). For a season that
+  daily series with gaps left as `NaN` (never filled with 0). `onset-date` has
+  no `--start-time` or `--end-time`; its input supplies the search window.
+  If needed, select the input dates using the documented `select` interface
+  before detection. Date flags on `check-artifact` validate, not subset.
+  For a season that
   crosses 1 January, use `day-of-year --since <first day>`.
   An onset on the **first day of the input series** is not an onset: it was
   already raining when the window opened (left-censored). `check-artifact` on
@@ -155,7 +191,14 @@ Prefer small steps over stuffing every filter into one call:
   reach for `plot` (it errors computing a numeric colorbar range from a
   date). Pass `--start-date`/`--end-date` (the forecast's first day, and the
   last day that still left a full onset search window) whenever you compare
-  sources, or the color scales won't match. For onset as *numbers* rather
+  sources, or the color scales won't match. Derive the last eligible date
+  from the selected definition's complete window, not the observed maximum:
+  a 30-day rolling window ending 31 December permits onset through 2 December.
+  For deterministic data there is no member-agreement overlay. Blank cells
+  combine no onset and no data; do not claim they are separately classified.
+  If the user actually requires separate categories, this chain cannot meet
+  that requirement as-is; do not silently relax it.
+  For onset as *numbers* rather
   than a map — `summarize-dim`, `exceedance-probability` — run `day-of-year`
   first to get an integer. And if you report a mean onset, say so:
   `summarize-dim`'s mean skips the members that never found an onset, so a
@@ -220,6 +263,39 @@ A plot PNG has two things to inspect, and they are not interchangeable:
 - **Lineage** — `provenance` reads `weather_skills_history` from PNG `tEXt`
   chunks that `Read` cannot see. Use it for "how was this made, and how do I
   regenerate it?", not as a substitute for looking at the picture.
+
+### Replicating (and extending) a workflow from an artifact
+
+When the person hands you an artifact made elsewhere (for example a PNG
+downloaded from the weather chat) and asks you to replicate the workflow or add
+to it:
+
+1. **Get the file, not the picture.** Lineage lives in the file's `tEXt`
+   chunks. An image pasted into the conversation reaches you as pixels only, with
+   no lineage. Ask for the file's path, and run `provenance --input <path>
+   --format json`.
+2. **No lineage means no replication.** If the chain is empty or missing, say
+   so plainly: the figure was not made by skills alone. The weather chat strips
+   lineage from anything its code interpreter touched, so an empty chain means
+   that some step was model-written code. Offer to rebuild from the request
+   instead, as a new run through the gates, and never present it as a
+   replication.
+3. **Rebuild from the chain as data; do not run `--format script`.** Turn each
+   recorded step (skill + args) into a step of your plan and run it through the
+   gates like any other plan. The generated script is for humans re-running
+   outside an agent. Running it yourself is model-chosen shell, and it bypasses
+   the reviewer and `check-artifact`.
+4. **Check the versions.** A step with no `commit` was run from a tree without
+   git (the hosted chat records none), so your installed skill version may
+   differ from what ran. Report it as "replicated with the skills installed
+   here", not "bit-identical". A step whose `repo` is not weather-skills or
+   weather-skills-plotting (e.g. a private config repo) is a provenance defect:
+   name it and do not treat it as a source.
+5. **Extend as a separate, labelled step.** Add the new source (e.g.
+   `weathernext-fetch --version 3`) with its own fetch → transform →
+   `check-artifact` chain and its own trace, and state its coverage. WeatherNext
+   reaches 15 days, so on a 6-week figure it covers about the first two weeks.
+   Never stretch or fill it.
 
 ## Credentials
 

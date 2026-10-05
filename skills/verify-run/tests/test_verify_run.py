@@ -1,5 +1,6 @@
 """Correctness tests for verify-run (synthetic data, offline)."""
 
+import json
 import re
 import shutil
 import sys
@@ -132,6 +133,15 @@ def test_unverifiable_when_artifact_missing(tmp_path, verify_run, capsys):
     assert "does not exist" in capsys.readouterr().out
 
 
+def test_json_gate_preserves_actual_unverifiable_verdict(tmp_path, verify_run, capsys):
+    path = tmp_path / "missing.zarr"
+    assert _gate(verify_run, "-i", str(path), "--require-replay", "--format", "json") == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["schema"] == "verify-run.gate/1"
+    assert report["exit_code"] == 2 and report["verdict"] == "UNVERIFIABLE"
+    assert report["artifact"] == str(path.resolve())
+
+
 def test_unverifiable_when_input_gone(tmp_path, clip_region, aggregate, verify_run, capsys):
     _src, clipped, weekly = _chain(tmp_path, clip_region, aggregate)
     shutil.rmtree(clipped)
@@ -210,6 +220,49 @@ def test_replay_rtol(tmp_path, clip_region, aggregate, verify_run, capsys):
     out = capsys.readouterr().out
     assert code == 0, out
     assert "equal within tolerance" in out
+
+
+def test_required_replay_runs_without_optional_flag(
+    tmp_path, clip_region, aggregate, verify_run, capsys
+):
+    _src, _clipped, weekly = _chain(tmp_path, clip_region, aggregate)
+    assert _gate(verify_run, "-i", str(weekly), "--require-replay") == 0
+    out = capsys.readouterr().out
+    assert _has_check(out, "PASS", "replay: replay of weekly.zarr")
+    assert "final data comparison required" in out
+    _rewrite_values(weekly, lambda v: v * 2)
+    assert _gate(verify_run, "-i", str(weekly), "--require-replay") == 1
+    assert "VERDICT  : BLOCK" in capsys.readouterr().out
+
+
+def test_required_replay_cannot_pass_on_intermediate_comparison_only(
+    tmp_path, clip_region, aggregate, verify_run, vr_module, monkeypatch, capsys
+):
+    _src, _clipped, weekly = _chain(tmp_path, clip_region, aggregate)
+
+    def intermediate_only(gate, *args):
+        gate.add("replay-step", "intermediate", "PASS", "identical", "identical")
+
+    monkeypatch.setattr(vr_module, "_replay", intermediate_only)
+    assert _gate(verify_run, "-i", str(weekly), "--require-replay") == 2
+    assert _has_check(capsys.readouterr().out, "UNVERIFIABLE", "required-replay:")
+
+
+def test_required_replay_rejects_fetch_only_figure(tmp_path, verify_run, capsys):
+    ds = make_gridded()
+    history = [{"skill": "chirps-fetch", "version": "0.0.2", "args": {}, "input": None}]
+    stamp_zarr(ds, history)
+    raw = write_zarr(ds, tmp_path / "raw.zarr")
+    png = tmp_path / "raw.png"
+    Image.new("RGB", (8, 8)).save(png)
+    stamp_figure(
+        png, history + [{"skill": "plot", "version": "0.0.2", "args": {}, "input": input_ref(raw)}]
+    )
+    assert _gate(verify_run, "-i", str(png), "--replay") == 0
+    capsys.readouterr()
+    assert _gate(verify_run, "-i", str(png), "--require-replay") == 2
+    out = capsys.readouterr().out
+    assert "input hashes alone do not verify output values" in out
 
 
 def test_png_gates_the_plotted_data(tmp_path, clip_region, aggregate, verify_run, capsys):

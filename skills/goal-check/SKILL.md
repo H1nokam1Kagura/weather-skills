@@ -89,14 +89,34 @@ other and anchor, so they are not samples. The recipe uses three separate headle
 with no tools and this plugin's compile prompt:
 
 ```
-uv run ${CLAUDE_SKILL_DIR}/scripts/sample_goals.py (--request TEXT | --request-file request.txt) [--n 3] [--model sonnet] [--timeout 180] [--allow-degraded]
+uv run ${CLAUDE_SKILL_DIR}/scripts/sample_goals.py (--request TEXT | --request-file request.txt) [--n 3] [--workers 1] [--model sonnet] [--timeout 180] [--allow-degraded]
 ```
 
-One command runs the three compiles in parallel (`claude -p`, same prompt file, no tools, no
+For the fixed D66 scope, add `--scope-profile d66`. This runs the frozen model scope
+prompt before any goal compiles, using `--scope-model claude-sonnet-4-6` and a 1024-token
+output cap. Empty, malformed or inconsistent replies receive at most two retries.
+A valid out-of-scope result exits 6 without compiling; exhausted retries exit 4
+with scope status `unavailable`, never a fabricated semantic rejection. Both stop
+the workflow. An in-scope result continues through the existing clarification path.
+Reports preserve every scope attempt, model identity and prompt hash.
+
+D66 is opt-in: its five-region, seven-product scope excludes onset maps and the
+demo's other extensions. Do not silently apply it to the broader forecasting demo.
+The prompt is copied verbatim from `clm_ws/d66_prompts.py:SCOPE_SYS`; its confirmed
+evaluation used Databricks Sonnet 4.6. This adapter uses Claude CLI, so the endpoint
+evaluation does not certify this deployment. Refusal wording and landlocked SST
+policy remain pending product decisions; this adapter emits machine status only.
+
+One command runs three separate compiles (`claude -p`, same prompt file, no tools, no
 MCP, no settings), then this skill's checks over all three, and prints the goal-check report plus
 `sampling`, `samples_ok`, `compile_failures` and `compile_prompt_sha256`. It is one literal
 command so an unattended agent is not stopped by a permission prompt per compile. Before it
 existed, the agent fell back to a single in-context compile without saying so loudly enough.
+
+`--workers` controls concurrency (1-3; default 1 to limit RAM), not the sample
+count or independence. Sequential calls use separate contexts and do not see
+each other's answers. Use `--workers 3` only when memory permits; the report
+records the effective worker count and each call's own session evidence.
 
 Exit codes add two to goal-check's 0/1/3:
 - **4 `unavailable`**: no `claude` CLI, or every compile failed. Nothing was checked.

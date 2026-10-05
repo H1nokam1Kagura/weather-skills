@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cftime",
 #   # >=0.3.34 for the IFS Cycle 50r1 (2026-05-12) date-aware oper/scda
 #   # stream fix in Client.patch_stream — older pins misroute 06/18Z runs.

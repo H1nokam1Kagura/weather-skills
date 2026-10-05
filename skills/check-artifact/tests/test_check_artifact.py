@@ -33,6 +33,15 @@ def _line(out, check_id):
     return next(line for line in out.splitlines() if f"] {check_id} " in line)
 
 
+def test_json_output_is_a_machine_gate(tmp_path, check_artifact, capsys):
+    src = _store(tmp_path, make_gridded(n_time=5))
+    assert _run(check_artifact, "-i", src, "--format", "json") == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["schema"] == "check-artifact.gate/1"
+    assert report["verdict"] == "PASS" and report["exit_code"] == 0
+    assert report["checks"]
+
+
 def test_clean_artifact_passes(tmp_path, check_artifact, capsys):
     src = _store(tmp_path, make_gridded(n_time=5))
     code = _run(

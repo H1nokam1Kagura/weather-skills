@@ -11,6 +11,10 @@ metadata:
 
 # onset-date
 
+This command has no `--start-time` or `--end-time` flags. Its input time
+coordinates define the search window; subset the input with `select` first if
+needed. Dates passed to `check-artifact` validate the output, not the search.
+
 Source-agnostic rainy-season-onset date along the time-like dim. For each
 selected data variable `VAR`, finds the first day along `time` (or a
 lead-time dim such as `step`) satisfying an onset criterion, and writes that

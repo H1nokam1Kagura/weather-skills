@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cftime",
 #   "xarray",
 #   "zarr",
@@ -231,19 +231,44 @@ def _render_human(data: dict) -> None:
         _print_chain(chain, indent)
 
 
-def _uvx_spec(step: dict) -> str:
-    repo = step.get("repo") if isinstance(step.get("repo"), str) and step["repo"] else DEFAULT_REPO
+# Packages that ship the skills-runner CLI, keyed by repo name (a fork keeps the name).
+# Any other repo (e.g. weather-skills-plotting, whose scripts import the package from
+# their own checkout) is replayed from a checkout at the recorded commit instead.
+_CLI_BY_REPO_NAME = {"weather-skills": DEFAULT_CLI, "forecasting-skills": DEFAULT_CLI}
+
+
+def _step_repo(step: dict) -> str:
+    repo = step.get("repo")
+    return repo if isinstance(repo, str) and repo else DEFAULT_REPO
+
+
+def _step_commit(step: dict) -> str | None:
     commit = step.get("commit")
-    if isinstance(commit, str) and commit:
+    return commit if isinstance(commit, str) and commit else None
+
+
+def _repo_name(repo: str) -> str:
+    return repo.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+
+
+def _uvx_spec(step: dict) -> str:
+    repo = _step_repo(step)
+    commit = _step_commit(step)
+    if commit:
         return f"git+{repo}@{commit}"
     return f"git+{repo}"
 
 
-def _command(step: dict, inputs: list, output: str) -> str:
-    skill = step.get("skill", "?")
-    args = step.get("args") or {}
-    parts = ["uvx", "--from", _uvx_spec(step), DEFAULT_CLI, skill]
-    for dest, value in sorted(args.items()):
+def _arg_text(value) -> str:
+    # A dict arg (e.g. plot --spec) was parsed from JSON, so it must go back out as JSON.
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    return str(value)
+
+
+def _skill_args(step: dict, inputs: list, output: str) -> list:
+    parts = []
+    for dest, value in sorted((step.get("args") or {}).items()):
         flag = "--" + dest.replace("_", "-")
         if value is None or value is False:
             continue
@@ -251,19 +276,52 @@ def _command(step: dict, inputs: list, output: str) -> str:
             parts.append(flag)
         elif isinstance(value, list):
             for item in value:
-                parts += [flag, shlex.quote(str(item))]
+                parts += [flag, shlex.quote(_arg_text(item))]
         else:
-            parts += [flag, shlex.quote(str(value))]
+            parts += [flag, shlex.quote(_arg_text(value))]
     for flag, path in inputs:
         parts += [flag, shlex.quote(path)]
     parts += ["--output", shlex.quote(output)]
-    line = " ".join(parts)
-    if step.get("dirty") is True:
-        return (
-            f"# dirty working tree when this step ran; commit {step.get('commit')} "
-            f"may not match what executed\n{line}"
+    return parts
+
+
+def _checkout_lines(step: dict, skill: str, args: list) -> list:
+    repo = _step_repo(step)
+    commit = _step_commit(step)
+    name = _repo_name(repo)
+    src = f"_src_{name}_{commit[:12] if commit else 'default'}"
+    lines = [
+        f"# {name} ships no CLI: run the skill script from a checkout of that repo.",
+        f"[ -d {src} ] || git clone -q {shlex.quote(repo)} {src}",
+    ]
+    if commit:
+        lines.append(f"git -C {src} checkout -q {commit}")
+    script = f'"$(ls {src}/skills/{skill}/scripts/*.py | head -n 1)"'
+    lines.append(" ".join(["uv", "run", "--script", script, *args]))
+    return lines
+
+
+def _command(step: dict, inputs: list, output: str) -> str:
+    skill = step.get("skill", "?")
+    args = _skill_args(step, inputs, output)
+    cli = _CLI_BY_REPO_NAME.get(_repo_name(_step_repo(step)))
+    if cli:
+        lines = [" ".join(["uvx", "--from", _uvx_spec(step), cli, skill, *args])]
+    else:
+        lines = _checkout_lines(step, skill, args)
+    if _step_commit(step) is None:
+        lines.insert(
+            0,
+            "# no commit recorded for this step: this runs today's default branch, "
+            "not necessarily the code that produced the artifact",
         )
-    return line
+    elif step.get("dirty") is True:
+        lines.insert(
+            0,
+            f"# dirty working tree when this step ran; commit {step.get('commit')} "
+            f"may not match what executed",
+        )
+    return "\n".join(lines)
 
 
 def _join_parents(chain: list) -> tuple[list[tuple[str, list]], dict] | None:

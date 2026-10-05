@@ -74,10 +74,16 @@ branch stays identified.
 
 ### `script`
 
-Emits a runnable bash reproduction that regenerates the artifact. Every line
-is a full literal `uvx --from git+<repo>@<commit> forecasting-skills <skill> …`
-command, so a skill that ran from a branch is pinned to that commit. Steps
-without a recorded commit fall back to the default `weather-skills` repo.
+Emits a runnable bash reproduction that regenerates the artifact. A step from
+a repo that ships the `forecasting-skills` CLI (weather-skills or a fork) is a
+full literal `uvx --from git+<repo>@<commit> forecasting-skills <skill> …`
+command, so a skill that ran from a branch is pinned to that commit. A step
+from any other repo (e.g. weather-skills-plotting, which ships no CLI) is a
+`git clone` + `checkout <commit>` of that repo, then `uv run --script` of the
+skill's script. Dict-valued args (e.g. `plot --spec`) are emitted as JSON.
+Steps without a recorded commit fall back to the default `weather-skills` repo,
+with a comment saying they run today's default branch (artifacts from the hosted
+chat record no commit).
 
 - A single-input path reproduces linearly: each step's output threads into
   the next step's `--input`; fetch steps take no `--input`; intermediates
