@@ -59,6 +59,33 @@ samples, ask on disagreement) measured 0.5% silent-wrong at 4.4% asks on a fresh
 Sonnet 4.6 alone, 0.8% at no asks (D47). **This plugin's compile prompt adds extension slots to
 the validated v3 prompt, so those figures are a target, not a property of this build.**
 
+### Finite-sample uncertainty and verdicts
+
+Run-weighted rates describe the observed scored unit-runs. Their goal-cluster bootstrap
+intervals are descriptive only: with all zeros or all ones they collapse, so they cannot
+certify rare-failure bars. Repeating a goal does not create another independent goal.
+
+The runner also averages each metric within a distinct goal, then gives each goal equal
+weight. For n independent, representative goals whose averages lie in [0,1], its two-sided
+90% Hoeffding interval is mean +/- sqrt(log(20)/(2n)), clipped to [0,1]. Dependence within a
+goal is unrestricted. This conservative bound is valid at zero/one boundaries and for mixed
+within-goal outcomes; it is deliberately wider than a model-dependent binomial interval.
+See [Hoeffding (1963), Theorem 2](https://www.cs.rpi.edu/academics/courses/spring06/random/hoefding.pdf).
+These assumptions do not establish representativeness of a curated request set or future users.
+
+The equal-goal estimand differs from a run-weighted one when cluster sizes differ. The
+runner therefore only certifies the existing run-weighted bars where scored cluster sizes
+are equal for silent-wrong and for exact among non-asked, and both bounds clear their bars.
+Otherwise the primary verdict is INCONCLUSIVE (exit 2), apart from the existing small-smoke
+rule or direct ask/rule-ask failures. Diagnostic populations still carry no verdict.
+Confidence bounds are per metric, not a simultaneous guarantee for all bars. Missing or
+excluded records can bias population inference even when they pass the error-share guard.
+
+For example, 44 independent goals with zero observed silent errors have a Hoeffding upper
+bound about 0.185, not zero. This supports an observed zero count, not a below-2% population
+assurance. More repetitions of those same goals do not narrow the bound. No additional
+model calls are needed to correct the report's interpretation.
+
 ## 2. Every outbound packet: completeness, measured at the gate
 
 Logged per packet from `decision-packet --mode check`:

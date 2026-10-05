@@ -333,9 +333,9 @@ def _recs(n_clear=40, n_bad=0, bad_kind="timeout", style="terse"):
     return out
 
 
-def test_clean_run_meets_bars():
+def test_clean_small_run_is_inconclusive():
     _, headline, code = H.report(_recs(), "# t")
-    assert headline == "MEETS BARS" and code == H.EXIT_OK
+    assert headline == "INCONCLUSIVE" and code == H.EXIT_INCONCLUSIVE
 
 
 def test_bad_share_over_10pct_is_inconclusive_nonzero():
@@ -346,7 +346,7 @@ def test_bad_share_over_10pct_is_inconclusive_nonzero():
 
 def test_under_10pct_bad_still_decides():
     _, headline, _ = H.report(_recs(n_bad=3), "# t")  # 3/40
-    assert headline == "MEETS BARS"
+    assert headline == "INCONCLUSIVE"
 
 
 def test_all_error_stratum_is_inconclusive():
@@ -386,14 +386,14 @@ def test_underdetermined_never_carries_the_verdict():
         for i in range(5)
     ]
     txt, headline, _ = H.report(recs, "# t")
-    assert headline == "MEETS BARS" and "no verdict (diagnostic population" in txt
+    assert headline == "INCONCLUSIVE" and "no verdict (diagnostic population" in txt
 
 
 def test_silent_wrong_fails():
     recs = []
     for i in range(40):
         u = unit(i)
-        recs.append(H.classify(u, good_raw(u, "perturb" if i < 8 else "oracle")) | {"rep": 0})
+        recs.append(H.classify(u, good_raw(u, "perturb" if i < 20 else "oracle")) | {"rep": 0})
     _, headline, _ = H.report(recs, "# t")
     assert headline == "FAILS"
 
@@ -763,3 +763,55 @@ def test_nested_from_sampler_report_in_tool_result_only():
     recs = R.nested_from_sampler_reports(_j.dumps(tool_result))
     s = R.nested_summary(recs)
     assert s["n_compiles"] == 3 and s["n_ok"] == 3 and s["prompt_ok"] is True
+
+
+@pytest.mark.parametrize("value", [0, 1])
+def test_goal_bounds_do_not_collapse_at_boundary(value):
+    recs = [{"cluster": str(i), "metric": value} for i in range(44)]
+    bounds, equal = H._goal_bounds(recs, "metric")
+    assert equal and bounds[0] == value
+    assert bounds[1] < bounds[2]
+    assert bounds[2] > 0.02 if value == 0 else bounds[1] < 0.9
+    assert H._goal_bounds(recs * 100, "metric") == (bounds, equal)
+
+
+def test_goal_bounds_mixed_unequal_clusters():
+    recs = [{"cluster": "a", "metric": 0}] * 9 + [{"cluster": "b", "metric": 1}]
+    bounds, equal = H._goal_bounds(recs, "metric")
+    assert bounds[0] == 0.5 and not equal  # run-weighted mean would be 0.1
+    assert bounds[1] <= 0.5 <= bounds[2]
+    assert H._goal_bounds(recs * 3, "metric") == (bounds, equal)
+
+
+def test_goal_bounds_empty():
+    bounds, equal = H._goal_bounds([], "exact")
+    assert not equal and all(H.math.isnan(x) for x in bounds)
+
+
+def test_unequal_goal_weights_cannot_certify(monkeypatch):
+    recs = _recs()
+    recs.append(recs[0] | {"rep": 1})
+    monkeypatch.setitem(H.BARS, "silent_wrong_hi", 0.5)
+    monkeypatch.setitem(H.BARS, "exact_lo", 0.5)
+    _, headline, code = H.report(recs, "# t")
+    assert headline == "INCONCLUSIVE" and code == H.EXIT_INCONCLUSIVE
+
+
+def test_equal_goal_weights_can_decide_when_bounds_clear_bars(monkeypatch):
+    monkeypatch.setitem(H.BARS, "silent_wrong_hi", 0.5)
+    monkeypatch.setitem(H.BARS, "exact_lo", 0.5)
+    _, headline, code = H.report(_recs(), "# t")
+    assert headline == "MEETS BARS" and code == H.EXIT_OK
+
+
+def test_goal_bounds_mixed_within_goal_and_duplicate_verdict():
+    mixed = [
+        {"cluster": "a", "metric": 0},
+        {"cluster": "a", "metric": 1},
+        {"cluster": "b", "metric": 0},
+        {"cluster": "b", "metric": 0},
+    ]
+    bounds, equal = H._goal_bounds(mixed, "metric")
+    assert equal and bounds[0] == 0.25
+    recs = _recs()
+    assert H.report(recs * 3, "# t")[1:] == H.report(recs, "# t")[1:]
