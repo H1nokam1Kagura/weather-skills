@@ -1,0 +1,103 @@
+{
+  "schema": "controller-eval-admission/1",
+  "status": "STRUCTURALLY_VALID_PENDING_ADAPTER_AND_ORACLE_REVIEW",
+  "source_file": "C:\\Users\\neilha\\Downloads\\seeded-agentic-eval.DEV-ONLY.json",
+  "source_sha256": "bd8b9b98e9d67ffaf1237ba650f2d519cb7fc81976af242edf1cf604b6f7d224",
+  "generation_status": "GENERATED_NOT_EXECUTED",
+  "development_case_count": 24,
+  "case_kinds": {
+    "injected": 12,
+    "valid_control": 12
+  },
+  "layers": {
+    "controller_integration": 18,
+    "scientific_replay": 1,
+    "model_response": 3,
+    "resource_simulation": 2
+  },
+  "family_counts": {
+    "F01": 2,
+    "F02": 2,
+    "F03": 2,
+    "F04": 2,
+    "F05": 2,
+    "F06": 2,
+    "F07": 2,
+    "F08": 2,
+    "F09": 2,
+    "F10": 2,
+    "F11": 2,
+    "F12": 2
+  },
+  "structural_errors": [],
+  "full_file_content_read": false,
+  "evaluation_executed": false,
+  "paid_calls": 0,
+  "issues": [
+    {
+      "id": "A01",
+      "kind": "ORACLE_REVIEW",
+      "cases": [
+        "DEV-F02-INJECT-01",
+        "DEV-F03-INJECT-01"
+      ],
+      "finding": "Authorization is checked on request admission and unknown plan fields are rejected before CLI preflight. The generated case names later gates and specific diagnostics. Earlier safe rejection must be distinguished from full diagnostic conformance; do not silently score the original exact-gate oracle as passed."
+    },
+    {
+      "id": "A02",
+      "kind": "ADAPTER_MAPPING",
+      "cases": [
+        "DEV-F09-INJECT-01"
+      ],
+      "finding": "Generated assumptions use verifier PASS|FAIL. Controller uses PASS|BLOCK|UNVERIFIABLE. Resolve the vocabulary in adapter documentation without weakening refusal requirements."
+    },
+    {
+      "id": "A03",
+      "kind": "ORACLE_REVIEW",
+      "cases": [
+        "DEV-F04-CONTROL-01",
+        "DEV-F05-INJECT-01",
+        "DEV-F05-CONTROL-01",
+        "DEV-F06-CONTROL-01",
+        "DEV-F08-CONTROL-01",
+        "DEV-F09-CONTROL-01"
+      ],
+      "finding": "Literal ban on all writes outside the run directory conflicts with normal CLI state, dependency caches and temporary replay scratch. Define the monitored write namespace explicitly. Scientific source mutation and alternate output destinations remain forbidden. Original oracle retained."
+    },
+    {
+      "id": "A04",
+      "kind": "ADAPTER_IMPLEMENTATION",
+      "cases": [
+        "DEV-F09-INJECT-01"
+      ],
+      "finding": "Case places verifier-shaped text in reviewer output after advancing to DATA_VERIFIED. Adapter must preserve valid prior review and separately suppress verifier invocation; replaying malformed review earlier would test a different failure."
+    },
+    {
+      "id": "A05",
+      "kind": "EVIDENCE_SCOPE",
+      "cases": [
+        "DEV-F01-CONTROL-01",
+        "DEV-F02-CONTROL-01",
+        "DEV-F03-CONTROL-01",
+        "DEV-F04-CONTROL-01",
+        "DEV-F05-CONTROL-01",
+        "DEV-F06-CONTROL-01",
+        "DEV-F07-CONTROL-01",
+        "DEV-F08-CONTROL-01",
+        "DEV-F09-CONTROL-01",
+        "DEV-F10-CONTROL-01",
+        "DEV-F11-CONTROL-01",
+        "DEV-F12-CONTROL-01"
+      ],
+      "finding": "Several controls require full scientific replay and six actual role invocation receipts. Process/model doubles alone cannot satisfy that oracle. Report lower-level assertions separately; do not label a mocked baseline run a passed end-to-end control."
+    }
+  ],
+  "execution_plan": [
+    "Freeze imported DEV bytes and keep full file outside implementation context.",
+    "Implement explicit adapters and trace assertions with unresolved or absent hooks reported, not scored as passes.",
+    "Resolve oracle questions independently while preserving original expected outcomes.",
+    "Run deterministic development injections without live model calls; distinguish fixture evidence from scientific and live-role evidence.",
+    "Budget and execute three model-response cases and required live controls separately.",
+    "Freeze candidate build before a custodian runs the 16 heldout cases."
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "simkit-adapter-build-handoff/1",
+  "how_to_use": "Start a NEW Claude Code session in the weather-skills implementation repository. Give it this file with the prompt: 'Read this file and execute session_instructions.' Set inputs.implementation_repo first.",
+  "why_a_separate_session": "The adapter must read the implementation; the case writer must not. Keeping them in different sessions preserves the independence of the frozen cases and oracles.",
+  "inputs": {
+    "implementation_repo": "SET BY USER BEFORE USE (absolute path of the weather-skills repository)",
+    "simkit_root": "C:/Users/neilha/agentic-sim",
+    "frozen_dataset": "C:/Users/neilha/agentic-sim/casesets/cached-onset-e2e/frozen/agentic-e2e-injections.DEV-ONLY.json",
+    "frozen_dataset_sha256": "9198f60612770b98e131419b4baca4489c441acf80c898746154906b4d23f054",
+    "frozen_manifest": "C:/Users/neilha/agentic-sim/casesets/cached-onset-e2e/frozen/agentic-e2e-injections.ADAPTER-REQUIREMENTS.json",
+    "frozen_manifest_sha256": "a2f49b843ca8741d1055d0c9e8f352989ea3db79e58a8252b341275928054118",
+    "forbidden_file": "C:/Users/neilha/Downloads/seeded-agentic-eval.json"
+  },
+  "session_instructions": [
+    "Verify both frozen SHA256 values first. On mismatch, report and stop.",
+    "Never open inputs.forbidden_file or any held-out corpus or oracle.",
+    "Never edit the frozen dataset, its oracles, the profile, or the requirements. The adapter conforms to the cases, never the reverse. If a case cannot be implemented as written, record it NOT_IMPLEMENTED with the reason; do not alter the case.",
+    "FIRST, before writing any adapter code, answer two gating questions from the implementation with file:line evidence and report them on their own: (1) UC-12 - generate the synthetic fixture (`python -m simkit.cli fixture --out <new dir>`) and determine whether the source check (SOURCE_CHECKED) and the scientific tools accept it as written (format, variable/coordinate names, and its synthetic lineage label). If the source check requires chirps-fetch lineage, STOP and report: every case would block at the first gate, and relabelling synthetic data is a human decision, not yours. (2) UC-09 - do compiler invocations receive source metadata in their input? State whether AMD-010/011 should therefore be ratified. Only then continue with the remaining instructions.",
+    "Implement a subclass of simkit.adapter.Adapter inside the implementation repository (not inside simkit). Override run_case plus only the capability methods you genuinely implement. An overridden method that does not really perform the capability is a defect: it would let cases run that cannot be honoured.",
+    "run_case must build evidence ONLY from controller and harness observations (controller trace, receipts, captured gate reports, filesystem snapshots, budget ledger). Model self-reports are never evidence. Resolve every HARNESS_* token from captured trusted values into evidence['symbols'].",
+    "The evidence SHAPE is specified by <simkit_root>/casesets/cached-onset-e2e/EVIDENCE_CONTRACT.json (generated from the cases; never edit it by hand). Produce every listed stream path, every symbol (including HARNESS_EXECUTED_ACTION:ONSET_CHECKED used by the proposed amendments), every event_seq key, process_tree, and controller_trace.terminal.outcome. A path you cannot produce must be reported, not faked: the scorer turns it into NOT_OBSERVED.",
+    "The contract's needs_system_evaluator list (five assertions using prose verbs) needs evaluators passed to simkit.score.score_all(evaluators=...). Judgment evaluators that grade model prose must be rubric-based and are themselves oracles: write them as PROPOSALS for the specification reviewer, never tuned against candidate output.",
+    "All fixture operations run on disposable copies. Decoy processes and injected denials must be harness-owned and harmless; never signal or mutate a real session; never change host ACLs.",
+    "Answer every question routed 'adapter' in <simkit_root>/casesets/cached-onset-e2e/OPEN-QUESTIONS.json (UC-01..UC-04, UC-06..UC-12) from the implementation, with file:line evidence. These answers go to the specification owner; they do not change any expected outcome. UC-09's answer decides whether AMD-010/011 should be ratified; say so explicitly.",
+    "Use the synthetic fixture (`python -m simkit.cli fixture --out <new dir>`), never a real cache. Report whether the scientific tools read its precip.nc as written (format, variable and coordinate names) and whether SOURCE_CHECKED accepts its synthetic lineage (UC-12). Do not relabel it as chirps-fetch.",
+    "Write a capability status report: for every capability ID, IMPLEMENTED or NOT_IMPLEMENTED, the overriding method, and evidence. Write it to the implementation repository, timestamped, never overwriting.",
+    "Prove the wiring with `python -m simkit.cli dry-run --caseset <simkit_root>/casesets/cached-onset-e2e --dataset <frozen_dataset> --adapter <module>:<Class>` in a mode that does NOT invoke live models or real scientific tools (a recording or stub mode of your adapter). Real execution of the candidate is out of scope for this session.",
+    "Do not score the candidate. Scoring requires ratified oracles (casesets/cached-onset-e2e/ratification-ledger.json, entries written by the human specification reviewer only) and a separately authorized run. Do not write ledger entries.",
+    "Final reply: adapter path, capability status table, UC answers with evidence, cases that will be NOT_IMPLEMENTED and why, the dry-run summary, and an explicit list of every file opened."
+  ]
+}
