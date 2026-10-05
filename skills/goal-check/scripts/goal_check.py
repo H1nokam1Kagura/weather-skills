@@ -107,6 +107,10 @@ SRC = {
         "compile schema v2: 'Never infer a resolution'",
         "you did not ask for weekly or monthly values, so none is invented",
     ),
+    "onset_resolution": (
+        "local demo onset_map contract",
+        "daily rainfall is the input; the output is one onset date per location",
+    ),
     "no_place": (
         "compile schema v2: region null if no place is named",
         "you did not name a place",
@@ -360,8 +364,13 @@ def check_goal(raw, request: str | None) -> dict:
     if g["time_window"] is None and t != "change_map":
         defaults.append(_default("time_window", None, "latest", "the most recent data available"))
     if g["period"] is None and v is not None and t is not None:
-        plain = "no time averaging" if t == "spread_map" else "the data's own time steps"
-        defaults.append(_default("period", None, "no_resolution", plain))
+        if t == "onset_map":
+            defaults.append(
+                _default("period", None, "onset_resolution", "one onset date per location")
+            )
+        else:
+            plain = "no time averaging" if t == "spread_map" else "the data's own time steps"
+            defaults.append(_default("period", None, "no_resolution", plain))
     if t in OBS_TASKS and g["obs_source"] == "grid":
         defaults.append(
             _default(

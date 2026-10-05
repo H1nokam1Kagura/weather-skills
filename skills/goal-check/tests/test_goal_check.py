@@ -81,6 +81,10 @@ def test_onset_map_resolves_without_rainfall_aggregation(gc, tmp_path, capsys):
     assert rep["questions"] == []
     assert rep["goal"]["period"] is None
     assert "onset" in rep["readback"]["output"]
+    assert "One onset date per location" in rep["readback"]["time_resolution"]
+    period_default = next(d for d in rep["defaults"] if d["slot"] == "period")
+    assert period_default["plain_value"] == "one onset date per location"
+    assert "daily rainfall" in period_default["why"]
 
 
 @pytest.mark.parametrize("overrides", [{"period": "weekly"}, {"variable": "t2m"}])
