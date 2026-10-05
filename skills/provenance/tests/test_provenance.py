@@ -149,6 +149,66 @@ def test_script_pins_commit_and_reproduces_join(tmp_path, provenance, capsys):
     assert "--dim number" in captured
 
 
+def _plot_history():
+    return [
+        {
+            "skill": "chirps-fetch",
+            "version": "0.0.2",
+            "commit": "aaaaaaaaaaaa",
+            "repo": "https://github.com/rhiza-research/weather-skills",
+            "args": {"bbox": "5/36/-5/42"},
+            "input": None,
+        },
+        {
+            "skill": "plot",
+            "version": "0.0.2",
+            "commit": "da0cb3640da4",
+            "repo": "https://github.com/rhiza-research/weather-skills-plotting",
+            "args": {"spec": {"title": "Kenya 10-day rain"}},
+            "input": {"basename": "step1.zarr", "hash": "aa"},
+        },
+    ]
+
+
+def test_script_replays_plotting_step_from_checkout(tmp_path, provenance, capsys):
+    # W38: weather-skills-plotting ships no CLI, so `uvx ... forecasting-skills plot` fails.
+    out = _stamp_history(tmp_path / "plot.zarr", _plot_history())
+
+    run_skill(provenance, "-i", str(out), "--format", "script")
+
+    captured = capsys.readouterr().out
+    assert "weather-skills-plotting@da0cb3640da4 forecasting-skills" not in captured
+    assert "git clone -q https://github.com/rhiza-research/weather-skills-plotting" in captured
+    assert "checkout -q da0cb3640da4" in captured
+    assert "skills/plot/scripts/*.py" in captured
+    assert (
+        "uvx --from git+https://github.com/rhiza-research/weather-skills@aaaaaaaaaaaa" in captured
+    )
+
+
+def test_script_renders_dict_args_as_json(tmp_path, provenance, capsys):
+    # W39: str(dict) produced a Python repr that `plot --spec` cannot parse.
+    out = _stamp_history(tmp_path / "plot.zarr", _plot_history())
+
+    run_skill(provenance, "-i", str(out), "--format", "script")
+
+    captured = capsys.readouterr().out
+    assert """--spec '{"title": "Kenya 10-day rain"}'""" in captured
+
+
+def test_script_flags_steps_with_no_commit(tmp_path, provenance, capsys):
+    # W41: hosted-chat skills run from a tree without .git, so no commit is recorded.
+    history = [
+        {"skill": "chirps-fetch", "version": "0.0.2", "args": {}, "input": None},
+    ]
+    out = _stamp_history(tmp_path / "nocommit.zarr", history)
+
+    run_skill(provenance, "-i", str(out), "--format", "script")
+
+    captured = capsys.readouterr().out
+    assert "no commit recorded for this step" in captured
+
+
 def test_check_accepts_stamped_join(tmp_path, provenance, capsys):
     history = [
         {

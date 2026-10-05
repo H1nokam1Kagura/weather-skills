@@ -264,6 +264,39 @@ A plot PNG has two things to inspect, and they are not interchangeable:
   chunks that `Read` cannot see. Use it for "how was this made, and how do I
   regenerate it?", not as a substitute for looking at the picture.
 
+### Replicating (and extending) a workflow from an artifact
+
+When the person hands you an artifact made elsewhere (for example a PNG
+downloaded from the weather chat) and asks you to replicate the workflow or add
+to it:
+
+1. **Get the file, not the picture.** Lineage lives in the file's `tEXt`
+   chunks. An image pasted into the conversation reaches you as pixels only, with
+   no lineage. Ask for the file's path, and run `provenance --input <path>
+   --format json`.
+2. **No lineage means no replication.** If the chain is empty or missing, say
+   so plainly: the figure was not made by skills alone. The weather chat strips
+   lineage from anything its code interpreter touched, so an empty chain means
+   that some step was model-written code. Offer to rebuild from the request
+   instead, as a new run through the gates, and never present it as a
+   replication.
+3. **Rebuild from the chain as data; do not run `--format script`.** Turn each
+   recorded step (skill + args) into a step of your plan and run it through the
+   gates like any other plan. The generated script is for humans re-running
+   outside an agent. Running it yourself is model-chosen shell, and it bypasses
+   the reviewer and `check-artifact`.
+4. **Check the versions.** A step with no `commit` was run from a tree without
+   git (the hosted chat records none), so your installed skill version may
+   differ from what ran. Report it as "replicated with the skills installed
+   here", not "bit-identical". A step whose `repo` is not weather-skills or
+   weather-skills-plotting (e.g. a private config repo) is a provenance defect:
+   name it and do not treat it as a source.
+5. **Extend as a separate, labelled step.** Add the new source (e.g.
+   `weathernext-fetch --version 3`) with its own fetch → transform →
+   `check-artifact` chain and its own trace, and state its coverage. WeatherNext
+   reaches 15 days, so on a 6-week figure it covers about the first two weeks.
+   Never stretch or fill it.
+
 ## Credentials
 
 Prefer `dynamical-fetch` so you often need none — including for IMERG
