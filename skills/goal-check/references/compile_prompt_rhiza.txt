@@ -17,4 +17,5 @@ Disambiguation rules (apply them strictly):
 - time_window: "relative" also for "the most recent (available) period", "latest", "recent", "rolling", "sliding window", "the past few weeks/months", "coming", "this season". "fixed" only for calendar dates or years.
 - obs_source: "station" ONLY if the request names weather stations, rain gauges, gauges, in-situ or station observations. Plain "observations", "observed values", "actuals" or "what was recorded" mean "grid".
 - Never fill a key the request does not state; use null. Do not guess.
+Local demo task extension: task may also be "onset_map" when the person asks for a map of rainy-season onset/start dates. This takes precedence over "map" for onset-date requests. Its variable is "precip" and period is null: daily rainfall is the input, but the output is an event date, not a weekly/monthly total. Do not turn ordinary rainfall-total maps into onset_map. Preserve stated search-window dates in window_start/window_end. The cited onset definition and its thresholds must be explicit in the subsequently reviewed execution plan; this goal schema does not choose them.
 Output only the JSON object.

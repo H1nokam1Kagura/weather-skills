@@ -27,6 +27,7 @@ SCHEMA = "rhiza-goal/1"
 # --- Vocabulary: the clm-weather-skills compile schema v2/v3 (references/SOURCE.json) ----------
 TASKS = {
     "map": "a map of a variable",
+    "onset_map": "a map of rainy-season onset dates (daily rainfall input)",
     "spread_map": "a map of ensemble spread (member disagreement)",
     "fcst_vs_obs": "a forecast compared side by side with observations",
     "timeseries": "forecast and observations as overlaid time series",
@@ -114,6 +115,7 @@ SRC = {
 
 READ_OUTPUT = {
     "map": "one map image",
+    "onset_map": "one map of rainy-season onset dates",
     "spread_map": "one map image of how much the forecast's ensemble members disagree",
     "bias_map": "one map image of forecast minus observed values",
     "change_map": "one map image of future minus the historical reference period",
@@ -126,6 +128,9 @@ READ_OUTPUT = {
 PLAN_HINTS = {
     "task": {
         "map": "fetch one dataset, then plot a map",
+        "onset_map": "use daily rainfall with gaps preserved, choose a cited onset definition "
+        "in the reviewed plan, compute onset dates, check the effective search window, "
+        "then plot onset dates (not weekly or monthly rainfall totals)",
         "spread_map": "fetch an ensemble forecast, take the spread across members, plot a map",
         "fcst_vs_obs": "fetch a forecast and observations, align their time axes, plot them "
         "side by side",
@@ -280,6 +285,11 @@ def check_goal(raw, request: str | None) -> dict:
         errors.append(
             "a spread map has no time resolution (contract: spread_map never has a period)"
         )
+    if t == "onset_map":
+        if v is not None and v != "precip":
+            errors.append("a rainy-season onset map requires rainfall (precip)")
+        if g["period"] is not None:
+            errors.append("an onset map outputs event dates, not weekly or monthly totals")
     if t == "change_map" and g["time_window"] == "relative":
         errors.append(
             "a climate-change map uses fixed scenario years, never a relative window "
@@ -305,7 +315,12 @@ def check_goal(raw, request: str | None) -> dict:
         return {"goal": g, "errors": errors, "missing": missing, "rules": rules}
 
     # Required-but-missing: rainfall figures must be period totals (clm soft rule, tasks.py).
-    if v == "precip" and t is not None and t != "spread_map" and g["period"] is None:
+    if (
+        v == "precip"
+        and t is not None
+        and t not in ("spread_map", "onset_map")
+        and g["period"] is None
+    ):
         missing.append(
             {
                 "slot": "period",
@@ -399,6 +414,7 @@ def readback(g: dict, defaults: list[dict], notes: list[str]) -> dict:
     var = VARIABLES.get(v, v)
     what = {
         "map": f"A map of {var}.",
+        "onset_map": "A map of when the rainy season started, using daily rainfall.",
         "spread_map": f"A map of how much the forecast's ensemble members disagree about {var}.",
         "fcst_vs_obs": f"The {var} forecast shown side by side with what was observed.",
         "timeseries": f"The {var} forecast and the observations as lines over time.",
@@ -432,6 +448,8 @@ def readback(g: dict, defaults: list[dict], notes: list[str]) -> dict:
         when += f" Season: {g['season']}."
     if g["period"]:
         res = f"{g['period']} totals" if v == "precip" else f"{g['period']} averages"
+    elif t == "onset_map":
+        res = "One onset date per location, computed from daily rainfall."
     elif t == "spread_map":
         res = "No time averaging."
     else:
