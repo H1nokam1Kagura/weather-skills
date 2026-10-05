@@ -7,6 +7,7 @@ huggingface_hub needed), writes into the gitignored cache, then:
   * with --write-lock records size + sha256 of every file in laya.lock.json, or without it
     verifies every file against the existing lock and refuses on any mismatch.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,8 +17,16 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-from .lock import (LAYA_FILES, LOCK_PATH, OFFICIAL_REPO, HashMismatch, cache_dir, read_lock,
-                   sha256_file, verify_cache)
+from .lock import (
+    LAYA_FILES,
+    LOCK_PATH,
+    OFFICIAL_REPO,
+    HashMismatch,
+    cache_dir,
+    read_lock,
+    sha256_file,
+    verify_cache,
+)
 
 HF = "https://huggingface.co"
 
@@ -59,7 +68,7 @@ def check_against_hub(directory: Path, tree: dict[str, dict]) -> None:
 
 
 def fetch(write_lock: bool = False, force: bool = False) -> dict:
-    lock = read_lock()                       # refuses any repo but convaiinnovations/laya
+    lock = read_lock()  # refuses any repo but convaiinnovations/laya
     repo, rev = lock["repo"], lock["revision"]
     assert repo == OFFICIAL_REPO
     directory = cache_dir(lock)
@@ -75,8 +84,11 @@ def fetch(write_lock: bool = False, force: bool = False) -> dict:
         files = {}
         for rel in LAYA_FILES:
             p = directory / rel
-            files[rel] = {"size": p.stat().st_size, "sha256": sha256_file(p),
-                          "hub_git_oid": tree[rel]["oid"]}
+            files[rel] = {
+                "size": p.stat().st_size,
+                "sha256": sha256_file(p),
+                "hub_git_oid": tree[rel]["oid"],
+            }
         lock["files"] = files
         with open(LOCK_PATH, "w", encoding="utf-8") as f:
             json.dump(lock, f, indent=2)

@@ -8,6 +8,7 @@
 #   # matplotlib<3.10: cartopy gridliner crash
 #   "matplotlib>=3.8,<3.10",
 #   "numpy",
+#   "pillow",
 #   "xarray",
 #   "zarr",
 #   "pint-xarray>=0.6",

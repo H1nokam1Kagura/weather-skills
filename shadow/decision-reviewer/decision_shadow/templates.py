@@ -14,6 +14,7 @@ and the log can be compared across backends.
                             only candidates the rules already allow; the shadow never widens
                             the set) -> choice in options
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -36,9 +37,7 @@ REVIEW_CRITERIA = {
     "reject": "The pipeline breaks at least one stated skill rule, or does not answer the request.",
 }
 
-NEXT_SKILL_INSTRUCTIONS = (
-    "Given the goal and the pipeline so far, which skill should run next?"
-)
+NEXT_SKILL_INSTRUCTIONS = "Given the goal and the pipeline so far, which skill should run next?"
 
 ESCALATE_OPTIONS = ("escalate", "proceed")
 REVIEW_OPTIONS = tuple(REVIEW_CRITERIA)
@@ -65,7 +64,11 @@ def build_question(decision_point: str, options: Any) -> dict[str, Any]:
     if decision_point == "escalate":
         return {"type": "noul", "instructions": ESCALATE_INSTRUCTIONS}
     if decision_point == "review_verdict":
-        return {"type": "choice", "instructions": REVIEW_INSTRUCTIONS, "criteria": dict(REVIEW_CRITERIA)}
+        return {
+            "type": "choice",
+            "instructions": REVIEW_INSTRUCTIONS,
+            "criteria": dict(REVIEW_CRITERIA),
+        }
     return {"type": "choice", "instructions": NEXT_SKILL_INSTRUCTIONS, "criteria": dict(opts)}
 
 

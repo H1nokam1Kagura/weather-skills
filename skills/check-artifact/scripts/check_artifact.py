@@ -710,7 +710,40 @@ def _history_window(chain):
     return None, None
 
 
-def _check_dates(name, da, start, end, source, checks):
+def _event_window(da, chain, start_time, end_time):
+    """Prefer recorded effective bounds; merge explicit overrides independently.
+
+    Old fetch history bounds the dates, but cannot establish the first search day:
+    a time selection or definition-specific search start may have intervened.
+    """
+    import datetime as _dt
+
+    start, end = _history_window(chain)
+    known_start = False
+    sources = ["fetch history (outer bounds only)"]
+    for key in ("onset_search_start", "onset_search_end"):
+        value = da.attrs.get(key)
+        if value is None:
+            continue
+        try:
+            parsed = _dt.date.fromisoformat(str(value))
+        except ValueError:
+            continue
+        if key == "onset_search_start":
+            start, known_start = parsed, True
+        else:
+            end = parsed
+        sources.append(key)
+    if start_time is not None:
+        start, known_start = start_time, True
+    if end_time is not None:
+        end = end_time
+    if start_time is not None or end_time is not None:
+        sources.append("--start-time/--end-time")
+    return start, end, "; ".join(sources), known_start
+
+
+def _check_dates(name, da, start, end, source, checks, known_start=True):
     """Checks for an event-date variable (datetime64): missing share, window, left-censoring."""
     vals = np.asarray(da.values).astype("datetime64[D]").reshape(-1)
     n = vals.size
@@ -728,6 +761,18 @@ def _check_dates(name, da, start, end, source, checks):
     )
     if hit.size == 0:
         return
+    if start is None or not known_start:
+        checks.append(
+            Check(
+                "date-censored",
+                name,
+                "WARN",
+                "not checked: effective search start unknown",
+                "recorded onset_search_start or explicit --start-time",
+                "fetch history alone cannot establish the first search day after time "
+                "selection or a restricted onset search; rerun onset-date or supply the actual start",
+            )
+        )
     if start is None and end is None:
         checks.append(
             Check(
@@ -758,7 +803,7 @@ def _check_dates(name, da, start, end, source, checks):
             f"an event date cannot fall outside the series it was detected in (window from {source})",
         )
     )
-    if s is None:
+    if s is None or not known_start:
         return
     frac = float(np.mean(hit == s))
     if frac > CENSORED_FAIL_FRAC:
@@ -903,7 +948,9 @@ def check_artifact(
             )
         uncheckable = [v for v in variable if v not in numeric and v not in dated]
         if uncheckable:
-            raise UsageError(f"no checkable values in {', '.join(uncheckable)} (not numeric or dates)")
+            raise UsageError(
+                f"no checkable values in {', '.join(uncheckable)} (not numeric or dates)"
+            )
         selected = [v for v in dict.fromkeys(variable) if v in numeric]
         selected_dates = [v for v in dict.fromkeys(variable) if v in dated]
     else:
@@ -921,12 +968,9 @@ def check_artifact(
     for name in selected:
         _check_variable(name, ds[name], ds, history_skills, expect_units, max_nan_frac, checks)
     if selected_dates:
-        if start_time is not None or end_time is not None:
-            win, source = (start_time, end_time), "--start-time/--end-time"
-        else:
-            win, source = _history_window(chain), "the fetch step in the history"
         for name in selected_dates:
-            _check_dates(name, ds[name], win[0], win[1], source, checks)
+            start, end, source, known_start = _event_window(ds[name], chain, start_time, end_time)
+            _check_dates(name, ds[name], start, end, source, checks, known_start)
     _check_coverage(ds, checks)
     if _time_axis(ds) is not None or not selected_dates:
         # An event-date artifact has no time axis; its window was checked on the dates above.

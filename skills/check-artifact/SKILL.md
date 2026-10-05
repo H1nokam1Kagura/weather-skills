@@ -128,14 +128,20 @@ cannot support a regional statistic. Tighten it per task (`--max-nan-frac
 ### Event dates
 
 A `datetime64` data variable (e.g. `onset-date`'s `onset_*_date`) is checked as
-an event date. Its search window comes from `--start-time`/`--end-time`, or,
-failing that, from the first history step that recorded `start_time`/`end_time`
-(the fetch that bounded the series); the card says which. With neither, the
-window checks are WARN "not checked". The artifact has no time axis, so
-`time-range` is not applied to it.
+an event date. New onset artifacts record `onset_search_start` and
+`onset_search_end` on the date variable, using the actual input series after
+time selection and any definition-specific search-start restriction. The end
+is the last input day (an outer bound, not the last eligible candidate).
+`--start-time` and `--end-time` override their respective bounds independently.
+The card reports the sources used. Legacy fetch history supplies outer bounds
+for range checks, but cannot prove the first search day: `date-censored` then
+WARNs "not checked". Rerun `onset-date` or supply the actual `--start-time` to
+check censoring. With no bounds, `date-window` also WARNs. The artifact has no
+time axis, so `time-range` is not applied to it.
 
 `date-censored` is the share of detected events dated on the window's first
-day. Such a cell was already raining when the window opened, so its "onset" is
+day, excluding NaT and counting member-cell events for ensembles; it is not
+the fraction of map area. Such a cell was already raining when the window opened, so its "onset" is
 the window start, not an onset, and the map looks plausible while being wrong
 there. Thresholds, measured on Kenya CHIRPS OND 2025 with
 `agrhymet-sos-rolling`: good windows scored 1.4 % and 2.5 %; a window opened

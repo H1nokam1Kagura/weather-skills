@@ -11,6 +11,7 @@ The log is append-only JSONL with two record kinds:
     {"kind": "outcome", "decision_id", "ts", "actual"}
 An outcome is what the REAL gate decided; the report joins on decision_id (last outcome wins).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -18,7 +19,7 @@ import json
 import os
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,12 +46,16 @@ def log_path() -> Path:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    return datetime.now(UTC).isoformat(timespec="milliseconds")
 
 
 def input_hash(decision_point: str, state_text: str, options: Any) -> str:
-    canon = json.dumps({"p": decision_point, "s": state_text, "o": options}, sort_keys=True,
-                       ensure_ascii=False, default=str)
+    canon = json.dumps(
+        {"p": decision_point, "s": state_text, "o": options},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
@@ -82,9 +87,15 @@ def normalize_actual(decision_point: str, actual: Any) -> str:
     return a
 
 
-def shadow_score(decision_point: str, state_text: str, options: Any = None, *,
-                 backend: str | None = None, actual: Any = None,
-                 decision_id: str | None = None) -> str | None:
+def shadow_score(
+    decision_point: str,
+    state_text: str,
+    options: Any = None,
+    *,
+    backend: str | None = None,
+    actual: Any = None,
+    decision_id: str | None = None,
+) -> str | None:
     """Score in shadow and log. Returns the decision_id, or None when the shadow is off.
 
     NEVER raises and NEVER returns a decision: the caller's verdict must not read this.
@@ -96,8 +107,11 @@ def shadow_score(decision_point: str, state_text: str, options: Any = None, *,
             return None
         decision_id = decision_id or uuid.uuid4().hex
         rec: dict[str, Any] = {
-            "kind": "decision", "decision_id": decision_id, "ts": _now(),
-            "decision_point": decision_point, "backend": backend,
+            "kind": "decision",
+            "decision_id": decision_id,
+            "ts": _now(),
+            "decision_point": decision_point,
+            "backend": backend,
             "input_sha256": input_hash(decision_point, state_text, options),
         }
         try:
@@ -113,28 +127,44 @@ def shadow_score(decision_point: str, state_text: str, options: Any = None, *,
                 rec["actual_error"] = str(e)
         try:
             out = backends.score(decision_point, state_text, options, backend=backend)
-            rec.update(status="ok", choice=out["choice"], probs=out["probs"],
-                       latency_ms=out["latency_ms"], model_sha=out["model_sha"])
+            rec.update(
+                status="ok",
+                choice=out["choice"],
+                probs=out["probs"],
+                latency_ms=out["latency_ms"],
+                model_sha=out["model_sha"],
+            )
             if "load_ms" in out:
                 rec["load_ms"] = out["load_ms"]
         except Exception as e:  # noqa: BLE001  fail closed: logged, never raised
-            rec.update(status="unavailable", choice=None, probs=None, latency_ms=None,
-                       model_sha=None, error=f"{type(e).__name__}: {e}")
+            rec.update(
+                status="unavailable",
+                choice=None,
+                probs=None,
+                latency_ms=None,
+                model_sha=None,
+                error=f"{type(e).__name__}: {e}",
+            )
         _append(rec)
         return decision_id
     except Exception:  # noqa: BLE001  even the logger failing must not touch the real run
         return None
 
 
-def shadow_score_background(decision_point: str, state_text: str, options: Any = None, *,
-                            backend: str | None = None) -> str | None:
+def shadow_score_background(
+    decision_point: str, state_text: str, options: Any = None, *, backend: str | None = None
+) -> str | None:
     """Fire-and-forget variant: returns the decision_id immediately, scores on a daemon thread."""
     backend = backend or enabled_backend()
     if backend is None:
         return None
     decision_id = uuid.uuid4().hex
-    threading.Thread(target=shadow_score, args=(decision_point, state_text, options),
-                     kwargs={"backend": backend, "decision_id": decision_id}, daemon=True).start()
+    threading.Thread(
+        target=shadow_score,
+        args=(decision_point, state_text, options),
+        kwargs={"backend": backend, "decision_id": decision_id},
+        daemon=True,
+    ).start()
     return decision_id
 
 
@@ -161,5 +191,5 @@ def read_log(path: Path | None = None) -> list[dict]:
             try:
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
-                continue            # a torn line from a crashed writer is skipped, not fatal
+                continue  # a torn line from a crashed writer is skipped, not fatal
     return rows

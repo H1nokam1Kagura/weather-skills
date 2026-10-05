@@ -1,10 +1,10 @@
 """Stub backend, shadow gating, logging, record-outcome, fail-closed backends, CLI."""
+
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
-
 from decision_shadow import backends, cli, shadow
 from decision_shadow.shadow import read_log, record_outcome, shadow_score
 
@@ -26,10 +26,12 @@ def test_stub_is_deterministic_and_typed():
 def test_stub_review_and_next_skill():
     r = backends.score("review_verdict", "pipeline: fetch -> plot. rules ok.", backend="stub")
     assert r["choice"] == "approve" and set(r["probs"]) == {"approve", "reject"}
-    r = backends.score("review_verdict", "pipeline violates rule: plot before convert-to-totals", backend="stub")
+    r = backends.score(
+        "review_verdict", "pipeline violates rule: plot before convert-to-totals", backend="stub"
+    )
     assert r["choice"] == "reject"
     n = backends.score("next_skill", "goal", ["select", "clip-region", "plot"], backend="stub")
-    assert n["choice"] == "clip-region"                      # alphabetically first valid skill
+    assert n["choice"] == "clip-region"  # alphabetically first valid skill
     assert set(n["probs"]) == {"select", "clip-region", "plot"}
     assert abs(sum(n["probs"].values()) - 1) < 1e-6
 
@@ -68,7 +70,7 @@ def test_inline_actual_and_record_outcome(shadow_log, monkeypatch):
     d1 = shadow_score("escalate", ESC_STATE, actual="yes")
     d2 = shadow_score("review_verdict", "fine", actual="approved")
     assert record_outcome(d2, "reject", "review_verdict") is True
-    assert record_outcome(d1, "maybe", "escalate") is False     # invalid outcome: refused, not raised
+    assert record_outcome(d1, "maybe", "escalate") is False  # invalid outcome: refused, not raised
     rows = read_log(shadow_log)
     assert rows[0]["actual"] == "escalate" and rows[1]["actual"] == "approve"
     assert rows[2] == {**rows[2], "kind": "outcome", "decision_id": d2, "actual": "reject"}
@@ -110,7 +112,7 @@ def test_http_backends_fail_closed_without_endpoint(shadow_log, backend):
 
 @pytest.mark.parametrize("backend", ["kev", "clm"])
 def test_http_backends_fail_closed_when_endpoint_down(shadow_log, monkeypatch, backend):
-    monkeypatch.setenv(f"{backend.upper()}_URL", "http://127.0.0.1:9")    # discard port: refused
+    monkeypatch.setenv(f"{backend.upper()}_URL", "http://127.0.0.1:9")  # discard port: refused
     monkeypatch.setenv(f"{backend.upper()}_TIMEOUT_S", "1")
     shadow_score("escalate", ESC_STATE, backend=backend)
     (rec,) = read_log(shadow_log)
@@ -119,12 +121,15 @@ def test_http_backends_fail_closed_when_endpoint_down(shadow_log, monkeypatch, b
 
 class _FakeSystemOne(BaseHTTPRequestHandler):
     """Mimics clm-serve / kev.serve POST /v1/systemone (shapes from their src/*/schema.py, api.py)."""
+
     seen: list = []
     status = 200
 
     def do_POST(self):  # noqa: N802
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
-        type(self).seen.append({"path": self.path, "auth": self.headers.get("authorization"), "body": body})
+        type(self).seen.append(
+            {"path": self.path, "auth": self.headers.get("authorization"), "body": body}
+        )
         if type(self).status != 200:
             self.send_response(type(self).status)
             self.end_headers()
@@ -136,8 +141,12 @@ class _FakeSystemOne(BaseHTTPRequestHandler):
             else:
                 keys = list(q["criteria"])
                 p = [0.7] + [0.3 / (len(keys) - 1)] * (len(keys) - 1)
-                answers[qid] = {"type": "choice", "choice": keys[0], "confidence": 0.6,
-                                "probabilities": dict(zip(keys, p))}
+                answers[qid] = {
+                    "type": "choice",
+                    "choice": keys[0],
+                    "confidence": 0.6,
+                    "probabilities": dict(zip(keys, p, strict=True)),
+                }
         out = json.dumps({"model": body["model"], "answers": answers, "usage": {}}).encode()
         self.send_response(200)
         self.send_header("content-type", "application/json")
@@ -169,10 +178,16 @@ def test_clm_mocked_endpoint_request_response_mapping(fake_server, monkeypatch):
     assert req["body"]["model"] == "clm-latest" and req["body"]["state"] == ESC_STATE
     assert req["body"]["questions"]["decision"]["type"] == "noul"
 
-    out = backends.score("next_skill", "goal", {"select": "pick a var", "plot": None}, backend="clm")
+    out = backends.score(
+        "next_skill", "goal", {"select": "pick a var", "plot": None}, backend="clm"
+    )
     assert out["choice"] == "select" and set(out["probs"]) == {"select", "plot"}
     q = _FakeSystemOne.seen[-1]["body"]["questions"]["decision"]
-    assert q == {"type": "choice", "instructions": q["instructions"], "criteria": {"select": "pick a var", "plot": None}}
+    assert q == {
+        "type": "choice",
+        "instructions": q["instructions"],
+        "criteria": {"select": "pick a var", "plot": None},
+    }
 
     out = backends.score("review_verdict", "pipeline ...", backend="clm")
     assert out["choice"] == "approve" and set(out["probs"]) == {"approve", "reject"}
@@ -195,12 +210,19 @@ def test_api_key_never_logged(fake_server, shadow_log, monkeypatch):
 
 # ------------------------------------------------------------------ CLI
 def test_cli_score_hides_choice_and_always_exits_zero(shadow_log, capsys):
-    assert cli.main(["score", "--point", "escalate", "--state", ESC_STATE, "--backend", "stub"]) == 0
+    assert (
+        cli.main(["score", "--point", "escalate", "--state", ESC_STATE, "--backend", "stub"]) == 0
+    )
     out = json.loads(capsys.readouterr().out)
     assert set(out) == {"decision_id", "shadow"} and out["shadow"] == "stub"
     assert cli.main(["score", "--point", "escalate", "--state", "x", "--backend", "kev"]) == 0
     capsys.readouterr()
-    assert cli.main(["record-outcome", "--id", out["decision_id"], "--actual", "yes", "--point", "escalate"]) == 0
+    assert (
+        cli.main(
+            ["record-outcome", "--id", out["decision_id"], "--actual", "yes", "--point", "escalate"]
+        )
+        == 0
+    )
     capsys.readouterr()
     assert cli.main(["report"]) == 0
     text = capsys.readouterr().out

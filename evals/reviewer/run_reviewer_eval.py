@@ -80,7 +80,14 @@ VERDICT_LINE_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-EXIT_OK, EXIT_REFUSED, EXIT_USAGE, EXIT_INCONCLUSIVE, EXIT_ABORTED, EXIT_PREFLIGHT = 0, 1, 2, 3, 4, 5
+EXIT_OK, EXIT_REFUSED, EXIT_USAGE, EXIT_INCONCLUSIVE, EXIT_ABORTED, EXIT_PREFLIGHT = (
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+)
 
 # Outcome classes.
 CATCH, MISS, NEEDS_INFO, APPROVE_OK, FALSE_ALARM, ERROR = (
@@ -169,9 +176,7 @@ def twin_diff(defect_sub: str, clean_sub: str) -> dict:
     a, b = _submission_lines(defect_sub), _submission_lines(clean_sub)
     ops = difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes()
     hunks = [(i1 + 1, max(i1 + 1, i2), j2 - j1) for tag, i1, i2, j1, j2 in ops if tag != "equal"]
-    changed = sum(
-        max(i2 - i1, j2 - j1) for tag, i1, i2, j1, j2 in ops if tag != "equal"
-    )
+    changed = sum(max(i2 - i1, j2 - j1) for tag, i1, i2, j1, j2 in ops if tag != "equal")
     return {"changed_lines": changed, "hunks": hunks}
 
 
@@ -293,7 +298,9 @@ def dry_run(cases: list[tuple[Path, dict]], repo: Path, quiet: bool = False) -> 
             )
     n_cases = len(cases)
     if not quiet:
-        print(f"\n{n_cases} cases ({2 * n_cases} variants: {n_cases} defect + {n_cases} clean twins)")
+        print(
+            f"\n{n_cases} cases ({2 * n_cases} variants: {n_cases} defect + {n_cases} clean twins)"
+        )
     if n_cases < 10:
         problems.append(f"only {n_cases} cases; the benchmark needs at least 10")
     if problems:
@@ -385,7 +392,10 @@ def _content_text(content) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "\n".join(_content_text(c.get("text", c.get("content", ""))) if isinstance(c, dict) else str(c) for c in content)
+        return "\n".join(
+            _content_text(c.get("text", c.get("content", ""))) if isinstance(c, dict) else str(c)
+            for c in content
+        )
     if isinstance(content, dict):
         return _content_text(content.get("text", content.get("content", "")))
     return "" if content is None else str(content)
@@ -516,7 +526,10 @@ def classify_cli(rc: int | None, stdout: str, stderr: str, timed_out: bool = Fal
 
 def parse_verdict(text: str) -> tuple[str | None, str]:
     """(verdict, '') or (None, 'unparseable' | 'ambiguous')."""
-    found = {m.group(1).upper().replace("_", "-").replace(" ", "-") for m in VERDICT_LINE_RE.finditer(text or "")}
+    found = {
+        m.group(1).upper().replace("_", "-").replace(" ", "-")
+        for m in VERDICT_LINE_RE.finditer(text or "")
+    }
     if not found:
         return None, "unparseable"
     if len(found) > 1:
@@ -526,7 +539,9 @@ def parse_verdict(text: str) -> tuple[str | None, str]:
 
 def findings_text(text: str) -> str | None:
     """The FINDINGS section of a card, or None when the card has none."""
-    m = re.search(r"FINDINGS\s*:(.*?)(?:\n[\s*#]*NEEDED\s*:|\n[\s*#]*OPEN QUESTIONS\s*:|\Z)", text or "", re.S)
+    m = re.search(
+        r"FINDINGS\s*:(.*?)(?:\n[\s*#]*NEEDED\s*:|\n[\s*#]*OPEN QUESTIONS\s*:|\Z)", text or "", re.S
+    )
     return m.group(1) if m else None
 
 
@@ -606,7 +621,9 @@ def cluster_bootstrap(groups: list[tuple[int, int]], iters: int = 2000, seed: in
 # ---------------------------------------------------------------------------
 
 
-def run_key(case_id: str, variant: str, rep: int, agent_hash: str, config_hash: str, prefix: str = "") -> str:
+def run_key(
+    case_id: str, variant: str, rep: int, agent_hash: str, config_hash: str, prefix: str = ""
+) -> str:
     """Resume key. A changed agent file or prompt/config forks a NEW key, so results from
     two agent versions can never be silently mixed in one results dir."""
     return f"{prefix}{case_id}__{variant}__r{rep}__a{agent_hash[:12]}__c{config_hash[:12]}"
@@ -646,7 +663,11 @@ def load_records(runs_dir: Path) -> dict[str, dict]:
 def _git(repo: Path, *args: str) -> str | None:
     try:
         proc = subprocess.run(
-            ["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8", timeout=60
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -695,7 +716,8 @@ def collect_stamp(args, agent_hash: str, config_hash: str) -> dict:
     return {
         "timestamp_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "git_sha": (_git(args.plugin_dir, "rev-parse", "HEAD") or "").strip() or None,
-        "git_branch": (_git(args.plugin_dir, "rev-parse", "--abbrev-ref", "HEAD") or "").strip() or None,
+        "git_branch": (_git(args.plugin_dir, "rev-parse", "--abbrev-ref", "HEAD") or "").strip()
+        or None,
         "dirty_guarded_paths": git_dirty(args.plugin_dir),
         "plugin_name": plugin_json.get("name"),
         "plugin_version": plugin_json.get("version") or "unversioned (no version in plugin.json)",
@@ -739,8 +761,10 @@ def stage_plugin(src: Path, dst_root: Path) -> Path:
         shutil.copytree(
             src,
             dst,
-            ignore=lambda d, names: [n for n in names if Path(d) == src and n in excluded_top]
-            + [n for n in names if n == "__pycache__"],
+            ignore=lambda d, names: (
+                [n for n in names if Path(d) == src and n in excluded_top]
+                + [n for n in names if n == "__pycache__"]
+            ),
         )
     if (dst / "evals").exists():
         raise RuntimeError("staging failed: evals/ present in the staged plugin")
@@ -782,7 +806,9 @@ def build_cmd(args, plugin_dir: Path) -> list[str]:
     return cmd
 
 
-def invoke_cli(cmd: list[str], prompt: str, timeout: int) -> tuple[int | None, str, str, bool, float]:
+def invoke_cli(
+    cmd: list[str], prompt: str, timeout: int
+) -> tuple[int | None, str, str, bool, float]:
     """Run one headless CLI call in an empty temp dir -> (rc, stdout, stderr, timed_out, secs)."""
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="reviewer-eval-") as workdir:
@@ -798,10 +824,20 @@ def invoke_cli(cmd: list[str], prompt: str, timeout: int) -> tuple[int | None, s
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
-            out = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            out = (
+                exc.stdout.decode("utf-8", "replace")
+                if isinstance(exc.stdout, bytes)
+                else (exc.stdout or "")
+            )
             return None, out, "", True, round(time.monotonic() - started, 1)
         except OSError as exc:
-            return 127, "", f"could not start claude CLI: {exc}", False, round(time.monotonic() - started, 1)
+            return (
+                127,
+                "",
+                f"could not start claude CLI: {exc}",
+                False,
+                round(time.monotonic() - started, 1),
+            )
     return proc.returncode, proc.stdout, proc.stderr, False, round(time.monotonic() - started, 1)
 
 
@@ -822,7 +858,9 @@ class Ctx:
     calls: int = 0
 
 
-def make_jobs(cases: list[dict], variants, n: int, ctx: Ctx, prefix: str = "", reps=None) -> list[dict]:
+def make_jobs(
+    cases: list[dict], variants, n: int, ctx: Ctx, prefix: str = "", reps=None
+) -> list[dict]:
     jobs = []
     for case in cases:
         for variant in variants:
@@ -860,7 +898,14 @@ def run_one(job: dict, ctx: Ctx) -> dict:
             cost_total += float(c)
         elif not res.get("error_kind"):
             cost_known = False
-        attempts.append({"attempt": attempt + 1, "error_kind": res.get("error_kind"), "cost_usd": c, "seconds": secs})
+        attempts.append(
+            {
+                "attempt": attempt + 1,
+                "error_kind": res.get("error_kind"),
+                "cost_usd": c,
+                "seconds": secs,
+            }
+        )
         if res.get("transient") and attempt < ctx.args.retries:
             wait = ctx.args.backoff * (3**attempt)
             ctx.log(f"    transient {res['error_kind']} on {job['key']}; retry in {wait:.0f}s")
@@ -870,13 +915,18 @@ def run_one(job: dict, ctx: Ctx) -> dict:
     if res.get("transient"):  # retries exhausted
         if res["error_kind"] == "rate_limit":
             res["fatal"] = True
-            res["error"] = f"rate limited after {len(attempts)} attempts: " + (res.get("error") or "")
+            res["error"] = f"rate limited after {len(attempts)} attempts: " + (
+                res.get("error") or ""
+            )
     # Model check: the agent pins a model; a run on a different family means the agent
     # was not loaded (the CLI fell back to the default session).
     agents = res.get("init_agents")
     short = ctx.args.agent.split(":")[-1]
-    if not res.get("error_kind") and isinstance(agents, list) and agents and not any(
-        short in (a if isinstance(a, str) else json.dumps(a)) for a in agents
+    if (
+        not res.get("error_kind")
+        and isinstance(agents, list)
+        and agents
+        and not any(short in (a if isinstance(a, str) else json.dumps(a)) for a in agents)
     ):
         res.update(
             error_kind="agent_not_loaded",
@@ -885,7 +935,9 @@ def run_one(job: dict, ctx: Ctx) -> dict:
         )
     if not res.get("error_kind") and ctx.model_pin and not ctx.args.model:
         family = ctx.model_pin.lower()
-        if family in ("opus", "sonnet", "haiku") and not any(family in m.lower() for m in res["models_used"]):
+        if family in ("opus", "sonnet", "haiku") and not any(
+            family in m.lower() for m in res["models_used"]
+        ):
             res.update(
                 error_kind="wrong_model",
                 error=f"agent pins {ctx.model_pin} but the run used {res['models_used']}: "
@@ -902,9 +954,7 @@ def run_one(job: dict, ctx: Ctx) -> dict:
     rec["verdict"] = res.get("verdict") if not res.get("error_kind") else None
     rec["outcome"] = outcome_for(job["variant"], rec["verdict"], rec.get("error_kind"))
     text = res.get("text", "")
-    rec["located"] = bool(
-        rec["outcome"] == CATCH and located(text, job["match_any"])
-    )
+    rec["located"] = bool(rec["outcome"] == CATCH and located(text, job["match_any"]))
     rec["quotes_verbatim"], rec["quotes_total"] = citation_check(text, ctx.plugin_dir)
     rec["response_sha"] = response_hash(text) if text.strip() else None
     rec["agent_sha256"] = ctx.agent_hash
@@ -920,7 +970,9 @@ def execute(jobs: list[dict], ctx: Ctx) -> tuple[list[dict], str | None]:
     done = {k: r for k, r in existing.items() if r.get("outcome") and r["outcome"] != ERROR}
     pending = [j for j in jobs if j["key"] not in done]
     if len(jobs) != len(pending):
-        ctx.log(f"resume: {len(jobs) - len(pending)} of {len(jobs)} runs already complete in {ctx.out_dir}")
+        ctx.log(
+            f"resume: {len(jobs) - len(pending)} of {len(jobs)} runs already complete in {ctx.out_dir}"
+        )
     records = {j["key"]: done[j["key"]] for j in jobs if j["key"] in done}
     abort = None
     consecutive_errors = 0
@@ -929,7 +981,7 @@ def execute(jobs: list[dict], ctx: Ctx) -> tuple[list[dict], str | None]:
     queue = list(pending)
     with cf.ThreadPoolExecutor(max_workers=workers) as pool:
         try:
-            while (queue or in_flight) :
+            while queue or in_flight:
                 while queue and not abort and len(in_flight) < workers:
                     projected = ctx.spent + (len(in_flight) + 1) * ctx.est_cost
                     if projected > ctx.args.max_cost:
@@ -954,7 +1006,11 @@ def execute(jobs: list[dict], ctx: Ctx) -> tuple[list[dict], str | None]:
                     cost = rec.get("cost_usd")
                     if isinstance(cost, (int, float)) and cost > 0 and rec.get("cost_known"):
                         ctx.spent += cost
-                    elif rec["outcome"] != ERROR or rec.get("error_kind") in ("timeout", "no_result", "cli_error"):
+                    elif rec["outcome"] != ERROR or rec.get("error_kind") in (
+                        "timeout",
+                        "no_result",
+                        "cli_error",
+                    ):
                         # Unreported cost: a killed or crashed run may still have been billed,
                         # so charge the estimate rather than $0 (the ceiling must not under-count).
                         ctx.spent += ctx.est_cost
@@ -965,7 +1021,11 @@ def execute(jobs: list[dict], ctx: Ctx) -> tuple[list[dict], str | None]:
                         f"  {rec.get('seconds', '?')}s"
                         + (f"  ${cost:.4f}" if isinstance(cost, (int, float)) else "  $?")
                         + f"  [spent ${ctx.spent:.2f}/{ctx.args.max_cost:.2f}]"
-                        + (f"  [{rec['error_kind']}: {(rec.get('error') or '')[:140]}]" if rec.get("error_kind") else "")
+                        + (
+                            f"  [{rec['error_kind']}: {(rec.get('error') or '')[:140]}]"
+                            if rec.get("error_kind")
+                            else ""
+                        )
                     )
                     consecutive_errors = consecutive_errors + 1 if rec["outcome"] == ERROR else 0
                     if rec.get("fatal") and not abort:
@@ -1015,18 +1075,25 @@ def sanity_flags(records: list[dict]) -> list[tuple[str, bool]]:
     for h, cells in by_hash.items():
         if len(cells) > 1:
             flags.append(
-                (f"IDENTICAL REPLY {h} for different case/variants {sorted(cells)} -- harness suspect", True)
+                (
+                    f"IDENTICAL REPLY {h} for different case/variants {sorted(cells)} -- harness suspect",
+                    True,
+                )
             )
     for cid in sorted(cases):
         rs = [r for r in valid if r["case"] == cid]
         d = {r["response_sha"] for r in rs if r["variant"] == "defect"}
         c = {r["response_sha"] for r in rs if r["variant"] == "clean"}
         if d and c and d & c:
-            flags.append((f"IDENTICAL REPLY to defect and clean twin of {cid} -- harness suspect", True))
+            flags.append(
+                (f"IDENTICAL REPLY to defect and clean twin of {cid} -- harness suspect", True)
+            )
     return flags
 
 
-def summarize(records: list[dict], planned: int, stamp: dict, abort: str | None, args) -> tuple[str, str, int]:
+def summarize(
+    records: list[dict], planned: int, stamp: dict, abort: str | None, args
+) -> tuple[str, str, int]:
     """(markdown report, run verdict, exit code)."""
     lines = [
         "# Reviewer planted-defect eval",
@@ -1073,7 +1140,10 @@ def summarize(records: list[dict], planned: int, stamp: dict, abort: str | None,
         c_fa = sum(r["outcome"] == FALSE_ALARM for r in c)
         ni = sum(r["outcome"] == NEEDS_INFO for r in rs)
         errs = [r for r in rs if r["outcome"] == ERROR]
-        kinds = ", ".join(f"{k}x{sum(r.get('error_kind') == k for r in errs)}" for k in sorted({r.get("error_kind") for r in errs}))
+        kinds = ", ".join(
+            f"{k}x{sum(r.get('error_kind') == k for r in errs)}"
+            for k in sorted({r.get("error_kind") for r in errs})
+        )
         tot["d_n"] += len(d)
         tot["d_c"] += d_c
         tot["d_l"] += d_l
@@ -1110,7 +1180,11 @@ def summarize(records: list[dict], planned: int, stamp: dict, abort: str | None,
         f"- cited SKILL.md quotes found verbatim: "
         f"{sum(r.get('quotes_verbatim', 0) for r in records)}/{sum(r.get('quotes_total', 0) for r in records)}",
         f"- spend: ${sum((r.get('cost_usd') or 0) for r in records):.2f} recorded"
-        + (f" ({sum(not r.get('cost_known', True) for r in records)} runs with unknown cost)" if any(not r.get("cost_known", True) for r in records) else ""),
+        + (
+            f" ({sum(not r.get('cost_known', True) for r in records)} runs with unknown cost)"
+            if any(not r.get("cost_known", True) for r in records)
+            else ""
+        ),
         f"- models used: {sorted({m for r in records for m in (r.get('models_used') or [])})}",
         "",
         "Wilson treats runs as independent; reps of one case are not, so the case-bootstrap "
@@ -1132,7 +1206,9 @@ def summarize(records: list[dict], planned: int, stamp: dict, abort: str | None,
         if severe:
             reasons.append(msg)
     lines += ["", "## Harness sanity"]
-    lines += [f"- {'SEVERE' if s else 'warn'}: {m}" for m, s in flags] or ["- no uniform-outcome or identical-reply flags"]
+    lines += [f"- {'SEVERE' if s else 'warn'}: {m}" for m, s in flags] or [
+        "- no uniform-outcome or identical-reply flags"
+    ]
 
     if abort:
         verdict, code = "ABORTED", EXIT_ABORTED
@@ -1141,7 +1217,9 @@ def summarize(records: list[dict], planned: int, stamp: dict, abort: str | None,
     else:
         verdict, code = "COMPLETE", EXIT_OK
     lines += ["", f"## RUN VERDICT: {verdict}"]
-    lines += [f"- {r}" for r in reasons] or ["- all planned runs recorded, error share within bounds, no harness flags"]
+    lines += [f"- {r}" for r in reasons] or [
+        "- all planned runs recorded, error share within bounds, no harness flags"
+    ]
     if verdict != "COMPLETE":
         lines.append("- DO NOT CITE the pooled rates above: they are partial or suspect.")
     return "\n".join(lines) + "\n", verdict, code
@@ -1165,7 +1243,9 @@ def check_preflight(recs: list[dict]) -> list[str]:
         return ["control runs missing"]
     for r in (d, c):
         if r["outcome"] == ERROR:
-            problems.append(f"{r['variant']} control ERROR ({r.get('error_kind')}): {(r.get('error') or '')[:300]}")
+            problems.append(
+                f"{r['variant']} control ERROR ({r.get('error_kind')}): {(r.get('error') or '')[:300]}"
+            )
     if d["outcome"] != ERROR and d["outcome"] != CATCH:
         problems.append(f"positive control not caught: defect twin answered {d.get('verdict')}")
     elif d["outcome"] == CATCH and not d["located"]:
@@ -1193,7 +1273,20 @@ def run_preflight(case: dict, ctx: Ctx) -> tuple[bool, list[dict], str | None]:
                 "fingerprint": preflight_fingerprint(ctx, case["id"]),
                 "agent_sha256": ctx.agent_hash,
                 "runs": [
-                    {k: r.get(k) for k in ("key", "variant", "outcome", "verdict", "located", "error_kind", "cost_usd", "seconds", "models_used")}
+                    {
+                        k: r.get(k)
+                        for k in (
+                            "key",
+                            "variant",
+                            "outcome",
+                            "verdict",
+                            "located",
+                            "error_kind",
+                            "cost_usd",
+                            "seconds",
+                            "models_used",
+                        )
+                    }
                     for r in recs
                 ],
                 "finished_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
@@ -1216,8 +1309,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--dry-run", action="store_true", help="validate case files offline and exit")
     ap.add_argument("--preflight", action="store_true", help="run ONLY the 2 control runs and exit")
-    ap.add_argument("--skip-preflight", action="store_true", help="full run without controls (stamped)")
-    ap.add_argument("--control-case", default=DEFAULT_CONTROL_CASE, help="case id used as the control pair")
+    ap.add_argument(
+        "--skip-preflight", action="store_true", help="full run without controls (stamped)"
+    )
+    ap.add_argument(
+        "--control-case", default=DEFAULT_CONTROL_CASE, help="case id used as the control pair"
+    )
     ap.add_argument("--cases-dir", default=str(CASES_DIR))
     ap.add_argument("--case", action="append", help="case id to run (repeatable); default all")
     ap.add_argument("--variant", choices=("defect", "clean", "both"), default="both")
@@ -1226,27 +1323,50 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--plugin-dir", type=Path, default=REPO, help="plugin root (default: repo)")
     ap.add_argument("--model", default=None, help="override the agent's pinned model")
     ap.add_argument("--timeout", type=int, default=600, help="seconds per run")
-    ap.add_argument("--retries", type=int, default=2, help="retries for transient API errors (max 2)")
-    ap.add_argument("--backoff", type=float, default=20.0, help="first retry wait, seconds (x3 per retry)")
+    ap.add_argument(
+        "--retries", type=int, default=2, help="retries for transient API errors (max 2)"
+    )
+    ap.add_argument(
+        "--backoff", type=float, default=20.0, help="first retry wait, seconds (x3 per retry)"
+    )
     ap.add_argument("--max-cost", type=float, default=35.0, help="USD ceiling for this invocation")
-    ap.add_argument("--max-run-cost", type=float, default=3.0, help="USD cap per run (claude --max-budget-usd)")
-    ap.add_argument("--est-cost-per-run", type=float, default=0.45, help="USD estimate before measurements exist")
+    ap.add_argument(
+        "--max-run-cost", type=float, default=3.0, help="USD cap per run (claude --max-budget-usd)"
+    )
+    ap.add_argument(
+        "--est-cost-per-run",
+        type=float,
+        default=0.45,
+        help="USD estimate before measurements exist",
+    )
     ap.add_argument("--est-seconds-per-run", type=float, default=150.0)
     ap.add_argument("--max-error-share", type=float, default=0.10)
     ap.add_argument("--max-consecutive-errors", type=int, default=4)
     ap.add_argument("--min-reps-for-call", type=int, default=3)
-    ap.add_argument("--workers", type=int, default=1, help="parallel CLI runs (results written atomically)")
-    ap.add_argument("--allow-dirty", action="store_true", help="run with uncommitted changes under evals/agents/skills")
+    ap.add_argument(
+        "--workers", type=int, default=1, help="parallel CLI runs (results written atomically)"
+    )
+    ap.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="run with uncommitted changes under evals/agents/skills",
+    )
     ap.add_argument(
         "--no-inline-skills",
         action="store_true",
         help="do not paste the named SKILL.md texts; the reviewer must load them itself",
     )
-    ap.add_argument("--out", default=None, help="results directory; reuse it to RESUME (default results/<timestamp>)")
+    ap.add_argument(
+        "--out",
+        default=None,
+        help="results directory; reuse it to RESUME (default results/<timestamp>)",
+    )
     return ap
 
 
-def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, stage_fn=None, log=print) -> int:
+def main(
+    argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, stage_fn=None, log=print
+) -> int:
     args = build_parser().parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -1297,12 +1417,15 @@ def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, st
     agent_hash = _sha(afile.read_bytes())
     skills_hash = _sha(
         "".join(
-            _sha(p.read_bytes())
-            for p in sorted((args.plugin_dir / "skills").glob("*/SKILL.md"))
+            _sha(p.read_bytes()) for p in sorted((args.plugin_dir / "skills").glob("*/SKILL.md"))
         )
     )
     config_hash = _sha(json.dumps([skills_hash, args.no_inline_skills, args.agent]))
-    out_dir = Path(args.out) if args.out else HERE / "results" / dt.datetime.now().strftime("%Y%m%dT%H%M%S")
+    out_dir = (
+        Path(args.out)
+        if args.out
+        else HERE / "results" / dt.datetime.now().strftime("%Y%m%dT%H%M%S")
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = (stamp_fn or collect_stamp)(args, agent_hash, config_hash)
     stamp["preflight"] = "skipped (--skip-preflight)" if args.skip_preflight else "required"
@@ -1312,7 +1435,9 @@ def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, st
         ctx = Ctx(
             args=args,
             out_dir=out_dir,
-            cmd=build_cmd(args, staged) if invoke is None else ["claude", "-p", "--plugin-dir", str(staged)],
+            cmd=build_cmd(args, staged)
+            if invoke is None
+            else ["claude", "-p", "--plugin-dir", str(staged)],
             plugin_dir=args.plugin_dir,
             agent_hash=agent_hash,
             config_hash=config_hash,
@@ -1323,12 +1448,18 @@ def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, st
             log=log,
         )
         prior = load_records(out_dir / "runs")
-        measured = [r["cost_usd"] for r in prior.values() if r.get("cost_known") and r.get("outcome") != ERROR and r.get("cost_usd")]
+        measured = [
+            r["cost_usd"]
+            for r in prior.values()
+            if r.get("cost_known") and r.get("outcome") != ERROR and r.get("cost_usd")
+        ]
         if measured:
             ctx.est_cost = max(args.est_cost_per_run * 0.5, sum(measured) / len(measured))
         foreign = [k for k, r in prior.items() if r.get("agent_sha256") != agent_hash]
         if foreign:
-            log(f"note: {len(foreign)} runs in {out_dir} are from a different agent file; they are kept on disk and EXCLUDED from this run's results")
+            log(
+                f"note: {len(foreign)} runs in {out_dir} are from a different agent file; they are kept on disk and EXCLUDED from this run's results"
+            )
 
         control = by_id[args.control_case]
         pf_path = out_dir / "preflight.json"
@@ -1338,7 +1469,9 @@ def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, st
                 pf = json.loads(pf_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 pf = {}
-            if pf.get("passed") and pf.get("fingerprint") == preflight_fingerprint(ctx, control["id"]):
+            if pf.get("passed") and pf.get("fingerprint") == preflight_fingerprint(
+                ctx, control["id"]
+            ):
                 log(f"preflight: reusing PASS from {pf_path}")
                 need_preflight = False
                 stamp["preflight"] = f"PASS (reused, {pf.get('finished_utc')})"
@@ -1346,7 +1479,12 @@ def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, st
         variants = ("defect", "clean") if args.variant == "both" else (args.variant,)
         main_jobs = [] if args.preflight else make_jobs(cases, variants, args.n, ctx)
         n_pre = 2 if need_preflight else 0
-        pending_main = [j for j in main_jobs if j["key"] not in {k for k, r in prior.items() if r.get("outcome") not in (None, ERROR)}]
+        pending_main = [
+            j
+            for j in main_jobs
+            if j["key"]
+            not in {k for k, r in prior.items() if r.get("outcome") not in (None, ERROR)}
+        ]
         est_runs = n_pre + len(pending_main)
         est = est_runs * ctx.est_cost
         log(
@@ -1356,9 +1494,14 @@ def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, st
             f"ceiling --max-cost ${args.max_cost:.2f}; results -> {out_dir}"
         )
         if est > args.max_cost:
-            log(f"refusing to start: estimate ${est:.2f} exceeds --max-cost ${args.max_cost:.2f} (raise it or narrow the run)")
+            log(
+                f"refusing to start: estimate ${est:.2f} exceeds --max-cost ${args.max_cost:.2f} (raise it or narrow the run)"
+            )
             return EXIT_ABORTED
-        atomic_write(out_dir / "manifest.json", json.dumps({"stamp": stamp, "argv": list(argv or sys.argv[1:])}, indent=1))
+        atomic_write(
+            out_dir / "manifest.json",
+            json.dumps({"stamp": stamp, "argv": list(argv or sys.argv[1:])}, indent=1),
+        )
 
         if need_preflight:
             passed, pre_recs, abort = run_preflight(control, ctx)
@@ -1368,12 +1511,16 @@ def main(argv=None, *, invoke=None, sleep=None, stamp_fn=None, dirty_fn=None, st
                 log("full run NOT started: the controls did not behave (see preflight.json)")
                 return EXIT_ABORTED if abort else EXIT_PREFLIGHT
             stamp["preflight"] = "PASS (this invocation)"
-            pre_costs = [r["cost_usd"] for r in pre_recs if r.get("cost_known") and r.get("cost_usd")]
+            pre_costs = [
+                r["cost_usd"] for r in pre_recs if r.get("cost_known") and r.get("cost_usd")
+            ]
             if pre_costs:
                 ctx.est_cost = max(ctx.est_cost, sum(pre_costs) / len(pre_costs))
                 log(f"estimate updated from the controls: ${ctx.est_cost:.2f}/run")
         elif args.preflight:
-            log("preflight: a passing preflight for this agent/config already exists; nothing to do")
+            log(
+                "preflight: a passing preflight for this agent/config already exists; nothing to do"
+            )
             return EXIT_OK
 
         records, abort = execute(main_jobs, ctx)

@@ -61,6 +61,39 @@ def test_missing_required_period_needs_human(gc, tmp_path, capsys):
     assert q["goal"]["period"] is None
 
 
+def test_onset_map_resolves_without_rainfall_aggregation(gc, tmp_path, capsys):
+    goal = _goal(
+        task="onset_map",
+        variable="precip",
+        region="Kenya OND region",
+        time_window="fixed",
+        window_start="2025-09-01",
+        window_end="2025-12-31",
+    )
+    code, rep = _run(
+        gc,
+        tmp_path,
+        capsys,
+        [goal, goal, goal],
+        "Map rainy-season onset dates for Kenya OND region in 2025.",
+    )
+    assert code == 0
+    assert rep["questions"] == []
+    assert rep["goal"]["period"] is None
+    assert "onset" in rep["readback"]["output"]
+    assert "One onset date per location" in rep["readback"]["time_resolution"]
+    period_default = next(d for d in rep["defaults"] if d["slot"] == "period")
+    assert period_default["plain_value"] == "one onset date per location"
+    assert "daily rainfall" in period_default["why"]
+
+
+@pytest.mark.parametrize("overrides", [{"period": "weekly"}, {"variable": "t2m"}])
+def test_onset_map_rejects_wrong_quantity_or_aggregation(gc, tmp_path, capsys, overrides):
+    goal = _goal(task="onset_map", variable="precip") | overrides
+    code, rep = _run(gc, tmp_path, capsys, [goal], "Map rainy-season onset dates.")
+    assert code == 1 and rep["errors"]
+
+
 def test_missing_task_needs_human(gc, tmp_path, capsys):
     code, rep = _run(gc, tmp_path, capsys, [_goal(task=None)], "Something about temperature.")
     assert code == 3

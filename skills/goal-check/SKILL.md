@@ -11,6 +11,15 @@ metadata:
 
 # goal-check
 
+## Local demo extension: onset maps
+
+`task: onset_map` represents rainy-season onset dates from daily rainfall. It requires
+`variable: precip` and `period: null`; weekly/monthly rainfall aggregation is invalid for
+this task. The plan reviewer must check the chosen registry definition and thresholds,
+daily input, missing-data handling, and effective search window. The typed goal does not
+encode the definition itself. This extension is outside the earlier 79-request intake
+benchmark; report that benchmark as historical evidence, not validation of onset intake.
+
 Deterministic gate between a person's request and a pipeline. It takes the typed goal a
 model compiled from the request and answers three questions without a model:
 

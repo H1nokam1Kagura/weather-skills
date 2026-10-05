@@ -64,6 +64,7 @@ import datetime as dt
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import platform
 import random
@@ -270,8 +271,7 @@ def effective_truth(unit: dict) -> tuple[dict, list[str]]:
             raise ValueError(f"label correction original value mismatch: {unit['id']}:{slot}")
         t[slot] = correction["corrected"]
         adj.append(
-            f"{slot}:{correction['original']}->{correction['corrected']} "
-            f"({correction['reason']})"
+            f"{slot}:{correction['original']}->{correction['corrected']} ({correction['reason']})"
         )
     if (
         t.get("task") in GC.OBS_TASKS
@@ -954,6 +954,28 @@ def _boot(recs: list[dict], key: str, n: int = 2000, seed: int = 7) -> tuple[flo
     return mean, stats[int(0.05 * n)], stats[int(0.95 * n) - 1]
 
 
+def _goal_bounds(recs: list[dict], key: str) -> tuple[tuple[float, float, float], bool]:
+    """Equal-goal mean, two-sided 90% Hoeffding bounds, and equal cluster sizes.
+
+    Independent representative goals are assumed; within-goal dependence is unrestricted.
+    Bounds concern the equal-goal estimand, not arbitrary run-weighted populations.
+    """
+    by = defaultdict(list)
+    for r in recs:
+        value = r[key]
+        if value is None or not 0 <= value <= 1:
+            raise ValueError(f"invalid bounded metric {key}: {value}")
+        by[r["cluster"]].append(value)
+    if not by:
+        return (float("nan"),) * 3, False
+    means = [sum(values) / len(values) for values in by.values()]
+    mean = sum(means) / len(means)
+    radius = math.sqrt(math.log(20) / (2 * len(means)))
+    return (mean, max(0.0, mean - radius), min(1.0, mean + radius)), len(
+        {len(values) for values in by.values()}
+    ) == 1
+
+
 def _fmt(t):
     return f"{t[0]:.3f} [{t[1]:.3f}, {t[2]:.3f}]"
 
@@ -1023,11 +1045,17 @@ def _pop_section(name: str, R_all: list[dict], primary: bool) -> tuple[list[str]
         sw, ask = _boot(R, "silent_wrong"), _boot(R, "asked")
         na = [r for r in R if not r["asked"]]
         ex = _boot(na, "exact") if na else (float("nan"),) * 3
+        sw_goal, sw_equal = _goal_bounds(R, "silent_wrong")
+        ex_goal, ex_equal = _goal_bounds(na, "exact")
         rule_asks = sum(r["rule_ask"] for r in R)
         L += [
-            f"- silent-wrong (scored unit-runs) {_fmt(sw)}  (bar: upper <= {BARS['silent_wrong_hi']})",
+            f"- silent-wrong (scored unit-runs) {_fmt(sw)} (descriptive bootstrap only)",
             f"- ask rate {_fmt(ask)}  (bar: point <= {BARS['ask_rate']})",
-            f"- exact among non-asked {_fmt(ex)}  (bar: lower >= {BARS['exact_lo']})",
+            f"- exact among non-asked {_fmt(ex)} (descriptive bootstrap only)",
+            f"- equal-goal silent-wrong {_fmt(sw_goal)}; exact among non-asked {_fmt(ex_goal)} "
+            "(two-sided 90% Hoeffding bounds; distinct goals, not repetitions)",
+            "- Bounds assume independent, representative goals; within-goal dependence is allowed. "
+            "Unequal cluster sizes do not certify the run-weighted bars.",
             f"- unnecessary-ask rate {sum(r['unnecessary'] for r in R) / len(R):.3f}; rule-decidable "
             f"asks {rule_asks} (bar 0); loud {sum(r['loud'] for r in R)}",
         ]
@@ -1037,17 +1065,23 @@ def _pop_section(name: str, R_all: list[dict], primary: bool) -> tuple[list[str]
         verdict = "INCONCLUSIVE"
     elif n_goals < MIN_GOALS_FOR_VERDICT:
         verdict = f"not decidable (n={n_goals} scored goals < {MIN_GOALS_FOR_VERDICT}; smoke only)"
+    elif ask[0] > BARS["ask_rate"] or rule_asks > 0:
+        verdict = "FAILS"
+    elif sw_equal and sw_goal[1] > BARS["silent_wrong_hi"]:
+        verdict = "FAILS"
     elif (
-        sw[2] <= BARS["silent_wrong_hi"]
-        and ask[0] <= BARS["ask_rate"]
-        and ex[1] >= BARS["exact_lo"]
-        and rule_asks == 0
+        sw_equal
+        and ex_equal
+        and sw_goal[2] <= BARS["silent_wrong_hi"]
+        and ex_goal[1] >= BARS["exact_lo"]
     ):
         verdict = "MEETS BARS"
-    elif sw[1] > BARS["silent_wrong_hi"] or ask[0] > BARS["ask_rate"] or rule_asks > 0:
-        verdict = "FAILS"
     else:
-        verdict = "not decidable (intervals straddle the bars)"
+        verdict = "INCONCLUSIVE"
+        inconclusive.append(
+            f"{name}: insufficient independent-goal evidence for the run-weighted bars "
+            "(bounds straddle a bar, no non-asked goals, or unequal cluster sizes)"
+        )
     L += [
         f"- verdict (F1 rule): {verdict}",
         "",

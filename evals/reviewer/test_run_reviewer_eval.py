@@ -30,24 +30,59 @@ CONTROL = next(c for c in CASES if c["id"] == ev.DEFAULT_CONTROL_CASE)
 def card(verdict: str, extra: str = "") -> str:
     return (
         f"VERDICT: {verdict}\nREVIEWED: plan\n\nFINDINGS:\n"
-        "1. step: 1\n   rule: skills/clip-region/SKILL.md: \"`--bbox` — `N/W/S/E` in decimal degrees.\"\n"
+        '1. step: 1\n   rule: skills/clip-region/SKILL.md: "`--bbox` — `N/W/S/E` in decimal degrees."\n'
         f"   severity: BLOCKER\n   fix: swap west and east {extra}\n\nNEEDED: none\nOPEN QUESTIONS: none\n"
         "SUMMARY: done"
     )
 
 
-def stream(text: str, cost=0.4, model="claude-opus-4-7", tools=(), is_error=False,
-           subtype="success", agents=None, tool_results=()) -> str:
-    ev_ = [{"type": "system", "subtype": "init", "model": model,
-            "agents": agents if agents is not None else ["rhiza-forecasting:reviewer"]}]
+def stream(
+    text: str,
+    cost=0.4,
+    model="claude-opus-4-7",
+    tools=(),
+    is_error=False,
+    subtype="success",
+    agents=None,
+    tool_results=(),
+) -> str:
+    ev_ = [
+        {
+            "type": "system",
+            "subtype": "init",
+            "model": model,
+            "agents": agents if agents is not None else ["rhiza-forecasting:reviewer"],
+        }
+    ]
     for name, inp in tools:
-        ev_.append({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "id": "t1", "name": name, "input": inp}]}})
+        ev_.append(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "tool_use", "id": "t1", "name": name, "input": inp}]
+                },
+            }
+        )
     for content in tool_results:
-        ev_.append({"type": "user", "message": {"content": [
-            {"type": "tool_result", "tool_use_id": "t1", "content": content}]}})
-    ev_.append({"type": "result", "subtype": subtype, "is_error": is_error, "result": text,
-                "total_cost_usd": cost, "modelUsage": {model: {"costUSD": cost}}, "num_turns": 2})
+        ev_.append(
+            {
+                "type": "user",
+                "message": {
+                    "content": [{"type": "tool_result", "tool_use_id": "t1", "content": content}]
+                },
+            }
+        )
+    ev_.append(
+        {
+            "type": "result",
+            "subtype": subtype,
+            "is_error": is_error,
+            "result": text,
+            "total_cost_usd": cost,
+            "modelUsage": {model: {"costUSD": cost}},
+            "num_turns": 2,
+        }
+    )
     return "\n".join(json.dumps(e) for e in ev_)
 
 
@@ -98,7 +133,9 @@ def test_cli_exit_error_is_ERROR_not_miss():
 
 
 def test_is_error_with_exit_zero_is_ERROR():
-    res = ev.classify_cli(0, stream(card("APPROVE"), is_error=True, subtype="error_during_execution"), "")
+    res = ev.classify_cli(
+        0, stream(card("APPROVE"), is_error=True, subtype="error_during_execution"), ""
+    )
     assert res["error_kind"] == "cli_error"
 
 
@@ -114,7 +151,9 @@ def test_empty_reply_and_non_json_are_ERROR():
 
 
 def test_ambiguous_verdict_is_ERROR_and_template_line_ignored():
-    assert ev.parse_verdict("VERDICT: APPROVE | REJECT | NEEDS-INFO\n\nVERDICT: REJECT")[0] == "REJECT"
+    assert (
+        ev.parse_verdict("VERDICT: APPROVE | REJECT | NEEDS-INFO\n\nVERDICT: REJECT")[0] == "REJECT"
+    )
     assert ev.parse_verdict("VERDICT: APPROVE\n...\nVERDICT: REJECT") == (None, "ambiguous")
     assert ev.parse_verdict("**VERDICT:** NEEDS-INFO")[0] == "NEEDS-INFO"
 
@@ -134,7 +173,10 @@ def test_401_inside_a_successful_card_is_not_auth():
 
 
 def test_leakage_in_transcript_is_fatal():
-    out = stream(card("REJECT"), tools=[("Read", {"file_path": "C:/x/weather-skills-demo/evals/reviewer/cases/05.yaml"})])
+    out = stream(
+        card("REJECT"),
+        tools=[("Read", {"file_path": "C:/x/weather-skills-demo/evals/reviewer/cases/05.yaml"})],
+    )
     res = ev.classify_cli(0, out, "")
     assert res["error_kind"] == "leakage" and res["fatal"]
     out2 = stream(card("REJECT"), tool_results=["expected_verdict: REJECT"])
@@ -152,11 +194,26 @@ def test_located_requires_findings_section():
 
 
 def _rec(case, variant, outcome, rep=1, sha=None, kind=None):
-    verdict = {ev.CATCH: "REJECT", ev.FALSE_ALARM: "REJECT", ev.MISS: "APPROVE",
-               ev.APPROVE_OK: "APPROVE", ev.NEEDS_INFO: "NEEDS-INFO"}.get(outcome)
-    return {"case": case, "defect_class": "x", "variant": variant, "rep": rep, "outcome": outcome,
-            "verdict": verdict, "located": outcome == ev.CATCH, "error_kind": kind,
-            "response_sha": sha or f"{case}{variant}{rep}", "cost_usd": 0.4, "cost_known": True}
+    verdict = {
+        ev.CATCH: "REJECT",
+        ev.FALSE_ALARM: "REJECT",
+        ev.MISS: "APPROVE",
+        ev.APPROVE_OK: "APPROVE",
+        ev.NEEDS_INFO: "NEEDS-INFO",
+    }.get(outcome)
+    return {
+        "case": case,
+        "defect_class": "x",
+        "variant": variant,
+        "rep": rep,
+        "outcome": outcome,
+        "verdict": verdict,
+        "located": outcome == ev.CATCH,
+        "error_kind": kind,
+        "response_sha": sha or f"{case}{variant}{rep}",
+        "cost_usd": 0.4,
+        "cost_known": True,
+    }
 
 
 def _args(**kw):
@@ -181,8 +238,12 @@ def test_errors_excluded_from_denominators_and_make_run_inconclusive():
 
 
 def test_all_reps_errored_cell_is_inconclusive_even_under_share():
-    recs = [_rec(c, v, ev.CATCH if v == "defect" else ev.APPROVE_OK, r)
-            for c in "abcdefghij" for v in ("defect", "clean") for r in (1, 2, 3)]
+    recs = [
+        _rec(c, v, ev.CATCH if v == "defect" else ev.APPROVE_OK, r)
+        for c in "abcdefghij"
+        for v in ("defect", "clean")
+        for r in (1, 2, 3)
+    ]
     recs = [r for r in recs if not (r["case"] == "a" and r["variant"] == "defect")]
     recs += [_rec("a", "defect", ev.ERROR, r, kind="cli_error") for r in (1, 2, 3)]  # 3/60 = 5%
     _, verdict, _ = ev.summarize(recs, len(recs), {}, None, _args())
@@ -190,14 +251,20 @@ def test_all_reps_errored_cell_is_inconclusive_even_under_share():
 
 
 def test_missing_planned_runs_is_inconclusive():
-    recs = [_rec("a", "defect", ev.CATCH, r) for r in (1, 2, 3)] + [_rec("b", "defect", ev.MISS, r) for r in (1, 2, 3)]
+    recs = [_rec("a", "defect", ev.CATCH, r) for r in (1, 2, 3)] + [
+        _rec("b", "defect", ev.MISS, r) for r in (1, 2, 3)
+    ]
     _, verdict, _ = ev.summarize(recs, 10, {}, None, _args())
     assert verdict == "INCONCLUSIVE"
 
 
 def test_uniform_outcome_flag():
-    recs = [_rec(c, v, ev.CATCH if v == "defect" else ev.FALSE_ALARM, r)
-            for c in "abc" for v in ("defect", "clean") for r in (1, 2, 3)]
+    recs = [
+        _rec(c, v, ev.CATCH if v == "defect" else ev.FALSE_ALARM, r)
+        for c in "abc"
+        for v in ("defect", "clean")
+        for r in (1, 2, 3)
+    ]
     flags = ev.sanity_flags(recs)
     assert any("UNIFORM VERDICT" in m and severe for m, severe in flags)
     _, verdict, _ = ev.summarize(recs, len(recs), {}, None, _args())
@@ -205,14 +272,22 @@ def test_uniform_outcome_flag():
 
 
 def test_identical_reply_across_cases_flag():
-    recs = [_rec("a", "defect", ev.CATCH, 1, sha="same"), _rec("b", "defect", ev.CATCH, 1, sha="same"),
-            _rec("a", "clean", ev.APPROVE_OK, 1), _rec("b", "clean", ev.APPROVE_OK, 1)]
+    recs = [
+        _rec("a", "defect", ev.CATCH, 1, sha="same"),
+        _rec("b", "defect", ev.CATCH, 1, sha="same"),
+        _rec("a", "clean", ev.APPROVE_OK, 1),
+        _rec("b", "clean", ev.APPROVE_OK, 1),
+    ]
     assert any("IDENTICAL REPLY" in m and severe for m, severe in ev.sanity_flags(recs))
 
 
 def test_no_per_case_call_below_three_reps():
-    recs = [_rec(c, v, ev.CATCH if v == "defect" else ev.APPROVE_OK, r)
-            for c in "ab" for v in ("defect", "clean") for r in (1, 2)]
+    recs = [
+        _rec(c, v, ev.CATCH if v == "defect" else ev.APPROVE_OK, r)
+        for c in "ab"
+        for v in ("defect", "clean")
+        for r in (1, 2)
+    ]
     report, _, _ = ev.summarize(recs, len(recs), {}, None, _args())
     assert "no call (n=2<3)" in report and "CAUGHT" not in report
 
@@ -239,7 +314,9 @@ def test_resume_skips_completed_and_forks_on_agent_change(tmp_path, monkeypatch)
     assert code == ev.EXIT_OK and inv2.calls == 0  # preflight reused, runs resumed
     # A changed agent file must fork new keys: nothing reused, nothing mixed.
     real_sha = ev._sha
-    monkeypatch.setattr(ev, "_sha", lambda t: real_sha((t if isinstance(t, bytes) else t.encode()) + b"v2"))
+    monkeypatch.setattr(
+        ev, "_sha", lambda t: real_sha((t if isinstance(t, bytes) else t.encode()) + b"v2")
+    )
     inv3 = Recorder(good_reviewer)
     code, logs = run_main(tmp_path, argv, inv3)
     assert code == ev.EXIT_OK and inv3.calls == 4
@@ -254,7 +331,9 @@ def test_cost_ceiling_aborts_with_partial_results(tmp_path):
 
     inv = Recorder(pricey)
     code, logs = run_main(
-        tmp_path, ["--skip-preflight", "--n", "1", "--max-cost", "3.5", "--est-cost-per-run", "0.1"], inv
+        tmp_path,
+        ["--skip-preflight", "--n", "1", "--max-cost", "3.5", "--est-cost-per-run", "0.1"],
+        inv,
     )
     assert code == ev.EXIT_ABORTED
     assert inv.calls == 4  # $4 spent >= $3.50 after run 4: stop, 20 runs never started
@@ -263,18 +342,26 @@ def test_cost_ceiling_aborts_with_partial_results(tmp_path):
     assert len(list((tmp_path / "out" / "runs").glob("*.json"))) == 4
     # Resume after raising the ceiling: the 4 finished runs are not paid for again.
     inv2 = Recorder(pricey)
-    code, _ = run_main(tmp_path, ["--skip-preflight", "--n", "1", "--max-cost", "100", "--est-cost-per-run", "0.1"], inv2)
+    code, _ = run_main(
+        tmp_path,
+        ["--skip-preflight", "--n", "1", "--max-cost", "100", "--est-cost-per-run", "0.1"],
+        inv2,
+    )
     assert code == ev.EXIT_OK and inv2.calls == 2 * len(CASES) - 4
 
 
 def test_estimate_over_ceiling_refuses_before_spending(tmp_path):
     inv = Recorder(good_reviewer)
-    code, _ = run_main(tmp_path, ["--skip-preflight", "--max-cost", "1", "--est-cost-per-run", "0.5"], inv)
+    code, _ = run_main(
+        tmp_path, ["--skip-preflight", "--max-cost", "1", "--est-cost-per-run", "0.5"], inv
+    )
     assert code == ev.EXIT_ABORTED and inv.calls == 0
 
 
 def test_auth_error_stops_run(tmp_path):
-    inv = Recorder(lambda c, p, t: (1, "", "OAuth token has expired. Please run /login", False, 0.5))
+    inv = Recorder(
+        lambda c, p, t: (1, "", "OAuth token has expired. Please run /login", False, 0.5)
+    )
     code, logs = run_main(tmp_path, ["--skip-preflight", "--n", "3"], inv)
     assert code == ev.EXIT_ABORTED
     assert inv.calls == 1
@@ -288,7 +375,11 @@ def test_transient_errors_retry_then_succeed(tmp_path):
         return next(seq, None) or good_reviewer(c, p, t)
 
     inv = Recorder(flaky)
-    code, _ = run_main(tmp_path, ["--skip-preflight", "--case", "omitted-clip", "--variant", "defect", "--n", "1"], inv)
+    code, _ = run_main(
+        tmp_path,
+        ["--skip-preflight", "--case", "omitted-clip", "--variant", "defect", "--n", "1"],
+        inv,
+    )
     assert inv.calls == 3
     rec = json.loads(next((tmp_path / "out" / "runs").glob("*.json")).read_text(encoding="utf-8"))
     assert rec["outcome"] == ev.CATCH and len(rec["attempts"]) == 3
@@ -302,18 +393,30 @@ def test_rate_limit_exhausted_is_fatal(tmp_path):
 
 def test_consecutive_errors_stop_the_run(tmp_path):
     inv = Recorder(lambda c, p, t: (0, stream("no card here"), "", False, 1.0))
-    code, _ = run_main(tmp_path, ["--skip-preflight", "--n", "1", "--max-consecutive-errors", "3"], inv)
+    code, _ = run_main(
+        tmp_path, ["--skip-preflight", "--n", "1", "--max-consecutive-errors", "3"], inv
+    )
     assert code == ev.EXIT_ABORTED and inv.calls == 3
 
 
 def test_wrong_model_means_agent_not_loaded(tmp_path):
-    inv = Recorder(lambda c, p, t: (0, stream(card("REJECT", str(hash(p))), model="claude-sonnet-4-6"), "", False, 1.0))
+    inv = Recorder(
+        lambda c, p, t: (
+            0,
+            stream(card("REJECT", str(hash(p))), model="claude-sonnet-4-6"),
+            "",
+            False,
+            1.0,
+        )
+    )
     code, logs = run_main(tmp_path, ["--skip-preflight", "--n", "1"], inv)
     assert code == ev.EXIT_ABORTED and inv.calls == 1
 
 
 def test_preflight_failure_blocks_full_run(tmp_path):
-    inv = Recorder(lambda c, p, t: (0, stream(card("APPROVE", str(hash(p)))), "", False, 1.0))  # misses the defect
+    inv = Recorder(
+        lambda c, p, t: (0, stream(card("APPROVE", str(hash(p)))), "", False, 1.0)
+    )  # misses the defect
     code, logs = run_main(tmp_path, ["--n", "1"], inv)
     assert code == ev.EXIT_PREFLIGHT and inv.calls == 2
     pf = json.loads((tmp_path / "out" / "preflight.json").read_text(encoding="utf-8"))
@@ -328,9 +431,14 @@ def test_preflight_only_mode(tmp_path):
 
 
 def test_dirty_tree_refused(tmp_path):
-    code = ev.main(["--out", str(tmp_path / "o"), "--skip-preflight"], invoke=good_reviewer,
-                   stamp_fn=lambda *a: {}, dirty_fn=lambda p: [" M agents/reviewer.md"],
-                   stage_fn=lambda s, r: s, log=lambda *a: None)
+    code = ev.main(
+        ["--out", str(tmp_path / "o"), "--skip-preflight"],
+        invoke=good_reviewer,
+        stamp_fn=lambda *a: {},
+        dirty_fn=lambda p: [" M agents/reviewer.md"],
+        stage_fn=lambda s, r: s,
+        log=lambda *a: None,
+    )
     assert code == ev.EXIT_REFUSED
 
 
@@ -385,8 +493,17 @@ def test_timeout_without_reported_cost_is_charged_the_estimate(tmp_path):
     inv = Recorder(lambda c, p, t: (None, "", "", True, 600.0))
     code, logs = run_main(
         tmp_path,
-        ["--skip-preflight", "--case", "omitted-clip", "--variant", "defect", "--n", "1",
-         "--est-cost-per-run", "0.45"],
+        [
+            "--skip-preflight",
+            "--case",
+            "omitted-clip",
+            "--variant",
+            "defect",
+            "--n",
+            "1",
+            "--est-cost-per-run",
+            "0.45",
+        ],
         inv,
     )
     assert code == ev.EXIT_INCONCLUSIVE  # 1/1 runs errored

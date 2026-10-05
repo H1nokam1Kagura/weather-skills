@@ -99,7 +99,13 @@ def test_plot_hash_is_deterministic(tmp_path, plot_onset, capsys):
     hashes = []
     for name in ("a.png", "b.png"):
         run_skill(plot_onset, "-i", str(src), "-o", str(tmp_path / name))
-        hashes.append(next(l for l in capsys.readouterr().out.splitlines() if l.startswith("plot hash: ")))
+        hashes.append(
+            next(
+                line
+                for line in capsys.readouterr().out.splitlines()
+                if line.startswith("plot hash: ")
+            )
+        )
     assert hashes[0] == hashes[1]
 
 
