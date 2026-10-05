@@ -124,3 +124,23 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py --goal goal.json \
 uv run ${CLAUDE_SKILL_DIR}/scripts/goal_check.py --goal g1.json --goal g2.json --goal g3.json \
   --request-file request.txt
 ```
+
+
+## Optional D66 scope gate
+
+For the fixed D66 scope, add `--scope-profile d66`. This runs the frozen model scope
+prompt before any goal compiles, using `--scope-model claude-sonnet-4-6` and a 1024-token
+output cap. Empty, malformed or inconsistent replies receive at most two retries.
+A valid out-of-scope result exits 6 without compiling; exhausted retries exit 4
+with scope status `unavailable`, never a fabricated semantic rejection. Both stop
+the workflow. An in-scope result continues through the existing clarification path.
+Reports preserve every scope attempt, model identity and prompt hash.
+
+D66 is opt-in: its five-region, seven-product scope excludes onset maps and the
+demo's other extensions. Do not silently apply it to the broader forecasting demo.
+The prompt is copied verbatim from `clm_ws/d66_prompts.py:SCOPE_SYS`; its confirmed
+evaluation used Databricks Sonnet 4.6. This adapter uses Claude CLI, so the endpoint
+evaluation does not certify this deployment. Refusal wording and landlocked SST
+policy remain pending product decisions; this adapter emits machine status only.
+
+Sampling runs sequentially by default to limit RAM; `--workers 1..3` controls concurrency.

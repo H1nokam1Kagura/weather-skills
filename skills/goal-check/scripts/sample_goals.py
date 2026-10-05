@@ -1,16 +1,18 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 # ]
 # ///
 """Compile a request into N independent typed goals and check them, in ONE command.
 
-Runs N headless `claude -p` compiles in parallel (same prompt file, no tools, no MCP, no
+Runs N separate headless `claude -p` compiles (same prompt file, no tools, no MCP, no
 settings), then runs goal-check's evaluate() over the samples. One literal command, so an agent
 running unattended is not blocked on per-call permission prompts. Before this script existed,
 the human-boundary agent fell back to a single in-context compile and labelled the card
 "single".
+
+Calls run sequentially by default to limit memory; --workers enables bounded concurrency.
 
 Sampling is reported, never assumed:
   sampling = "independent"  all N compiles returned output
@@ -24,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,6 +40,7 @@ _SKILL_VERSION = "0.0.1"
 
 HERE = Path(__file__).resolve().parent
 PROMPT_FILE = HERE.parent / "references" / "compile_prompt_rhiza.txt"
+SCOPE_PROMPT_FILE = HERE.parent / "references" / "scope_prompt_d66.txt"
 
 
 def _goal_check():
@@ -59,7 +63,9 @@ def _extract_json(text: str):
     return None
 
 
-def _compile(claude: str, model: str, prompt: str, request: str, timeout: int) -> dict:
+def _compile(
+    claude: str, model: str, prompt: str, request: str, timeout: int, max_tokens: int | None = None
+) -> dict:
     cmd = [
         claude,
         "-p",
@@ -78,7 +84,12 @@ def _compile(claude: str, model: str, prompt: str, request: str, timeout: int) -
         request,
     ]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+        env = os.environ.copy()
+        if max_tokens is not None:
+            env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(max_tokens)
+        r = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=env
+        )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"timeout after {timeout}s", "goal": None}
     except OSError as exc:
@@ -115,12 +126,59 @@ def _compile(claude: str, model: str, prompt: str, request: str, timeout: int) -
     }
 
 
+def _scope_check(claude, model, request, timeout):
+    prompt = SCOPE_PROMPT_FILE.read_text(encoding="utf-8")
+    attempts = []
+    for _ in range(3):  # initial attempt plus at most two retries
+        run = _compile(claude, model, prompt, request, timeout, max_tokens=1024)
+        attempts.append(run)
+        value = run.get("goal")
+        valid = (
+            run["ok"]
+            and isinstance(value, dict)
+            and set(value) == {"in_scope", "unsupported"}
+            and type(value["in_scope"]) is bool
+            and isinstance(value["unsupported"], list)
+            and all(
+                isinstance(x, str) and x in {"region", "variable", "task", "time"}
+                for x in value["unsupported"]
+            )
+            and (value["in_scope"] == (not value["unsupported"]))
+        )
+        if valid:
+            break
+    return {
+        "profile": "d66",
+        "status": ("in_scope" if value["in_scope"] else "out_of_scope") if valid else "unavailable",
+        "decision": value if valid else None,
+        "attempts": attempts,
+        "model": model,
+        "transport": "claude-cli",
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        "validation": "Frozen D66 prompt; CLI transport is not the confirmed Databricks deployment.",
+    }
+
+
 @weather_skill(name="goal-check", version=_SKILL_VERSION, output=False)
+@weather_skill.argument(
+    "--scope-profile",
+    choices=["none", "d66"],
+    default="none",
+    help="Explicit fixed-scope profile; D66 excludes onset and other demo extensions.",
+)
+@weather_skill.argument(
+    "--scope-model",
+    default="claude-sonnet-4-6",
+    help="Scope model, pinned separately from the compile alias.",
+)
 @weather_skill.argument("--request", default=None, help="The user's request text.")
 @weather_skill.argument(
     "--request-file", default=None, metavar="PATH", help="Read the request from a file."
 )
 @weather_skill.argument("--n", type=int, default=3, help="Independent compiles (2-3). Default 3.")
+@weather_skill.argument(
+    "--workers", type=int, default=1, help="Concurrent compiles (1-3). Default 1 to limit RAM."
+)
 @weather_skill.argument("--model", default="sonnet", help="Compile model alias. Default sonnet.")
 @weather_skill.argument(
     "--timeout", type=int, default=180, help="Seconds per compile. Default 180."
@@ -130,7 +188,18 @@ def _compile(claude: str, model: str, prompt: str, request: str, timeout: int) -
     action="store_true",
     help="Exit with goal-check's code even if some compiles failed (still reported).",
 )
-def sample_goals(request, request_file, n, model, timeout, allow_degraded, **kwargs):
+def sample_goals(
+    request,
+    request_file,
+    n,
+    model,
+    timeout,
+    allow_degraded,
+    workers=1,
+    scope_profile="none",
+    scope_model="claude-sonnet-4-6",
+    **kwargs,
+):
     """Compile a request into N independent typed goals and check them, in one command."""
     if (request is None) == (request_file is None):
         raise UsageError("pass exactly one of --request or --request-file")
@@ -141,6 +210,8 @@ def sample_goals(request, request_file, n, model, timeout, allow_degraded, **kwa
             raise UsageError(f"cannot read --request-file: {exc}") from None
     if not 2 <= n <= 3:
         raise UsageError("--n must be 2 or 3 (goal-check compares at most 3 samples)")
+    if not 1 <= workers <= 3:
+        raise UsageError("--workers must be between 1 and 3")
     prompt = PROMPT_FILE.read_text(encoding="utf-8")
     prompt_sha = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
@@ -159,7 +230,25 @@ def sample_goals(request, request_file, n, model, timeout, allow_degraded, **kwa
         )
         sys.exit(4)
 
-    with ThreadPoolExecutor(max_workers=n) as pool:
+    scope = {"profile": "none", "status": "not_requested"}
+    if scope_profile == "d66":
+        scope = _scope_check(claude, scope_model, request, timeout)
+        if scope["status"] != "in_scope":
+            code = 6 if scope["status"] == "out_of_scope" else 4
+            print(
+                json.dumps(
+                    {
+                        "sampling": "not_started",
+                        "samples_ok": 0,
+                        "exit_code": code,
+                        "scope_check": scope,
+                    },
+                    indent=1,
+                )
+            )
+            sys.exit(code)
+
+    with ThreadPoolExecutor(max_workers=min(workers, n)) as pool:
         runs = list(pool.map(lambda _: _compile(claude, model, prompt, request, timeout), range(n)))
     ok = [r for r in runs if r["ok"]]
     failures = [r["error"] for r in runs if not r["ok"]]
@@ -173,6 +262,7 @@ def sample_goals(request, request_file, n, model, timeout, allow_degraded, **kwa
                     "reason": "every compile failed",
                     "failures": failures,
                     "compile_prompt_sha256": prompt_sha,
+                    "scope_check": scope,
                 },
                 indent=1,
             )
@@ -184,7 +274,9 @@ def sample_goals(request, request_file, n, model, timeout, allow_degraded, **kwa
     rep.update(
         {
             "sampling": sampling,
+            "scope_check": scope,
             "samples_requested": n,
+            "workers": min(workers, n),
             "samples_ok": len(ok),
             "compile_failures": failures,
             "compile_model": model,
