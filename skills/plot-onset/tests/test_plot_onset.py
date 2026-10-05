@@ -80,6 +80,29 @@ def test_deterministic_onset_writes_png(tmp_path, plot_onset):
     assert out.stat().st_size > 0
 
 
+def test_prints_plot_hash_and_data_line(tmp_path, plot_onset, capsys):
+    """Same QA lines as the other figure skills, so the agent can read them after every figure."""
+    src = write_zarr(_onset_ds(["2026-11-05", "2026-11-12"]), tmp_path / "in.zarr")
+    out = tmp_path / "onset.png"
+
+    run_skill(plot_onset, "-i", str(src), "-o", str(out))
+    printed = capsys.readouterr().out
+
+    lines = [line for line in printed.splitlines() if line.startswith(("plot hash: ", "data: "))]
+    assert len(lines) == 2, printed
+    assert len(lines[0].split(": ", 1)[1]) == 64  # sha256 hex
+    assert lines[1].startswith("data: not null (") and "dated)" in lines[1]
+
+
+def test_plot_hash_is_deterministic(tmp_path, plot_onset, capsys):
+    src = write_zarr(_onset_ds(["2026-11-05", "2026-11-12"]), tmp_path / "in.zarr")
+    hashes = []
+    for name in ("a.png", "b.png"):
+        run_skill(plot_onset, "-i", str(src), "-o", str(tmp_path / name))
+        hashes.append(next(l for l in capsys.readouterr().out.splitlines() if l.startswith("plot hash: ")))
+    assert hashes[0] == hashes[1]
+
+
 def test_scale_spans_new_year(tmp_path, plot_onset):
     """A Dec init running into January must not wrap the scale (day-of-year
     would send Jan 5 back to 5 and invert the range)."""

@@ -151,11 +151,82 @@ def test_unreadable_exits_2(tmp_path, check_artifact, capsys, kind):
 
 def test_no_checkable_variable_exits_2(tmp_path, check_artifact, capsys):
     ds = make_gridded()
-    ds["onset_precip_date"] = ds["time"].broadcast_like(ds["precip"])
+    ds["dry_spell_length"] = (ds["time"] - ds["time"][0]).broadcast_like(ds["precip"])
     ds = ds.drop_vars("precip")
     src = _store(tmp_path, ds)
     assert _run(check_artifact, "-i", src) == 2
     assert "absence of a check is not a pass" in capsys.readouterr().err
+
+
+def _onset_store(tmp_path, dates, history_window=("2025-09-01", "2025-12-31")):
+    """An onset-date-shaped artifact: one datetime64 variable on lat/lon, no time axis."""
+    import xarray as xr
+
+    vals = np.array(dates, dtype="datetime64[ns]").reshape(2, -1)
+    ds = xr.Dataset(
+        {"onset_precip_date": (("latitude", "longitude"), vals)},
+        coords={"latitude": [1.0, 2.0], "longitude": np.arange(vals.shape[1], dtype=float) + 10},
+    )
+    args = {"start_time": history_window[0], "end_time": history_window[1]} if history_window else {}
+    ds.attrs["weather_skills_history"] = json.dumps(
+        [
+            {"skill": "chirps-fetch", "version": "0.0.2", "args": args, "input": None},
+            {"skill": "onset-date", "version": "0.1.0", "args": {}, "input": "raw.zarr"},
+        ]
+    )
+    return str(write_zarr(ds, tmp_path / "onset.zarr"))
+
+
+def test_onset_dates_are_checked_not_skipped(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["2025-10-12", "2025-10-20", "NaT", "2025-11-02", "2025-10-26", "2025-10-30",
+                                  "2025-10-05", "2025-10-18", "2025-11-10", "NaT", "2025-10-22", "2025-10-25",
+                                  "2025-10-01", "2025-10-15", "2025-10-16", "2025-10-17", "2025-10-19", "2025-10-21",
+                                  "2025-10-23", "2025-10-24"])
+    assert _run(check_artifact, "-i", src) == 0
+    out = capsys.readouterr().out
+    assert _line(out, "event-found").startswith("[PASS]")
+    assert _line(out, "date-window").startswith("[PASS]")
+    assert _line(out, "date-censored").startswith("[PASS]")  # none on the first day
+    assert "the fetch step in the history" in out
+
+
+def test_left_censored_onsets_fail(tmp_path, check_artifact, capsys):
+    # 10 of 20 events on the window's first day: already raining when the window opened.
+    src = _onset_store(tmp_path, ["2025-09-01"] * 10 + ["2025-10-15"] * 10)
+    assert _run(check_artifact, "-i", src) == 1
+    out = capsys.readouterr().out
+    assert _line(out, "date-censored").startswith("[FAIL]")
+    assert "50.0% of events on the window's first day (2025-09-01)" in out
+
+
+def test_some_censoring_warns(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["2025-09-01"] * 2 + ["2025-10-15"] * 18)  # 10%
+    assert _run(check_artifact, "-i", src) == 0
+    assert _line(capsys.readouterr().out, "date-censored").startswith("[WARN]")
+
+
+def test_flags_override_history_window_and_catch_dates_outside(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["2025-10-15"] * 19 + ["2026-02-01"])
+    code = _run(check_artifact, "-i", src, "--start-time", "2025-09-01", "--end-time", "2025-12-31")
+    out = capsys.readouterr().out
+    assert code == 1
+    assert _line(out, "date-window").startswith("[FAIL]")
+    assert "(1 outside)" in out and "--start-time/--end-time" in out
+    assert "time-range" not in out  # an event-date artifact has no time axis to fail on
+
+
+def test_unknown_window_warns_not_passes(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["2025-10-15"] * 20, history_window=None)
+    assert _run(check_artifact, "-i", src) == 0
+    out = capsys.readouterr().out
+    assert _line(out, "date-window").startswith("[WARN]")
+    assert "date-censored" not in out
+
+
+def test_no_event_anywhere_warns(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["NaT"] * 20)
+    assert _run(check_artifact, "-i", src) == 0
+    assert _line(capsys.readouterr().out, "event-found").startswith("[WARN]")
 
 
 def test_unknown_variable_exits_2(tmp_path, check_artifact):

@@ -103,7 +103,15 @@ much they agree on when.
 One PNG. The colorbar is a discrete five-band scale (sand → green → cyan →
 pink-purple → gray, four shades each) labeled with real dates at the band
 edges. Remaining dims must reduce to lat/lon (plus the member dim); anything
-else — a leftover `step`, say — is an error pointing at `select`.
+else — a leftover `step`, say — is an error pointing at `select`. A legend
+key marks uncoloured cells as "No onset found (or no data)": a cell where no
+member found an onset in the window is left blank, which is a result, not a
+gap in the map.
+
+Stdout carries the same QA lines as the other figure skills:
+`plot hash: <sha256 of the RGB pixels before the provenance mark>` (compare it
+across runs to see whether the figure changed) and
+`data: not null (<variable> <dated>/<cells> dated)`.
 
 ### Provenance
 
