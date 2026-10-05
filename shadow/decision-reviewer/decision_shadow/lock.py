@@ -5,6 +5,7 @@ recomputes every file's sha256 and REFUSES (raises ``HashMismatch``) on any diff
 missing file, or an extra repo/revision. Only ``convaiinnovations/laya`` is accepted; third-party
 mirrors (ONNX/GGUF re-packs) and the ``ollaya`` runner are not, by design.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -12,9 +13,9 @@ import json
 import os
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent.parent          # shadow/decision-reviewer/
+HERE = Path(__file__).resolve().parent.parent  # shadow/decision-reviewer/
 LOCK_PATH = HERE / "laya.lock.json"
-CACHE_ROOT = HERE / "cache"                            # gitignored
+CACHE_ROOT = HERE / "cache"  # gitignored
 
 OFFICIAL_REPO = "convaiinnovations/laya"
 # English root checkpoint: the files laya.Agent reads from a local directory.
@@ -47,7 +48,9 @@ def read_lock(path: Path = LOCK_PATH) -> dict:
     with open(path, encoding="utf-8") as f:
         lock = json.load(f)
     if lock.get("repo") != OFFICIAL_REPO:
-        raise HashMismatch(f"lock names repo {lock.get('repo')!r}; only {OFFICIAL_REPO!r} is allowed")
+        raise HashMismatch(
+            f"lock names repo {lock.get('repo')!r}; only {OFFICIAL_REPO!r} is allowed"
+        )
     rev = str(lock.get("revision", ""))
     if len(rev) != 40 or any(c not in "0123456789abcdef" for c in rev):
         raise HashMismatch(f"lock revision must be a full 40-hex commit sha, got {rev!r}")
@@ -63,7 +66,9 @@ def verify_cache(lock: dict, directory: Path) -> None:
     files = lock.get("files") or {}
     missing_pins = [f for f in LAYA_FILES if not files.get(f, {}).get("sha256")]
     if missing_pins:
-        raise HashMismatch(f"lock has no sha256 for {missing_pins}; run fetch-laya --write-lock first")
+        raise HashMismatch(
+            f"lock has no sha256 for {missing_pins}; run fetch-laya --write-lock first"
+        )
     for rel, meta in files.items():
         p = directory / rel
         if not p.is_file():

@@ -6,6 +6,7 @@ Synthetic states only (no user text). Writes eval/smoke_laya_<date>.json with ea
 the one-time load time, and per-decision latency (cold first call, then 5 warm repeats).
 These are NOT evaluation results: n=3, no outcomes. They show the backend runs.
 """
+
 import json
 import platform
 import statistics
@@ -20,29 +21,44 @@ sys.path.insert(0, str(HERE.parent))
 from decision_shadow import backends  # noqa: E402
 
 CASES = [
-    ("escalate",
-     "User request: 'show me rainfall for the farm, the usual period'. No location, no dates and no "
-     "product were given, and the last session used two different regions.", None),
-    ("review_verdict",
-     "Request: seasonal rainfall totals for Kenya, March to May 2026, as a map.\n"
-     "Proposed pipeline: chirps-fetch -> clip-region -> aggregate-temporal --period season -> plot.\n"
-     "Skill rules: fetchers write precip as rates (mm day-1); run convert-to-totals before any plot "
-     "so figures are period mm, not rates. Skip deaccumulate after fetch.", None),
-    ("next_skill",
-     "Goal: map seasonal rainfall totals for Kenya, March to May 2026.\n"
-     "Done so far: chirps-fetch (rates, mm day-1) -> clip-region -> aggregate-temporal --period season.",
-     {"convert-to-totals": "convert rate fields to period totals before plotting",
-      "plot": "draw a map or figure from a Zarr",
-      "deaccumulate": "turn cumulative-since-init fields into per-step amounts"}),
+    (
+        "escalate",
+        "User request: 'show me rainfall for the farm, the usual period'. No location, no dates and no "
+        "product were given, and the last session used two different regions.",
+        None,
+    ),
+    (
+        "review_verdict",
+        "Request: seasonal rainfall totals for Kenya, March to May 2026, as a map.\n"
+        "Proposed pipeline: chirps-fetch -> clip-region -> aggregate-temporal --period season -> plot.\n"
+        "Skill rules: fetchers write precip as rates (mm day-1); run convert-to-totals before any plot "
+        "so figures are period mm, not rates. Skip deaccumulate after fetch.",
+        None,
+    ),
+    (
+        "next_skill",
+        "Goal: map seasonal rainfall totals for Kenya, March to May 2026.\n"
+        "Done so far: chirps-fetch (rates, mm day-1) -> clip-region -> aggregate-temporal --period season.",
+        {
+            "convert-to-totals": "convert rate fields to period totals before plotting",
+            "plot": "draw a map or figure from a Zarr",
+            "deaccumulate": "turn cumulative-since-init fields into per-step amounts",
+        },
+    ),
 ]
 
 
 def main() -> int:
-    out = {"date": date.today().isoformat(), "host": f"{platform.system()} {platform.release()} "
-           f"{platform.machine()}", "python": platform.python_version(), "results": []}
+    out = {
+        "date": date.today().isoformat(),
+        "host": f"{platform.system()} {platform.release()} {platform.machine()}",
+        "python": platform.python_version(),
+        "results": [],
+    }
     try:
         import laya
         import torch
+
         out["laya_version"] = getattr(laya, "__version__", "?")
         out["torch"] = torch.__version__
         out["torch_threads"] = torch.get_num_threads()

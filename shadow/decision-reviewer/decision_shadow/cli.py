@@ -4,6 +4,7 @@
 choice, so a calling agent cannot accidentally act on it. `--show` prints the logged record
 (for demos and the smoke test, not for agents).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,8 +48,19 @@ def cmd_score(args) -> int:
         if args.background:
             # Detached child does the work; this process returns at once (never delays the run).
             did = uuid.uuid4().hex
-            cmd = [sys.executable, str(ENTRY), "score", "--point", args.point, "--backend", backend,
-                   "--decision-id", did, "--state-file", "-"]
+            cmd = [
+                sys.executable,
+                str(ENTRY),
+                "score",
+                "--point",
+                args.point,
+                "--backend",
+                backend,
+                "--decision-id",
+                did,
+                "--state-file",
+                "-",
+            ]
             if args.options_json or args.option:
                 cmd += ["--options-json", json.dumps(options)]
             if args.actual is not None:
@@ -56,14 +68,25 @@ def cmd_score(args) -> int:
             flags = 0
             if os.name == "nt":
                 flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-            p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, creationflags=flags)
+            p = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=flags,
+            )
             p.stdin.write(state.encode("utf-8"))
             p.stdin.close()
             print(json.dumps({"decision_id": did, "shadow": backend, "mode": "background"}))
             return 0
-        did = shadow_score(args.point, state, options, backend=backend, actual=args.actual,
-                           decision_id=args.decision_id)
+        did = shadow_score(
+            args.point,
+            state,
+            options,
+            backend=backend,
+            actual=args.actual,
+            decision_id=args.decision_id,
+        )
         if args.show and did:
             rec = next((r for r in reversed(read_log()) if r.get("decision_id") == did), None)
             print(json.dumps(rec, indent=2))
@@ -88,18 +111,22 @@ def cmd_report(args) -> int:
 
 def cmd_fetch(args) -> int:
     from .fetch import fetch
+
     fetch(write_lock=args.write_lock, force=args.force)
     return 0
 
 
 def cmd_verify(args) -> int:
     from .backends import laya_verify_only
+
     print(json.dumps({"verified": True, "revision": laya_verify_only()}))
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="ds.py", description="Shadow-only decision reviewer (advisory, never decides)")
+    ap = argparse.ArgumentParser(
+        prog="ds.py", description="Shadow-only decision reviewer (advisory, never decides)"
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("score", help="score one decision in shadow and log it")
@@ -109,10 +136,14 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--state-file", help="path, or - for stdin")
     s.add_argument("--option", action="append", help="candidate (repeat); next_skill only")
     s.add_argument("--options-json", help='JSON list or {"skill": "description"} map')
-    s.add_argument("--backend", choices=["stub", "laya", "kev", "clm"], help="override WS_DECISION_SHADOW")
+    s.add_argument(
+        "--backend", choices=["stub", "laya", "kev", "clm"], help="override WS_DECISION_SHADOW"
+    )
     s.add_argument("--actual", help="the real gate's outcome, if already known")
     s.add_argument("--decision-id", help=argparse.SUPPRESS)
-    s.add_argument("--background", action="store_true", help="return immediately; score in a detached child")
+    s.add_argument(
+        "--background", action="store_true", help="return immediately; score in a detached child"
+    )
     s.add_argument("--show", action="store_true", help="print the logged record (demo only)")
     s.set_defaults(fn=cmd_score)
 
@@ -122,7 +153,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--point", choices=["escalate", "review_verdict", "next_skill"])
     r.set_defaults(fn=cmd_record)
 
-    rp = sub.add_parser("report", help="agreement + E2-style recall diagnostic (bar of record: clm D58, offline)")
+    rp = sub.add_parser(
+        "report", help="agreement + E2-style recall diagnostic (bar of record: clm D58, offline)"
+    )
     rp.add_argument("--log")
     rp.set_defaults(fn=cmd_report)
 
