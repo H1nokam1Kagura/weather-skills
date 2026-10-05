@@ -19,12 +19,19 @@
       "sha256_matches": "compile_sys_v3_sha256 recorded by probes/d4_distill_data.py in results/d4"
     },
     "compile_prompt_rhiza.txt": {
-      "what": "THIS PLUGIN's compile prompt: v3 verbatim plus two declared edits, NOT a clm artifact",
+      "what": "THIS PLUGIN's compile prompt: v3 verbatim plus three declared edits, NOT a clm artifact",
       "edits_vs_v3": [
         "region: other places allowed verbatim (the plugin is not limited to the five benchmark regions)",
-        "six extension keys appended (window_phrase, window_start, window_end, baseline, season, decision) and one rule 'never fill a key the request does not state'"
+        "six extension keys appended (window_phrase, window_start, window_end, baseline, season, decision) and one rule 'never fill a key the request does not state'",
+        "time_window rule: the v3 line replaced by clm D66's v5 line (the brief's full definition: a window counted from now is relative in any wording or language, including calendar periods counted from now; fixed only when dates or years are named; a window length is never a resolution)"
       ],
-      "validated": "NO. clm validated v3 (+v3rr rules, 3 samples, ask on disagreement: D45 dev, D47 fresh held-out). The edits are unmeasured until evals/intake/run_intake_eval.py is run on them."
+      "validated": "NO. clm validated v3 (+v3rr rules, 3 samples, ask on disagreement: D45 dev, D47 fresh held-out). The edits are unmeasured until evals/intake/run_intake_eval.py is run on them.",
+      "time_window_rule_evidence": {
+        "source": "clm-weather-skills clm_ws/d66_prompts.py V5_TIME (sha256 843657a2 at D66 registration)",
+        "why": "clm D61/D64: S2/S3 errors were calendar periods counted from now read as fixed; a second model family failed the same way, so the cause was the v3 definition",
+        "d66": "v5 (clm schema) CONFIRMED on the sealed S4: silent-wrong 0.003 [0.000, 0.009], exact 0.997",
+        "d67_this_prompt": "rhiza+v5, Sonnet 4.6, all R1 primary: silent-wrong S1 0.005, S2 0.000, S3 0.003, S4 0.003 (as-is: S2 0.006, S3 0.010). Descriptive transfer check: S1-S4 had been opened."
+      }
     }
   },
   "code_reimplemented_not_copied": {
