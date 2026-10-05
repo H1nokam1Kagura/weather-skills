@@ -1,6 +1,6 @@
 ---
 name: check-artifact
-description: Deterministic sanity gate for one weather-skills Zarr artifact — checks units (present, and in the allow-list for precipitation or temperature), physical range (no negative rain, nothing above record rainfall, temperature within -90..60 degC), missing-value fraction, lat/lon inside an expected N/W/S/E box, time axis monotonic with no duplicates (gaps reported) and inside an expected window, and that provenance history is present. Prints a check card (PASS / FAIL / WARN per check, observed vs expected, and the threshold's basis) and exits 0 all pass / 1 any FAIL / 2 unreadable or nothing checkable. Use on any intermediate or final Zarr before building on it or reporting from it. Not lineage replay (that is provenance) and not forecast skill (that is verify).
+description: Deterministic sanity gate for one weather-skills Zarr artifact — checks units (present, and in the allow-list for precipitation or temperature), physical range (no negative rain, nothing above record rainfall, temperature within -90..60 degC), missing-value fraction, lat/lon inside an expected N/W/S/E box, time axis monotonic with no duplicates (gaps reported) and inside an expected window, event-date variables (onset-date output) inside their search window and not piled on its first day (left-censored), and that provenance history is present. Prints a check card (PASS / FAIL / WARN per check, observed vs expected, and the threshold's basis) and exits 0 all pass / 1 any FAIL / 2 unreadable or nothing checkable. Use on any intermediate or final Zarr before building on it or reporting from it. Not lineage replay (that is provenance) and not forecast skill (that is verify).
 license: MIT
 compatibility: Requires Python 3.12 and uv. Reads a zarr directory; writes nothing; no network.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/check_artifact.py *)
@@ -45,13 +45,16 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/check_artifact.py --input <in.zarr> \
 - `--input`, `-i` — the Zarr to check. A missing path, a plain file, or a
   directory that is not a Zarr exits 2.
 - `--variable`, `-v` — repeatable; data variable(s) to check. Default: every
-  numeric data variable. Datetime/duration variables (e.g. `onset-date`
-  output) are listed as not checked; if nothing numeric is left, the skill
-  exits 2 — the absence of a check is never reported as a pass.
+  numeric data variable and every datetime variable (e.g. `onset-date`
+  output, checked as event dates; see "Event dates"). Duration variables are
+  listed as not checked; if nothing checkable is left, the skill exits 2 —
+  the absence of a check is never reported as a pass.
 - `--bbox` — expected extent, `N/W/S/E` decimal degrees. Every lat/lon value
   must lie inside it, within one grid cell. North below south exits 2.
 - `--start-time` — expected first valid time, `YYYY-MM-DD`, within one step.
+  For an event-date artifact (no time axis): the search window's first day.
 - `--end-time` — expected last valid time, `YYYY-MM-DD`, within one step.
+  For an event-date artifact: the search window's last day.
 - `--expect-units` — units every checked variable must carry. Compared with
   pint, so `mm/day`, `mm d-1` and `mm day-1` are the same.
 - `--max-nan-frac` — maximum fraction of missing cells per variable, 0–1.
@@ -80,6 +83,9 @@ Each line of the card is `[STATUS] check-id (subject)` followed by
 | `bbox` | any lat/lon outside `--bbox` by more than one grid cell | — | one cell tolerates cell-centre vs cell-edge clipping (`clip-region --region` keeps straddling cells) |
 | `bbox-coverage` | — | the data stop more than one cell short of an edge of `--bbox` | over-clipped, or a source grid smaller than the box |
 | `provenance` | — | `weather_skills_history` absent, empty or malformed | every catalog skill stamps it; its absence means hand-made or unknown lineage |
+| `event-found` (dates) | — | no cell has a date | NaT means "no event" (valid), but none anywhere usually means the window missed the season |
+| `date-window` (dates) | any date outside the search window | the window is unknown (no flags, nothing in the history) | an event cannot fall outside the series it was detected in |
+| `date-censored` (dates) | > 25 % of events on the window's first day | > 5 % | an event on day one was already under way when the window opened (left-censored); see "Event dates" |
 
 ### Units allow-list
 
@@ -119,6 +125,23 @@ strict default would fail correct artifacts. A field more than half missing
 cannot support a regional statistic. Tighten it per task (`--max-nan-frac
 0.05` for a land-only box). An all-missing variable always fails.
 
+### Event dates
+
+A `datetime64` data variable (e.g. `onset-date`'s `onset_*_date`) is checked as
+an event date. Its search window comes from `--start-time`/`--end-time`, or,
+failing that, from the first history step that recorded `start_time`/`end_time`
+(the fetch that bounded the series); the card says which. With neither, the
+window checks are WARN "not checked". The artifact has no time axis, so
+`time-range` is not applied to it.
+
+`date-censored` is the share of detected events dated on the window's first
+day. Such a cell was already raining when the window opened, so its "onset" is
+the window start, not an onset, and the map looks plausible while being wrong
+there. Thresholds, measured on Kenya CHIRPS OND 2025 with
+`agrhymet-sos-rolling`: good windows scored 1.4 % and 2.5 %; a window opened
+inside the season scored 17.7 % (WARN) and 41.8 % (FAIL). Fix by starting the
+series earlier or restricting the area to where the season applies.
+
 ### Time axis
 
 The time axis is `time` when it is a dimension. A classic forecast (`step`
@@ -132,7 +155,7 @@ first, or check a store that still carries its init).
 - `0` — every check PASS or WARN.
 - `1` — at least one check FAIL.
 - `2` — the artifact cannot be read, a requested `--variable` is missing or
-  not numeric, nothing numeric is present, or a flag is invalid.
+  neither numeric nor a date, nothing checkable is present, or a flag is invalid.
 
 The card goes to stdout and ends with
 `RESULT: PASS|FAIL - n FAIL, n WARN, n PASS (exit n)`. On exit 1 a one-line

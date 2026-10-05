@@ -66,6 +66,14 @@ TEMP_MAX_C = 60.0  # highest recognised surface air temperature: 56.7 (Death Val
 
 DEFAULT_MAX_NAN_FRAC = 0.5
 
+# Event-date variables (e.g. onset-date output): share of detected events that fall on the
+# FIRST day of the search window. Such an "event" was already under way when the window opened
+# (left-censored), so its date is the window start, not an onset. Measured on Kenya CHIRPS
+# OND 2025 (agrhymet-sos-rolling): good windows 1.4% and 2.5%; a window opened inside the
+# season 17.7% and 41.8%.
+CENSORED_WARN_FRAC = 0.05
+CENSORED_FAIL_FRAC = 0.25
+
 PRECIP_NAMES = {"tp", "pr", "prcp", "precip", "rain", "rainfall", "precipitation"}
 TEMP_NAMES = {"t2m", "tas", "tasmax", "tasmin", "tmax", "tmin", "tavg", "temp", "sst", "skt"}
 TEMP_NAMES |= {"d2m", "t", "2m_temperature"}
@@ -681,6 +689,97 @@ def _check_bbox(ds, bbox, checks):
             )
 
 
+def _history_window(chain):
+    """(start, end) as datetime.date from the first history step that records start_time/end_time
+    (the fetch that bounded the series), or (None, None)."""
+    import datetime as _dt
+
+    for entry in chain or []:
+        args = entry.get("args") if isinstance(entry, dict) else None
+        if not isinstance(args, dict):
+            continue
+        s, e = args.get("start_time"), args.get("end_time")
+        if s or e:
+            try:
+                return (
+                    _dt.date.fromisoformat(str(s)[:10]) if s else None,
+                    _dt.date.fromisoformat(str(e)[:10]) if e else None,
+                )
+            except ValueError:
+                return None, None
+    return None, None
+
+
+def _check_dates(name, da, start, end, source, checks):
+    """Checks for an event-date variable (datetime64): missing share, window, left-censoring."""
+    vals = np.asarray(da.values).astype("datetime64[D]").reshape(-1)
+    n = vals.size
+    hit = vals[~np.isnat(vals)]
+    checks.append(
+        Check(
+            "event-found",
+            name,
+            "WARN" if hit.size == 0 else "PASS",
+            f"{hit.size} of {n} cells have a date ({n - hit.size} without: no event, or no data)",
+            "at least one detected event",
+            "NaT means no event in the window (a valid result, unlike missing data); "
+            "none at all usually means the window missed the season",
+        )
+    )
+    if hit.size == 0:
+        return
+    if start is None and end is None:
+        checks.append(
+            Check(
+                "date-window",
+                name,
+                "WARN",
+                f"{hit.min()} .. {hit.max()}",
+                "a known search window",
+                "no --start-time/--end-time and none recorded in the history: "
+                "window and left-censoring not checked",
+            )
+        )
+        return
+    s = np.datetime64(start.isoformat(), "D") if start else None
+    e = np.datetime64(end.isoformat(), "D") if end else None
+    outside = 0
+    if s is not None:
+        outside += int(np.sum(hit < s))
+    if e is not None:
+        outside += int(np.sum(hit > e))
+    checks.append(
+        Check(
+            "date-window",
+            name,
+            "FAIL" if outside else "PASS",
+            f"{hit.min()} .. {hit.max()} ({outside} outside)",
+            f"inside {start or '...'} .. {end or '...'}",
+            f"an event date cannot fall outside the series it was detected in (window from {source})",
+        )
+    )
+    if s is None:
+        return
+    frac = float(np.mean(hit == s))
+    if frac > CENSORED_FAIL_FRAC:
+        status = "FAIL"
+    elif frac > CENSORED_WARN_FRAC:
+        status = "WARN"
+    else:
+        status = "PASS"
+    checks.append(
+        Check(
+            "date-censored",
+            name,
+            status,
+            f"{frac:.1%} of events on the window's first day ({start})",
+            f"<= {CENSORED_WARN_FRAC:.0%} (WARN above; FAIL above {CENSORED_FAIL_FRAC:.0%})",
+            "an event on day one was already under way when the window opened, so its date is "
+            "the window start, not an onset; start the series earlier or restrict the area",
+        )
+    )
+
+
 def _check_provenance(chain, state, checks):
     if chain:
         last = chain[-1].get("skill") if isinstance(chain[-1], dict) else None
@@ -788,10 +887,12 @@ def check_artifact(
     path = Path(input)
     ds = _open(path)
 
-    numeric, skipped = [], []
+    numeric, dated, skipped = [], [], []
     for name, da in ds.data_vars.items():
         if np.issubdtype(da.dtype, np.number) and not np.issubdtype(da.dtype, np.timedelta64):
             numeric.append(name)
+        elif np.issubdtype(da.dtype, np.datetime64):
+            dated.append(name)
         else:
             skipped.append(f"{name} ({da.dtype})")
     if variable:
@@ -800,15 +901,16 @@ def check_artifact(
             raise UsageError(
                 f"--variable {', '.join(missing)} not in artifact (have {list(ds.data_vars)})"
             )
-        not_numeric = [v for v in variable if v not in numeric]
-        if not_numeric:
-            raise UsageError(f"no checkable values in {', '.join(not_numeric)} (not numeric)")
-        selected = list(dict.fromkeys(variable))
+        uncheckable = [v for v in variable if v not in numeric and v not in dated]
+        if uncheckable:
+            raise UsageError(f"no checkable values in {', '.join(uncheckable)} (not numeric or dates)")
+        selected = [v for v in dict.fromkeys(variable) if v in numeric]
+        selected_dates = [v for v in dict.fromkeys(variable) if v in dated]
     else:
-        selected = numeric
-    if not selected:
+        selected, selected_dates = numeric, dated
+    if not selected and not selected_dates:
         raise UsageError(
-            f"no checkable variable in {path}: no numeric data variables"
+            f"no checkable variable in {path}: no numeric or date data variables"
             + (f" (found {', '.join(skipped)})" if skipped else "")
             + "; absence of a check is not a pass"
         )
@@ -818,13 +920,22 @@ def check_artifact(
     checks: list[Check] = []
     for name in selected:
         _check_variable(name, ds[name], ds, history_skills, expect_units, max_nan_frac, checks)
+    if selected_dates:
+        if start_time is not None or end_time is not None:
+            win, source = (start_time, end_time), "--start-time/--end-time"
+        else:
+            win, source = _history_window(chain), "the fetch step in the history"
+        for name in selected_dates:
+            _check_dates(name, ds[name], win[0], win[1], source, checks)
     _check_coverage(ds, checks)
-    _check_time(ds, start_time, end_time, checks)
+    if _time_axis(ds) is not None or not selected_dates:
+        # An event-date artifact has no time axis; its window was checked on the dates above.
+        _check_time(ds, start_time, end_time, checks)
     if bbox is not None:
         _check_bbox(ds, bbox, checks)
     _check_provenance(chain, state, checks)
 
-    text, counts = _render(path, selected, skipped, checks)
+    text, counts = _render(path, selected + selected_dates, skipped, checks)
     print(text)
     sys.stdout.flush()
     if counts["FAIL"]:

@@ -140,12 +140,13 @@ Prefer small steps over stuffing every filter into one call:
   daily series with gaps left as `NaN` (never filled with 0). For a season that
   crosses 1 January, use `day-of-year --since <first day>`.
   An onset on the **first day of the input series** is not an onset: it was
-  already raining when the window opened (left-censored), and nothing in the
-  output flags it. Start the series weeks before the season you expect,
-  restrict the area to where that season applies (e.g. `resolve-region
-  "Kenya OND region"` for the short rains), and report the share of cells
-  whose onset equals the first day. If that share is large, say the map is
-  not trustworthy there.
+  already raining when the window opened (left-censored). `check-artifact` on
+  the `onset-date` output measures this (`date-censored`: WARN above 5 %,
+  FAIL above 25 % of events on the first day). On a FAIL, do not plot: start
+  the series weeks before the season you expect, or restrict the area to
+  where that season applies (e.g. `resolve-region "Kenya OND region"` for the
+  short rains), and rerun. On a WARN, plot but say which share of the map is
+  censored.
 - **Onset dates:** to *map* an onset result, use `plot-onset` — it takes
   `onset-date`'s output directly and draws mean onset date and per-cell
   member agreement in one figure. Do not build that by hand, and do not

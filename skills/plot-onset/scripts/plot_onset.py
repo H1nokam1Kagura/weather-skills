@@ -357,12 +357,40 @@ def plot_onset(ds, variable, start_date, end_date, low_confidence_pct, title, ou
     cbar.set_label("Onset date", fontsize=13)
     cbar.ax.tick_params(labelsize=11)
 
+    # Uncoloured cells are "no onset found in the window" (or no data), not missing output.
+    # Without a key a non-expert reads them as a hole in the map.
+    from matplotlib.patches import Patch
+
+    ax.legend(
+        handles=[Patch(facecolor="white", edgecolor="0.4", label="No onset found (or no data)")],
+        loc="lower left",
+        fontsize=10,
+        framealpha=0.9,
+    )
+
     fig.tight_layout()
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=150, bbox_inches="tight")
     plt.close(fig)
+    _report_figure(output, variable, int(valid.size), int(da.size))
     return output
+
+
+def _report_figure(path, variable, n_dated, n):
+    """Print the same QA lines the other figure skills print: a pixel hash and a data line.
+
+    The hash is over RGB pixels of the PNG as written here, before the provenance stamp is
+    added, matching weather-skills-plotting's ``plot hash`` so hashes compare across skills.
+    """
+    import hashlib
+
+    from PIL import Image
+
+    with Image.open(path) as img:
+        digest = hashlib.sha256(img.convert("RGB").tobytes()).hexdigest()
+    print(f"plot hash: {digest}")
+    print(f"data: not null ({variable} {n_dated}/{n} dated)")
 
 
 if __name__ == "__main__":
