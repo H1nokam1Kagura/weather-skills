@@ -312,6 +312,21 @@ def _onset(ds):
     return ds["onset_tp_date"].isel(latitude=0, longitude=0).values
 
 
+@pytest.mark.parametrize("search_start", [None, "06-02"])
+def test_records_effective_search_bounds_after_selection(tmp_path, onset_date, search_start):
+    # Fetch history remains broad after selecting the actual series passed to onset-date.
+    source = _daily_ds([3.0] * 100).isel(time=slice(10, 90))
+    source.attrs["weather_skills_history"] = json.dumps(
+        [{"skill": "chirps-fetch", "args": {"start_time": "2026-05-01", "end_time": "2026-08-08"}}]
+    )
+    flags = ("--mr-search-start", search_start) if search_start else ()
+    result = _run_mr(onset_date, tmp_path, source, *flags)
+    attrs = result["onset_tp_date"].attrs
+    assert attrs["onset_search_start"] == ("2026-06-02" if search_start else "2026-05-11")
+    assert attrs["onset_search_end"] == "2026-07-29"
+    assert _onset(result) == np.datetime64(attrs["onset_search_start"])
+
+
 def test_mr_clean_onset(tmp_path, onset_date):
     # 10 dry days, then a 5-day all-wet window of 3mm/day (15mm > 10mm), then
     # 2mm/day: every 10-day window in the 30-day follow-up totals 20mm >= 5mm.

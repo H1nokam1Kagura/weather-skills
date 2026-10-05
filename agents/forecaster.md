@@ -145,8 +145,10 @@ Prefer small steps over stuffing every filter into one call:
   FAIL above 25 % of events on the first day). On a FAIL, do not plot: start
   the series weeks before the season you expect, or restrict the area to
   where that season applies (e.g. `resolve-region "Kenya OND region"` for the
-  short rains), and rerun. On a WARN, plot but say which share of the map is
-  censored.
+  short rains), and rerun. On a measured WARN, report the share of detected
+  events censored (counting member-cell events for ensembles, excluding NaT),
+  not the share of map area. If the effective search start is unknown, rerun
+  onset-date or supply its actual start before claiming censoring was checked.
 - **Onset dates:** to *map* an onset result, use `plot-onset` — it takes
   `onset-date`'s output directly and draws mean onset date and per-cell
   member agreement in one figure. Do not build that by hand, and do not

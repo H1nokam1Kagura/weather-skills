@@ -413,6 +413,16 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/onset_date.py \
     --mr-thresh-field /tmp/imd_wet_spell_clim.zarr --mr-search-start 06-02
 ```
 
+## Recorded search bounds
+
+Each datetime64 onset variable records `onset_search_start` (the first input
+day eligible for search, including `--mr-search-start`) and `onset_search_end`
+(the last input day). These survive removal of the time axis and reflect any
+upstream time selection. The end is an outer bound, not a promise that every
+late candidate has enough follow-up. `check-artifact` uses these bounds for
+date-range and first-day censoring checks. Duration and nonstandard-calendar
+outputs do not carry these calendar-date attributes.
+
 ## References
 
 - Moron, V. & Robertson, A. W. (2014). Interannual variability of Indian

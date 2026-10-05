@@ -1351,6 +1351,14 @@ def onset_date(
             "standard_name": None,
             **provenance,
         }
+        # Capture the actual input/search bounds before collapsing time. Fetch history
+        # can precede a time selection or an explicit search-start restriction.
+        if np.issubdtype(time_values.dtype, np.datetime64):
+            result.attrs["onset_search_end"] = str(time_values[-1].astype("datetime64[D]"))
+            if start_idx < len(time_values):
+                result.attrs["onset_search_start"] = str(
+                    time_values[start_idx].astype("datetime64[D]")
+                )
         del out_ds[var]
         # Sandwiched, not `{var}_onset_date` / `onset_date_{var}`:
         # weather_skills_core classifies a variable's physical kind (and

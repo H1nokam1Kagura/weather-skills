@@ -158,7 +158,12 @@ def test_no_checkable_variable_exits_2(tmp_path, check_artifact, capsys):
     assert "absence of a check is not a pass" in capsys.readouterr().err
 
 
-def _onset_store(tmp_path, dates, history_window=("2025-09-01", "2025-12-31")):
+def _onset_store(
+    tmp_path,
+    dates,
+    history_window=("2025-09-01", "2025-12-31"),
+    effective_window=("2025-09-01", "2025-12-31"),
+):
     """An onset-date-shaped artifact: one datetime64 variable on lat/lon, no time axis."""
     import xarray as xr
 
@@ -167,7 +172,13 @@ def _onset_store(tmp_path, dates, history_window=("2025-09-01", "2025-12-31")):
         {"onset_precip_date": (("latitude", "longitude"), vals)},
         coords={"latitude": [1.0, 2.0], "longitude": np.arange(vals.shape[1], dtype=float) + 10},
     )
-    args = {"start_time": history_window[0], "end_time": history_window[1]} if history_window else {}
+    args = (
+        {"start_time": history_window[0], "end_time": history_window[1]} if history_window else {}
+    )
+    if effective_window:
+        ds["onset_precip_date"].attrs.update(
+            onset_search_start=effective_window[0], onset_search_end=effective_window[1]
+        )
     ds.attrs["weather_skills_history"] = json.dumps(
         [
             {"skill": "chirps-fetch", "version": "0.0.2", "args": args, "input": None},
@@ -178,16 +189,37 @@ def _onset_store(tmp_path, dates, history_window=("2025-09-01", "2025-12-31")):
 
 
 def test_onset_dates_are_checked_not_skipped(tmp_path, check_artifact, capsys):
-    src = _onset_store(tmp_path, ["2025-10-12", "2025-10-20", "NaT", "2025-11-02", "2025-10-26", "2025-10-30",
-                                  "2025-10-05", "2025-10-18", "2025-11-10", "NaT", "2025-10-22", "2025-10-25",
-                                  "2025-10-01", "2025-10-15", "2025-10-16", "2025-10-17", "2025-10-19", "2025-10-21",
-                                  "2025-10-23", "2025-10-24"])
+    src = _onset_store(
+        tmp_path,
+        [
+            "2025-10-12",
+            "2025-10-20",
+            "NaT",
+            "2025-11-02",
+            "2025-10-26",
+            "2025-10-30",
+            "2025-10-05",
+            "2025-10-18",
+            "2025-11-10",
+            "NaT",
+            "2025-10-22",
+            "2025-10-25",
+            "2025-10-01",
+            "2025-10-15",
+            "2025-10-16",
+            "2025-10-17",
+            "2025-10-19",
+            "2025-10-21",
+            "2025-10-23",
+            "2025-10-24",
+        ],
+    )
     assert _run(check_artifact, "-i", src) == 0
     out = capsys.readouterr().out
     assert _line(out, "event-found").startswith("[PASS]")
     assert _line(out, "date-window").startswith("[PASS]")
     assert _line(out, "date-censored").startswith("[PASS]")  # none on the first day
-    assert "the fetch step in the history" in out
+    assert "onset_search_start" in out
 
 
 def test_left_censored_onsets_fail(tmp_path, check_artifact, capsys):
@@ -216,11 +248,50 @@ def test_flags_override_history_window_and_catch_dates_outside(tmp_path, check_a
 
 
 def test_unknown_window_warns_not_passes(tmp_path, check_artifact, capsys):
-    src = _onset_store(tmp_path, ["2025-10-15"] * 20, history_window=None)
+    src = _onset_store(tmp_path, ["2025-10-15"] * 20, history_window=None, effective_window=None)
     assert _run(check_artifact, "-i", src) == 0
     out = capsys.readouterr().out
     assert _line(out, "date-window").startswith("[WARN]")
-    assert "date-censored" not in out
+    assert _line(out, "date-censored").startswith("[WARN]")
+
+
+def test_effective_search_start_overrides_earlier_fetch(tmp_path, check_artifact, capsys):
+    src = _onset_store(
+        tmp_path,
+        ["2025-10-01"] * 20,
+        effective_window=("2025-10-01", "2025-12-31"),
+    )
+    assert _run(check_artifact, "-i", src) == 1
+    out = capsys.readouterr().out
+    assert _line(out, "date-censored").startswith("[FAIL]")
+    assert "100.0% of events on the window's first day (2025-10-01)" in out
+
+
+def test_end_only_override_preserves_effective_start(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["2025-09-01"] * 20)
+    assert _run(check_artifact, "-i", src, "--end-time", "2025-12-31") == 1
+    assert _line(capsys.readouterr().out, "date-censored").startswith("[FAIL]")
+
+
+def test_start_only_override_preserves_effective_end(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["2026-01-01"] * 20)
+    assert _run(check_artifact, "-i", src, "--start-time", "2025-09-01") == 1
+    assert _line(capsys.readouterr().out, "date-window").startswith("[FAIL]")
+
+
+@pytest.mark.parametrize("flags", [(), ("--end-time", "2025-12-31")])
+def test_legacy_fetch_bounds_do_not_certify_censoring(tmp_path, check_artifact, capsys, flags):
+    src = _onset_store(tmp_path, ["2025-10-01"] * 20, effective_window=None)
+    assert _run(check_artifact, "-i", src, *flags) == 0
+    out = capsys.readouterr().out
+    assert _line(out, "date-censored").startswith("[WARN]")
+    assert "effective search start unknown" in out
+
+
+def test_legacy_explicit_start_enables_censoring(tmp_path, check_artifact, capsys):
+    src = _onset_store(tmp_path, ["2025-10-01"] * 20, effective_window=None)
+    assert _run(check_artifact, "-i", src, "--start-time", "2025-10-01") == 1
+    assert _line(capsys.readouterr().out, "date-censored").startswith("[FAIL]")
 
 
 def test_no_event_anywhere_warns(tmp_path, check_artifact, capsys):
