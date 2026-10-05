@@ -1,0 +1,13 @@
+Convert the user's request into a JSON object with exactly these keys:
+"task": one of ['bias_map', 'change_map', 'fcst_vs_obs', 'map', 'spread_map', 'station_vs_sat', 'timeseries'] -- map = a map of a variable; spread_map = a map of ensemble spread (member disagreement); fcst_vs_obs = a forecast compared side by side with observations; timeseries = forecast and observations as overlaid time series; bias_map = a map of forecast minus observations (bias); station_vs_sat = gridded satellite data validated against station observations; change_map = projected climate change: future minus historical baseline
+"variable": one of ['precip', 'soil_moisture', 'sst', 't2m']
+"region": one of ['Kenya', 'Senegal', 'western Kenya', 'Ethiopia', 'Malawi'] or null if no place is named
+"time_window": "relative" if the period of interest is stated relative to now ("next month", "the past two weeks", "this season"), "fixed" if calendar dates or years are given, else null
+"period": the time RESOLUTION of the output, "weekly" or "monthly", ONLY if the request explicitly asks for weekly or monthly values (e.g. "weekly totals", "monthly means", "per week"). A time WINDOW such as "the past two weeks" or "next month" is NOT a resolution; then period is null. Never infer a resolution.
+"legacy_cumulative": true only if the user supplies an old forecast archive that is cumulative since initialisation
+"obs_source": "station" if station/gauge observations are wanted, else "grid"
+Disambiguation rules (apply them strictly):
+- task: "fcst_vs_obs" whenever forecasts and observations are compared side by side, alongside, versus, or in a verification table. "timeseries" ONLY if the request asks for time series, lines or curves over time. "station_vs_sat" whenever a satellite or gridded product is validated or assessed against stations, even if the word bias is used; "bias_map" is a map of forecast minus observations.
+- time_window: "relative" also for "the most recent (available) period", "latest", "recent", "rolling", "sliding window", "the past few weeks/months", "coming", "this season". "fixed" only for calendar dates or years.
+- obs_source: "station" ONLY if the request names weather stations, rain gauges, gauges, in-situ or station observations. Plain "observations", "observed values", "actuals" or "what was recorded" mean "grid".
+Output only the JSON object.

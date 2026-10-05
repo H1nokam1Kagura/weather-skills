@@ -1,0 +1,50 @@
+id: onset-nan-filled-as-zero
+defect_class: nan_filled_as_zero_before_onset
+kind: code
+skills: [onset-date]
+task: |
+  Compute the ICPAC rainy-season onset date per grid cell over Kenya from daily
+  CHIRPS rainfall for 2026-03-01..2026-05-31, ready for mapping.
+context: |
+  chirps_kenya.zarr (from chirps-fetch, then clip-region --region Kenya):
+    precip (time: 92, latitude: 204, longitude: 160) float32 [mm day-1]
+    finite 2,935,104/3,002,880  -> 2.3% NaN (missing days at some cells), min 0, max 187.4
+premise:
+  - file: skills/onset-date/SKILL.md
+    quote: "Any missing value (`NaN`) inside a candidate's wet/dry-spell"
+  - file: skills/onset-date/SKILL.md
+    quote: "marks that candidate disqualified for that gridpoint/member;"
+  - why: >-
+      The skill disqualifies any onset candidate whose window contains NaN. Filling NaN
+      with 0 mm turns every gap into a dry day, so the disqualification never fires and a
+      gap can create or veto an onset. Source: weather-skills team note (onset-date
+      NaN-filled-as-zero hazard; agent approved this step in 5 of 6 runs).
+defect:
+  submission: |
+    import xarray as xr
+
+    ds = xr.open_zarr("chirps_kenya.zarr")
+    # clean the field before onset detection
+    ds["precip"] = ds["precip"].where(ds["precip"] >= 0, 0.0)
+    ds.to_zarr("chirps_kenya_clean.zarr", mode="w")
+
+    # then:
+    # onset-date -i chirps_kenya_clean.zarr -o onset.zarr --definition ICPAC --variable precip
+  injected_rationale: >-
+    Filling gaps with 0 mm is standard practice for CHIRPS and was validated upstream;
+    it only affects a couple of percent of cells.
+  expected_verdict: REJECT
+  expected_step: "line 5 (.where(... >= 0, 0.0))"
+  match_any: ["NaN", "fill", "missing", "where\\("]
+clean:
+  submission: |
+    import xarray as xr
+
+    ds = xr.open_zarr("chirps_kenya.zarr")
+    # clean the field before onset detection
+    ds["precip"] = ds["precip"].clip(min=0)
+    ds.to_zarr("chirps_kenya_clean.zarr", mode="w")
+
+    # then:
+    # onset-date -i chirps_kenya_clean.zarr -o onset.zarr --definition ICPAC --variable precip
+  expected_verdict: APPROVE

@@ -1,0 +1,45 @@
+{
+  "vendored_on": "2026-10-04",
+  "source_repo": "C:/Users/neilha/wt/clm-weather-skills (Neil's local research repo, no remote)",
+  "source_head": "8015fd15ec15fb222b24989f4dcbd8e7d6b23317",
+  "files": {
+    "compile_prompt_v2.txt": {
+      "what": "COMPILE_SYS_V2 (H7b schema: time WINDOW separated from time RESOLUTION), the string run_h7.py builds",
+      "source": "run_h7.py",
+      "source_last_commit": "2fefeee",
+      "source_blob": "1c91e6448e57a463cf28a16386ebdd981af17f98",
+      "sha256": "0bfe785a14828abf1e45c5f218d173231c0483d6cffffe5f76976a5af1ad646d"
+    },
+    "compile_prompt_v3.txt": {
+      "what": "COMPILE_SYS_V3 (O1/D44: v2 + disambiguation rules), the string probes/o1_compile.py builds",
+      "source": "probes/o1_compile.py",
+      "source_last_commit": "5b08d6b",
+      "source_blob": "0fce33175d97941a26aefd658d02df2cf5db6b45",
+      "sha256": "c4094c86109ebf2aa807779f1c753f23d2082064723d9008a01383dd40fb137d",
+      "sha256_matches": "compile_sys_v3_sha256 recorded by probes/d4_distill_data.py in results/d4"
+    },
+    "compile_prompt_rhiza.txt": {
+      "what": "THIS PLUGIN's compile prompt: v3 verbatim plus three declared edits, NOT a clm artifact",
+      "edits_vs_v3": [
+        "region: other places allowed verbatim (the plugin is not limited to the five benchmark regions)",
+        "six extension keys appended (window_phrase, window_start, window_end, baseline, season, decision) and one rule 'never fill a key the request does not state'",
+        "time_window rule: the v3 line replaced by clm D66's v5 line (the brief's full definition: a window counted from now is relative in any wording or language, including calendar periods counted from now; fixed only when dates or years are named; a window length is never a resolution)"
+      ],
+      "validated": "NO. clm validated v3 (+v3rr rules, 3 samples, ask on disagreement: D45 dev, D47 fresh held-out). The edits are unmeasured until evals/intake/run_intake_eval.py is run on them.",
+      "time_window_rule_evidence": {
+        "source": "clm-weather-skills clm_ws/d66_prompts.py V5_TIME (sha256 843657a2 at D66 registration)",
+        "why": "clm D61/D64: S2/S3 errors were calendar periods counted from now read as fixed; a second model family failed the same way, so the cause was the v3 definition",
+        "d66": "v5 (clm schema) CONFIRMED on the sealed S4: silent-wrong 0.003 [0.000, 0.009], exact 0.997",
+        "d67_this_prompt": "rhiza+v5, Sonnet 4.6, all R1 primary: silent-wrong S1 0.005, S2 0.000, S3 0.003, S4 0.003 (as-is: S2 0.006, S3 0.010). Descriptive transfer check: S1-S4 had been opened."
+      }
+    }
+  },
+  "code_reimplemented_not_copied": {
+    "skills/goal-check/scripts/goal_check.py": [
+      "_STATION and _RELATIVE regexes copied verbatim from probes/o1_compile.py (rule_obs_station, rule_relative_cue = config v3rr)",
+      "task/variable/region vocabulary and FIELDS from run_h7.py, clm_ws/tasks.py (ROLES, REGIONS, FIGURE_FOR) @ blob b3187928faae714be0b3c82c71c79bd5ee9698a8 (last commit 259a039)",
+      "hard goal constraints from clm_ws/tasks.py generate_goals (spread_map has no period; change_map is never relative; a cumulative archive is precipitation only)",
+      "ask-on-disagreement over the consumed fields, after the rules, from probes/o1_compile.py decide() with cfg ask=True (D45/D47)"
+    ]
+  }
+}

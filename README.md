@@ -60,7 +60,7 @@ credentialed or source-specific fetcher only when it does not.
 | `standardize-anomaly` | Standardized anomaly aka z-score: `(field − clim_avg) / clim_std` against a climatology (e.g. `clim-fetch`) — dimensionless output, errors on units mismatch. For a plain physical-unit anomaly, use `difference` instead. |
 | `zonal-moisture-transport` | Eastward moisture flux `q·u`, default column-integrated to IVT (`viwve`, kg m-1 s-1). Compose after `ecmwf-fetch -v q -v u` |
 | `verify` | Forecast vs obs verification: `--metric hits|bias|mae` (hits = event classification). Plot the output with `plot`. |
-| `indicator` | Daily boolean indicator from one `--rule` (aliases `icpac-onset` / `chc-onset`, or clauses like `precip sum 8d >= 25`); optional `--probability`, `--detect first` / `any`, `--cumulative` |
+| `indicator` | Daily boolean indicator from one `--rule` (onset-definition registry names such as `icpac-onset` / `chc-onset` / `agrhymet-sos-rolling`, or clauses like `precip sum 8d >= 25`); optional `--probability`, `--detect first` / `any`, `--cumulative` |
 | `plot` | Heatmap, filled-contour, timeseries, **xy scatter**, wind-rose, quiver, or **layered** map (repeatable `--layer heatmap:…` / `scatter:…` / `outline:…`) from one or more datasets |
 | `plot-compare` | Side-by-side multi-panel comparison of two datasets (incl. station-vs-grid), optionally clipped to a `--bbox` and masked to a `--mask-geojson` polygon |
 | `plot-compare-forecasts` | N-dataset comparison grid (rows = forecasts and/or gridded obs; columns = union of times); missing times are blank `n/a` cells |
@@ -99,6 +99,7 @@ dataset output.
 | `resolve-time` | Resolve relative calendar dates to absolute `--start-time`/`--end-time` or `--date`. |
 | `inspect-zarr` | Print dims, coordinate values, and a bounded data-variable summary of a Zarr (stdout; no write). Data arrays can be huge — this skill never dumps them in full. |
 | `provenance` | Inspect `weather_skills_history` on a Zarr or plot PNG (DAG lineage, JSON, or a commit-pinned reproduction script). |
+| `verify-run` | Deterministic gate over an artifact's provenance: re-hash every recorded input, optionally replay the recorded steps and compare data fingerprints; prints a gate card with VERDICT PASS / BLOCK / UNVERIFIABLE (exit 0 / 1 / 2). |
 | `submit-feedback` | Build a length-checked prefilled GitHub new-issue URL the user clicks to file feedback under their own account. Holds no token, makes no network call, creates no issue itself. |
 
 ## Install

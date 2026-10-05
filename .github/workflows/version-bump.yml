@@ -437,7 +437,7 @@ jobs:
           rm -rf "$stage"
           mkdir -p "$stage/.claude-plugin" "$stage/agents"
           cp .claude-plugin/plugin.json "$stage/.claude-plugin/plugin.json"
-          cp agents/forecaster.md "$stage/agents/forecaster.md"
+          cp agents/*.md "$stage/agents/"
           cp LICENSE "$stage/LICENSE"
           cp -R skills "$stage/skills"
 
