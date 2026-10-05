@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cftime>=1.6",
 #   "numpy",
 #   "xarray",
@@ -12,7 +12,7 @@
 import json
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -916,8 +916,19 @@ def _render(path, variables, skipped, checks):
     default=DEFAULT_MAX_NAN_FRAC,
     help="Maximum fraction of missing cells per variable (0-1). Default 0.5.",
 )
+@weather_skill.argument(
+    "--format", dest="output_format", choices=["human", "json"], default="human"
+)
 def check_artifact(
-    input, variable, bbox, start_time, end_time, expect_units, max_nan_frac, **kwargs
+    input,
+    variable,
+    bbox,
+    start_time,
+    end_time,
+    expect_units,
+    max_nan_frac,
+    output_format="human",
+    **kwargs,
 ):
     """Check a Zarr artifact against fixed physical and structural invariants."""
     if not 0.0 <= max_nan_frac <= 1.0:
@@ -980,7 +991,21 @@ def check_artifact(
     _check_provenance(chain, state, checks)
 
     text, counts = _render(path, selected + selected_dates, skipped, checks)
-    print(text)
+    if output_format == "json":
+        print(
+            json.dumps(
+                {
+                    "schema": "check-artifact.gate/1",
+                    "artifact": str(path.resolve()),
+                    "verdict": "FAIL" if counts["FAIL"] else "PASS",
+                    "exit_code": 1 if counts["FAIL"] else 0,
+                    "counts": counts,
+                    "checks": [asdict(c) for c in checks],
+                }
+            )
+        )
+    else:
+        print(text)
     sys.stdout.flush()
     if counts["FAIL"]:
         raise DataError(f"check-artifact: {counts['FAIL']} check(s) failed on {path}", prefix=False)

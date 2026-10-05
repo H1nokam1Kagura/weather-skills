@@ -177,6 +177,11 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/check_artifact.py -i /tmp/chirps_kenya.zarr \
     --expect-units 'mm day-1' --max-nan-frac 0.05
 ```
 
+Controllers can use `--format json` for a single stdout object with schema
+`check-artifact.gate/1`, resolved `artifact`, `verdict`, `exit_code`, counts and
+structured `checks`. A failed gate still exits nonzero; inspect the actual
+process exit as well as the reported verdict.
+
 ```
 check-artifact: /tmp/chirps_kenya.zarr
 variables checked: precip

@@ -22,12 +22,23 @@ at 4.4% asks).
 
 ## 1. Intake: the opening request → GOAL CARD
 
+Read the intake rules at `${CLAUDE_PLUGIN_ROOT}/skills/goal-check/SKILL.md`
+and packet rules at `${CLAUDE_PLUGIN_ROOT}/skills/decision-packet/SKILL.md`.
+Run their scripts at those exact plugin-relative locations; the host substitutes
+the plugin root in this document. Never search the drive or session logs.
+Preserve the original request and separately attributed authorization. Keep
+explicit constraints that the typed schema cannot encode in `plan_hints` and
+the read-back; do not replace a numeric bbox with an inferred whole country,
+or treat assistant-added constraints as the user's words.
+
 1. **Three independent readings, one command.** Write the request verbatim to a file with the
    **Write tool** (never paraphrase it; never `echo`/`printf` it in Bash), then run the
    `goal-check` skill's `uv run <skill dir>/scripts/sample_goals.py --request-file <absolute path>`
    **as a Bash command on its own**: no `cd`, `&&`, `;`, pipes, redirects or `echo $?`. Compound
    commands are refused by permission checks when you run unattended.
-   It runs the three headless compiles in parallel and checks them in one step. Use that one
+   It runs three separate headless compiles sequentially by default (`--workers 1`)
+   and checks them in one step. Separate contexts make them independent; concurrency
+   is not required. Use that one
    command, not three `claude -p` calls of your own: separate calls get stopped by permission
    prompts when you run unattended. Do not substitute three reasoning passes in your own
    context either; they see each other and anchor, so they are not independent. Copy its
@@ -62,6 +73,17 @@ at 4.4% asks).
    this" / "Change something", each with its definition, the read-back lines as evidence, and
    what happens next; default: nothing runs until the person answers) and gate it like any other
    outbound packet.
+
+   **Existing authorization:** before constructing a new approval question,
+   check the original user messages supplied by the caller. If an explicit
+   authorization already covers this exact scenario and no scientific choice
+   changed, retain the read-back but omit the approval question. Record an
+   `authorization` object in the typed card with `status: "existing"`, the
+   exact user quote, its source, and the covered scope; set `approval: null`.
+   `ready_for_approval` then describes goal readiness, not a pending question.
+   Never manufacture a reply or run decision-packet import on invented text.
+   An assistant's claim of approval without its source is insufficient. If
+   scope changed, record the difference and use the normal approval packet.
 
 ## 2. Outbound: any question, approval or plan read-back to the person
 
@@ -131,7 +153,7 @@ Status: ready_for_approval | needs_answers | blocked_invalid | blocked_packet
    3) I can't tell from this — say what is missing.
    If you do not answer: <if_no_reply>
 
-### Is this what you want?       (only if Status is ready_for_approval)
+### Is this what you want?       (only if ready_for_approval AND no existing authorization)
 1) Yes, plan exactly this — <definition>
 2) Change something — <definition>
 

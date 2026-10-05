@@ -31,7 +31,7 @@ Use `provenance` to *read* the lineage; use verify-run to *gate* on it. Use
 ## Usage
 
 ```
-uv run ${CLAUDE_SKILL_DIR}/scripts/verify_run.py --input <artifact> [--replay] [--rtol R] [--search-dir DIR]
+uv run ${CLAUDE_SKILL_DIR}/scripts/verify_run.py --input <artifact> [--require-replay | --replay] [--rtol R] [--search-dir DIR]
 ```
 
 ### Arguments
@@ -39,11 +39,18 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/verify_run.py --input <artifact> [--replay] [
   stamped figure (`.png`, `.jpg`, `.html`). Required.
 - `--replay` — also re-run the recorded transform steps in a temp dir and
   compare the regenerated data with the artifact.
+- `--require-replay` — use for final-result claims. Implies `--replay` and
+  requires a successful final data comparison. Input hashes or intermediate
+  comparisons alone cannot pass: missing final replay is UNVERIFIABLE (2).
+  A detected mismatch remains BLOCK (1). A figure with only a remote fetch
+  upstream has no replayable calculation and is UNVERIFIABLE in this mode.
 - `--rtol` — relative tolerance for the replay value comparison. Default `0`:
   values must be bit-identical (NaNs in the same places).
 - `--search-dir` — extra directory to look for recorded inputs, repeatable.
   The artifact's own directory is always searched first. History records
   input basenames, not full paths.
+  Supply the parent of every reused input outside the artifact directory.
+  Use one `--input` per invocation; repeat `--search-dir` for multiple locations.
 
 ## Checks
 
@@ -89,10 +96,19 @@ with nothing on disk to re-hash, is `UNVERIFIABLE`, never `PASS`. A `PASS`
 without `--replay` means the recorded inputs are intact; the card's `scope`
 line says so.
 
+For final numbers or a calculated figure, use `--require-replay`. A hashes-only
+PASS must be described as input integrity only, never as verified output values.
+Strict replay still does not compare figure pixels or validate source observations.
+
 The card goes to stdout; a one-line `verify-run: VERDICT …` goes to stderr on
 a non-zero exit.
 
 ## Replay limits
+
+For a controller, use `--require-replay --format json`. The single stdout object
+has schema `verify-run.gate/1`, resolved `artifact`, `verdict`, `exit_code`, `scope`
+and structured `checks`. Cross-check its exit code against the actual process;
+release requires a `kind: replay`, `status: PASS` check, not only input hashes.
 
 - Args are replayed as `--<dest>=<value>` from the recorded argparse dests.
   A skill whose flag spelling differs from its dest, or whose extra Zarr

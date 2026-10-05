@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cartopy",
 #   "cf-xarray",
 #   "cftime>=1.6",
@@ -317,6 +317,19 @@ def plot_onset(ds, variable, start_date, end_date, low_confidence_pct, title, ou
     gl.xlabel_style = {"size": 11}
     gl.ylabel_style = {"size": 11}
     ax.set_title(title or f"Onset date — {variable}", fontsize=15, fontweight="bold", pad=10)
+    if ds.attrs.get("synthetic") == "true":
+        ax.text(
+            0.5,
+            0.015,
+            "SYNTHETIC EVALUATION - NOT OBSERVATIONS",
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            color="#713f12",
+            bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
+            zorder=10,
+        )
 
     if pct_valid is not None:
         lon2d, lat2d = np.meshgrid(pct_valid[lon_dim].values, pct_valid[lat_dim].values)

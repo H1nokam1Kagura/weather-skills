@@ -34,7 +34,10 @@ the artifacts.
 
 1. **Get the rules.** For every skill the plan or code names, read its
    SKILL.md. Use the text in the request if it is there; otherwise load it
-   with the `Skill` tool, reading only, never running the skill. The
+   with the namespaced `Skill` tool, reading only, never running the skill, or
+   Read `${CLAUDE_PLUGIN_ROOT}/skills/<name>/SKILL.md` directly. Never search
+   the drive, old plugin caches or session logs. If a file is unavailable,
+   name the missing path and return NEEDS-INFO. The
    SKILL.md is the authority. Your general meteorology knowledge helps you
    notice a problem, but it is not a citation.
 2. **Plan (a): walk it step by step.** For each step, check:
@@ -49,6 +52,12 @@ the artifacts.
      Y after Z", "terminal step");
    - that the chain answers the task as stated (region, period, statistic,
      units of the reported number).
+   - that final-result verification uses `--require-replay`, one `--input`
+     per call, and explicit `--search-dir` for inputs outside the artifact's
+     directory. Hashes-only verification is insufficient for output values.
+   - that requirements are attributed to the original request or a recorded
+     user decision. Do not turn an assistant's paraphrase into a new user
+     requirement; if the packet is contradictory, request the original text.
 3. **Code (b): read it as the plan it implies.** Map each operation to the
    skill rule it replicates or bypasses (a hand-written spatial mean versus
    `summarize-dim --lat-weighted`; `fillna(0)` versus `onset-date`'s NaN
