@@ -107,6 +107,62 @@ def test_region_canonicalised_both_sides():
     assert H.classify(UNIT, with_card(raw, goal=card["goal"]))["outcome"] == "exact"
 
 
+def global_label_unit():
+    correction = H.LABEL_CORRECTIONS[0]
+    return unit(
+        1,
+        id=correction["id"],
+        request=correction["request"],
+        clarity="underdetermined",
+        truth=UNIT["truth"] | {"region": None},
+    )
+
+
+def test_audited_global_label_corrected_without_mutating_sample():
+    u = global_label_unit()
+    assert H.premise_audit([u]) == []
+    record = H.classify(u, good_raw(u))
+    assert record["outcome"] == "exact"
+    assert record["truth_adjusted"][0].startswith("region:None->global")
+    assert record["clarity"] == "underdetermined"
+    assert u["truth"]["region"] is None
+    text, _, _ = H.report([record], "Correction smoke")
+    assert "region:None->global" in text
+
+
+@pytest.mark.parametrize("region", [None, "Kenya"])
+def test_global_label_correction_still_catches_wrong_agent_region(region):
+    u = global_label_unit()
+    raw = good_raw(u)
+    goal = H.parse_card(raw["text"])["goal"] | {"region": region}
+    record = H.classify(u, with_card(raw, goal=goal))
+    assert record["outcome"] == "silent_wrong"
+
+
+def test_region_unspecified_is_not_globally_relabelled():
+    u = unit(1, truth=UNIT["truth"] | {"region": None})
+    truth, adjustments = H.effective_truth(u)
+    assert truth["region"] is None and adjustments == []
+
+
+@pytest.mark.parametrize("change", ["request", "truth"])
+def test_stale_label_correction_refused(change):
+    u = global_label_unit()
+    if change == "request":
+        u["request"] = "Weekly rainfall map for Kenya."
+    else:
+        u["truth"] = u["truth"] | {"region": "Kenya"}
+    with pytest.raises(ValueError, match="label correction"):
+        H.effective_truth(u)
+
+
+def test_already_corrected_label_is_idempotent():
+    u = global_label_unit()
+    u["truth"] = u["truth"] | {"region": "global"}
+    truth, adjustments = H.effective_truth(u)
+    assert truth["region"] == "global" and adjustments == []
+
+
 def test_controls_have_the_truth_they_claim():
     pos, neg = H.CONTROLS
     assert (

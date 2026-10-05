@@ -48,7 +48,9 @@ flagged) and 5 CONTRADICT their own truth on obs_source (they say "gauge" / "in-
 says grid). So that label does NOT mean "the right behaviour is to ask". It is reported as a
 diagnostic population with no verdict; an ask there is neither credited nor penalised, and where
 a strong station cue contradicts the truth the scorer uses the request-implied value (the v3rr
-station rule's own reading) and records the adjustment.
+station rule's own reading) and records the adjustment. The versioned LABEL_CORRECTIONS below
+also records an audited region contradiction. It matches the exact request and original label;
+it never equates an unspecified region with global coverage. Population membership is unchanged.
 
 Exit codes: 0 completed (verdict MEETS / FAILS / smoke), 1 refused before spending (dirty tree,
 estimate over cap, config/resume mismatch, missing sample), 2 INCONCLUSIVE, 3 ABORTED (auth,
@@ -119,6 +121,20 @@ CARD_STATUSES = {"ready_for_approval", "needs_answers", "blocked_invalid", "bloc
 STATUS_EXIT = {"ready_for_approval": 0, "needs_answers": 3, "blocked_invalid": 1}
 NOT_SCORED = ("error", "degraded")
 METRICS = ("asked", "exact", "silent_wrong", "loud", "unnecessary", "rule_ask")
+# Source: cleared D4 train unit 1, cluster 872e1e4e98. The source fidelity audit
+# runs/o0_audit/d4/databricks-gpt-oss-120b/records.jsonl marks region UNFAITHFUL,
+# quoting "global precipitation map". This is a request/label contradiction,
+# not a missing-information case. Preserve the original sample and record the adjustment.
+LABEL_CORRECTIONS = (
+    {
+        "id": "d4train-0001",
+        "request": "Show me a global precipitation map, weekly resolution, covering the next month.",
+        "slot": "region",
+        "original": None,
+        "corrected": "global",
+        "reason": "audited request explicitly says global; source fidelity audit flags region",
+    },
+)
 # Session-scoped variables of a PARENT Claude Code session: a child must not inherit them (it
 # would believe it is a child/attended session of whoever launched the harness).
 STRIP_ENV = (
@@ -242,6 +258,21 @@ def effective_truth(unit: dict) -> tuple[dict, list[str]]:
     """Truth as the scorer compares it, plus any request-implied adjustment (see docstring)."""
     t = dict(unit["truth"])
     adj = []
+    for correction in LABEL_CORRECTIONS:
+        if unit.get("id") != correction["id"]:
+            continue
+        if unit["request"] != correction["request"]:
+            raise ValueError(f"label correction request mismatch: {unit['id']}")
+        slot = correction["slot"]
+        if t.get(slot) == correction["corrected"]:
+            continue  # A later sample already contains the corrected label.
+        if t.get(slot) != correction["original"]:
+            raise ValueError(f"label correction original value mismatch: {unit['id']}:{slot}")
+        t[slot] = correction["corrected"]
+        adj.append(
+            f"{slot}:{correction['original']}->{correction['corrected']} "
+            f"({correction['reason']})"
+        )
     if (
         t.get("task") in GC.OBS_TASKS
         and t.get("obs_source") == "grid"
@@ -1036,9 +1067,11 @@ def _pop_section(name: str, R_all: list[dict], primary: bool) -> tuple[list[str]
     if adj:
         c = Counter(r["outcome"] for r in adj)
         L.append(
-            f"\nTruth adjusted to the request (station cue vs grid truth): {len(adj)} unit-runs, "
+            f"\nTruth adjusted to the request (recorded label corrections): {len(adj)} unit-runs, "
             f"outcomes {dict(c)}"
         )
+        reasons = Counter(reason for r in adj for reason in r["truth_adjusted"])
+        L.extend(f"- {reason}: {count} unit-runs" for reason, count in sorted(reasons.items()))
     L.append("")
     return L, verdict, inconclusive
 
@@ -1319,19 +1352,16 @@ def preflight(ctx, backend, guard: Guard, out: Path) -> tuple[bool, list[dict], 
 
 # ------------------------------------------------------------------------------------- main ---
 def premise_audit(units: list[dict]) -> list[str]:
-    """The scorer must score every unit's own truth, phrased as the AGENT would phrase it, exact."""
+    """The scorer must score each unit's effective truth, in the agent schema, exact."""
     problems = []
     for u in units:
-        t = u["truth"]
+        t, _ = effective_truth(u)
         for tw in ["relative"] if t["relative_time"] else [None, "fixed"]:
             goal = {
                 k: t.get(k)
                 for k in ("task", "variable", "region", "period", "legacy_cumulative", "obs_source")
             }
             goal["time_window"] = tw
-            _, adj = effective_truth(u)
-            if adj:
-                goal["obs_source"] = "station"
             card = {
                 "status": "ready_for_approval",
                 "sampling": "independent",
