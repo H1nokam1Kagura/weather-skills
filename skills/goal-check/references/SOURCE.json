@@ -41,5 +41,12 @@
       "hard goal constraints from clm_ws/tasks.py generate_goals (spread_map has no period; change_map is never relative; a cumulative archive is precipitation only)",
       "ask-on-disagreement over the consumed fields, after the rules, from probes/o1_compile.py decide() with cfg ask=True (D45/D47)"
     ]
+  },
+  "d66_scope_prompt": {
+    "source": "clm-weather-skills clm_ws/d66_prompts.py:SCOPE_SYS",
+    "sha256": "649041311d18f997fb446b39a3b09a6ecfeb4479a3a567c0e4fc8342acc84b89",
+    "copied_verbatim": true,
+    "deployment": "Opt-in Claude CLI adapter; not the confirmed Databricks deployment",
+    "validation": "Offline adapter tests only; no transferred accuracy claim"
   }
 }
