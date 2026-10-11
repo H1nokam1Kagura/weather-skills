@@ -139,9 +139,9 @@ def test_scope_missing_details_reach_existing_clarification(sg, monkeypatch, cap
 def test_scope_prompt_is_frozen(sg):
     import hashlib
 
-    assert hashlib.sha256(sg.SCOPE_PROMPT_FILE.read_text(encoding="utf-8").encode("utf-8")).hexdigest() == (
-        "649041311d18f997fb446b39a3b09a6ecfeb4479a3a567c0e4fc8342acc84b89"
-    )
+    assert hashlib.sha256(
+        sg.SCOPE_PROMPT_FILE.read_text(encoding="utf-8").encode("utf-8")
+    ).hexdigest() == ("649041311d18f997fb446b39a3b09a6ecfeb4479a3a567c0e4fc8342acc84b89")
 
 
 def test_report_carries_per_compile_evidence(sg, monkeypatch, capsys):
