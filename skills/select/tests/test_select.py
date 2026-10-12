@@ -214,3 +214,25 @@ def test_select_index_zero_aliases_are_duplicates(tmp_path, select):
             "00",
         )
     assert exc.value.code == 2
+
+
+def test_select_rejects_repeated_dim(tmp_path, select):
+    """SKILL.md: exactly one --dim per run (argparse used to keep the last silently)."""
+    src = write_zarr(make_gridded(n_time=3), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            select,
+            "-i",
+            str(src),
+            "-o",
+            str(out),
+            "--dim",
+            "time",
+            "--dim",
+            "latitude",
+            "--index",
+            "0",
+        )
+    assert exc.value.code == 2
+    assert not out.exists()

@@ -9,6 +9,7 @@
 # ///
 """Select along one dim by --index or --value."""
 
+import argparse
 import re
 
 from weather_skills_core import Dataset, UsageError, weather_skill
@@ -31,6 +32,15 @@ _KEEP_SCALAR_COORDS = frozenset(
 _INDEX_RE = re.compile(r"-?[0-9]+")
 _NUM_INT_RE = re.compile(r"-?[0-9]+")
 _NUM_FLOAT_RE = re.compile(r"-?([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+)([eE][+-]?[0-9]+)?")
+
+
+class _OnceAction(argparse.Action):
+    """Store a flag that may be given only once (argparse otherwise keeps the last)."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            raise UsageError(f"{option_string} given more than once; select along exactly one dim")
+        setattr(namespace, self.dest, values)
 
 
 def _strict_index(raw):
@@ -92,7 +102,7 @@ def _parse_value(raw, coord_vals, dim):
     version=_SKILL_VERSION,
 )
 @weather_skill.argument("-i", "--input", type=Dataset("any"), required=True)
-@weather_skill.argument("--dim", required=True)
+@weather_skill.argument("--dim", required=True, action=_OnceAction)
 @weather_skill.argument(
     "--index", action="append", type=_strict_index, help="Integer position (repeatable)."
 )
