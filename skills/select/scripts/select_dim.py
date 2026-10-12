@@ -33,6 +33,16 @@ _NUM_INT_RE = re.compile(r"-?[0-9]+")
 _NUM_FLOAT_RE = re.compile(r"-?([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+)([eE][+-]?[0-9]+)?")
 
 
+def _strict_index(raw):
+    """argparse type: strict integer literal, stored canonically (``00`` -> ``0``).
+
+    Raising UsageError (not ValueError) keeps the standard exit-2 ``Error:`` path.
+    """
+    if not _INDEX_RE.fullmatch(raw):
+        raise UsageError(f"--index '{raw}' is not an integer")
+    return int(raw)
+
+
 def _is_string_coord(dtype, coord_vals) -> bool:
     """True for unicode, bytes, NumPy 2 StringDType (kind 'T'), or object-of-str."""
     if dtype.kind in "UST":
@@ -83,7 +93,9 @@ def _parse_value(raw, coord_vals, dim):
 )
 @weather_skill.argument("-i", "--input", type=Dataset("any"), required=True)
 @weather_skill.argument("--dim", required=True)
-@weather_skill.argument("--index", action="append", help="Integer position (repeatable).")
+@weather_skill.argument(
+    "--index", action="append", type=_strict_index, help="Integer position (repeatable)."
+)
 @weather_skill.argument("--value", action="append", help="Coord value (repeatable).")
 def select(ds, dim, index, value, **kwargs):
     """Select along one dim by --index or --value."""
@@ -97,10 +109,8 @@ def select(ds, dim, index, value, **kwargs):
     if index is not None:
         positions = []
         seen = {}
-        for raw in index:
-            if not _INDEX_RE.fullmatch(raw):
-                raise UsageError(f"--index '{raw}' is not an integer")
-            pos = int(raw)
+        for pos in index:
+            raw = str(pos)
             if not -size <= pos < size:
                 raise UsageError(f"--index {raw} is out of range for dim '{dim}' (size {size})")
             canon = pos % size

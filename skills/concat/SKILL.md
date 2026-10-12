@@ -40,7 +40,13 @@ variable common to every input, the `units` attr is compared across the inputs
 before any output is written. When two inputs carry the variable in differing
 units, the skill exits with status 2 and names each input and its units; no
 output is produced. Inputs that omit `units` for a variable are not treated as a
-violation — only present values are compared.
+violation — only present values are compared, and the output carries the units
+that are present (values are joined as-is, never converted).
+
+When the `--dim` coordinate is datetime-like, its calendar must match across
+inputs (for example `proleptic_gregorian` vs `noleap`); otherwise the skill
+exits with status 2 naming each input's calendar (use `convert-calendar`
+first).
 
 ### Output
 

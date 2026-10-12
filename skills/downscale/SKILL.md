@@ -19,7 +19,9 @@ dataset whose lat/lon grid becomes the target. The requested target must be
 finer-or-equal to the input on each axis; equal (or near-equal) resolution
 is accepted as a lateral realign — same spacing, different cell-center
 offset, including a half-cell shift. Geometry is a no-op when the grids
-already match (for `--algorithm q-q` the value mapping still applies). A
+already match — `--factor 1`, or a `--reference-grid` with the input's exact
+coordinates, passes the input grid and values through unchanged (for
+`--algorithm q-q` the value mapping still applies). A
 meaningfully-coarser target is rejected with a pointer to the `coarsen`
 skill. Near-equal spacings (within 1%, including float rounding or a
 slightly irregular CHIRPS axis vs a regular 0.05° forecast) are not treated
@@ -67,7 +69,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/downscale.py --input <in.zarr> --output <out.
 - `--reference-grid` — path to a reference Zarr whose lat/lon grid defines the target. The reference grid must be finer-or-equal to the input (near-equal counts as equal, so a half-cell offset at the same nominal resolution is allowed). Mutually exclusive with `--factor` and `--target-resolution`.
 - `--variable`, `-v` — restrict to a single data variable. Default: process all.
 - `--qq-reference` — reference Zarr whose distribution the `q-q` method maps the output onto. Per-grid-cell empirical quantile mapping along `--time-dim`. The reference must already be on the post-downscale lat/lon grid; mismatches are an error. Every variable mapped (present in both) must carry the same `units` as the input (spelling-independent, e.g. `mm/day` = `mm day-1`); differing units, or units on only one side, exit 2 — convert first with `unit-convert`. Required for `--algorithm q-q`.
-- `--time-dim` — time dimension used as the sample axis for q-q mapping. Default: `time`. Both the output and the reference must have a dimension by this name.
+- `--time-dim` — time dimension used as the sample axis for q-q mapping. Default: `time`. Both the output and the reference must have a dimension by this name; a reference without it exits 2, even when it shares no variable with the input.
 
 ### Output
 

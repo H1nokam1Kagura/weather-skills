@@ -15,7 +15,7 @@ import math
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.standard_dataset import detect_spatial_dims, detect_time_dim
 from weather_skills_core.standard_utils import ensure_normalized_longitude, grid_spacing
-from weather_skills_core.units import units_equal, variable_units
+from weather_skills_core.units import dequantify_dataset, units_equal, variable_units
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -118,8 +118,13 @@ def downscale(
             if target_resolution <= 0 or too_coarse:
                 raise UsageError("--target-resolution must be finer-or-equal to input")
             lat_sp = lon_sp = target_resolution
-        new_lat = _target_coord(ds[lat_dim].values, lat_sp)
-        new_lon = _target_coord(ds[lon_dim].values, lon_sp)
+        if factor == 1:
+            # Identity: keep the input coords exactly. Regenerating them from
+            # vmin + spacing * arange drifts on real float32 grids (CHIRPS).
+            new_lat, new_lon = ds[lat_dim].values, ds[lon_dim].values
+        else:
+            new_lat = _target_coord(ds[lat_dim].values, lat_sp)
+            new_lon = _target_coord(ds[lon_dim].values, lon_sp)
 
     target = xr.Dataset(
         coords={
@@ -129,13 +134,26 @@ def downscale(
     )
     # Regridding drops the pint quantity, so read the input units first.
     in_units = {v: variable_units(ds[v]) for v in ds.data_vars}
-    out = ds.regrid.linear(target)
+    if np.array_equal(new_lat, ds[lat_dim].values) and np.array_equal(new_lon, ds[lon_dim].values):
+        # Grids already match: geometry is a no-op (SKILL.md), not a re-interpolation.
+        out = dequantify_dataset(ds)
+    else:
+        out = ds.regrid.linear(target)
 
     if algorithm == "q-q":
         time_dim = detect_time_dim(out, time_dim)
         ref = xr.open_zarr(qq_reference, consolidated=False)
+        if time_dim not in ref.dims:
+            raise UsageError(
+                f"--qq-reference has no '{time_dim}' dimension (have {list(ref.dims)}); "
+                "q-q needs it as the sample axis (--time-dim)"
+            )
         for d in (lat_dim, lon_dim):
-            if not np.allclose(out[d].values, ref[d].values, atol=1e-6, rtol=0):
+            if (
+                d not in ref.coords
+                or ref[d].shape != out[d].shape
+                or not np.allclose(out[d].values, ref[d].values, atol=1e-6, rtol=0)
+            ):
                 raise UsageError(f"--qq-reference '{d}' must match post-downscale grid")
         ref = ref.assign_coords({lat_dim: out[lat_dim], lon_dim: out[lon_dim]})
         shared = [v for v in out.data_vars if v in ref.data_vars]

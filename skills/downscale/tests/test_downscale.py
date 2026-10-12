@@ -207,3 +207,74 @@ def test_downscale_qq_rejects_reference_units_mismatch(tmp_path, downscale, ref_
         _run_qq(downscale, tmp_path, src, ref)
     assert exc.value.code == 2
     assert not (tmp_path / "out.zarr").exists()
+
+
+def _float32_grid_store(path, fill_offset=0.0, n_lat=204):
+    """CHIRPS-like 0.05 deg grid stored as float32, so spacing is not exactly 0.05."""
+    import numpy as np
+
+    lats = (-4.675 + 0.05 * np.arange(n_lat)).astype(np.float32)
+    lons = (33.925 + 0.05 * np.arange(3)).astype(np.float32)
+    ds = make_gridded(n_time=3, lats=tuple(lats.tolist()), lons=tuple(lons.tolist()))
+    ds["precip"].values[:] = np.arange(3)[:, None, None] + 1.0 + fill_offset
+    ds = ds.assign_coords(latitude=lats, longitude=lons)
+    ds["latitude"].attrs.update(standard_name="latitude", units="degrees_north", axis="Y")
+    ds["longitude"].attrs.update(standard_name="longitude", units="degrees_east", axis="X")
+    return write_zarr(ds, path)
+
+
+def test_downscale_factor_one_is_exact_identity_on_float32_grid(tmp_path, downscale):
+    """SKILL.md: geometry is a no-op when grids already match; factor 1 = identity."""
+    import numpy as np
+
+    src = _float32_grid_store(tmp_path / "src.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        downscale, "-i", str(src), "-o", str(out), "--algorithm", "linear-interpolation", "-f", "1"
+    )
+    a = xr.open_zarr(src, consolidated=True)
+    b = xr.open_zarr(out, consolidated=True)
+    assert np.array_equal(a["latitude"].values, b["latitude"].values)
+    assert np.array_equal(a["precip"].values, b["precip"].values)
+
+
+def test_downscale_qq_factor_one_accepts_reference_on_input_grid(tmp_path, downscale):
+    import numpy as np
+
+    src = _float32_grid_store(tmp_path / "src.zarr")
+    ref = _float32_grid_store(tmp_path / "ref.zarr", fill_offset=10.0)
+    out = _run_qq(downscale, tmp_path, src, ref)
+    ds = xr.open_zarr(out, consolidated=True)
+    np.testing.assert_allclose(ds["precip"].isel(latitude=0, longitude=0).values, [11, 12, 13])
+
+
+def test_downscale_qq_rejects_reference_without_time_dim(tmp_path, downscale):
+    """No time dim on the reference must refuse even when no variable name is shared."""
+    src, _ = _qq_pair(tmp_path, "mm day-1")
+    other = make_gridded(n_time=1, lats=(1.0, 2.0), lons=(10.0, 11.0), name="other").isel(time=0)
+    ref = write_zarr(other.drop_vars("time"), tmp_path / "ref_notime.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run_qq(downscale, tmp_path, src, ref)
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_downscale_qq_no_shared_variable_passes_through(tmp_path, downscale):
+    """Documented: variables not in the reference pass through unchanged."""
+    import numpy as np
+
+    src, _ = _qq_pair(tmp_path, "mm day-1")
+    other = make_gridded(n_time=4, lats=(1.0, 2.0), lons=(10.0, 11.0), name="other", fill=9.0)
+    ref = write_zarr(other, tmp_path / "ref_other.zarr")
+    out = _run_qq(downscale, tmp_path, src, ref)
+    ds = xr.open_zarr(out, consolidated=True)
+    np.testing.assert_allclose(ds["precip"].isel(latitude=0, longitude=0).values, [1, 2, 3, 4])
+
+
+def test_downscale_qq_rejects_reference_grid_of_other_shape(tmp_path, downscale):
+    src, _ = _qq_pair(tmp_path, "mm day-1")
+    ref = make_gridded(n_time=4, lats=(1.0, 2.0, 3.0), lons=(10.0, 11.0))
+    ref_path = write_zarr(ref, tmp_path / "ref_shape.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run_qq(downscale, tmp_path, src, ref_path)
+    assert exc.value.code == 2

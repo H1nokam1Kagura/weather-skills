@@ -173,3 +173,44 @@ def test_select_negative_index_and_values_accepted(tmp_path, select):
     b = xr.open_zarr(out_v, consolidated=True)
     assert "step" not in a.dims and "step" not in b.dims
     xr.testing.assert_identical(a["tp"].load(), b["tp"].load())
+
+
+def test_select_records_index_as_canonical_integers(tmp_path, select):
+    """SKILL.md: index positions are recorded as canonical integers (`0` == `00`)."""
+    src = write_zarr(make_gridded(n_time=4), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        select, "-i", str(src), "-o", str(out), "--dim", "time", "--index", "-1", "--index", "00"
+    )
+    assert load_history(out)[-1]["args"]["index"] == [-1, 0]
+    ds = xr.open_zarr(out, consolidated=True)
+    assert ds.sizes["time"] == 2
+
+
+@pytest.mark.parametrize("raw", ["1.0", "+1", "1_0", "x"])
+def test_select_index_rejects_non_integer_literal(tmp_path, select, raw):
+    src = write_zarr(make_gridded(n_time=3), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            select, "-i", str(src), "-o", str(tmp_path / "o.zarr"), "--dim", "time", "--index", raw
+        )
+    assert exc.value.code == 2
+
+
+def test_select_index_zero_aliases_are_duplicates(tmp_path, select):
+    src = write_zarr(make_gridded(n_time=3), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            select,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "o.zarr"),
+            "--dim",
+            "time",
+            "--index",
+            "0",
+            "--index",
+            "00",
+        )
+    assert exc.value.code == 2

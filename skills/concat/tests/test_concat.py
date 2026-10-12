@@ -7,6 +7,7 @@ import pytest
 import xarray as xr
 from conftest import load_skill, make_gridded, run_skill, write_zarr
 from weather_skills_core.provenance import load_history
+from weather_skills_core.units import units_equal
 
 
 @pytest.fixture(scope="module")
@@ -110,3 +111,49 @@ def test_concat_rejects_mismatched_other_dim_size(tmp_path, concat):
     with pytest.raises(SystemExit) as exc:
         _concat_time(concat, tmp_path, make_gridded(), b)
     assert exc.value.code == 2
+
+
+def _plain(values, units=None):
+    ds = xr.Dataset(
+        {"field": (("sample",), np.asarray(values, dtype=float))}, coords={"sample": [0, 1]}
+    )
+    if units is not None:
+        ds["field"].attrs["units"] = units
+    return ds
+
+
+@pytest.mark.parametrize("unitless_first", [True, False])
+def test_concat_accepts_input_omitting_units(tmp_path, concat, unitless_first):
+    """SKILL.md: inputs that omit units are not a violation (was a pint crash, exit 1)."""
+    stores = [_plain([1, 2], "m s-1"), _plain([3, 4])]
+    if unitless_first:
+        stores.reverse()
+    paths = [write_zarr(d, tmp_path / f"in{n}.zarr") for n, d in enumerate(stores)]
+    out = tmp_path / "out.zarr"
+    run_skill(concat, "-i", str(paths[0]), "-i", str(paths[1]), "-o", str(out), "--dim", "model")
+    ds = xr.open_zarr(out, consolidated=True)
+    assert ds.sizes["model"] == 2
+    assert units_equal(ds["field"].attrs["units"], "m s-1")
+    assert sorted(ds["field"].values.ravel().tolist()) == [1.0, 2.0, 3.0, 4.0]
+
+
+def _noleap(start_day):
+    import cftime
+
+    ds = make_gridded(n_time=2, start=f"2026-01-0{start_day}")
+    times = [cftime.DatetimeNoLeap(2026, 1, start_day + i) for i in range(2)]
+    return ds.assign_coords(time=times)
+
+
+def test_concat_rejects_mixed_calendars(tmp_path, concat):
+    with pytest.raises(SystemExit) as exc:
+        _concat_time(concat, tmp_path, make_gridded(), _noleap(3))
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_concat_accepts_matching_cftime_calendars(tmp_path, concat):
+    out = _concat_time(concat, tmp_path, _noleap(1), _noleap(3))
+    ds = xr.open_zarr(out, consolidated=True, use_cftime=True)
+    assert ds.sizes["time"] == 4
+    assert ds["time"].dt.calendar == "noleap"

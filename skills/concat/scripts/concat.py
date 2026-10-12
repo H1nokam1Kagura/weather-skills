@@ -9,7 +9,7 @@
 """Concatenate Zarr stores along a named dim."""
 
 from weather_skills_core import Dataset, UsageError, weather_skill
-from weather_skills_core.units import units_equal, variable_units
+from weather_skills_core.units import dequantify_dataset, units_equal, variable_units
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -39,6 +39,16 @@ def _check_compatible(dss, dim):
             if in_first != in_item or (in_first and not first[d].variable.equals(item[d].variable)):
                 raise UsageError(f"coordinate '{d}' differs between input 1 and input {n}")
 
+    calendars = [(n, _calendar(item, dim)) for n, item in enumerate(dss, start=1)]
+    known = [(n, c) for n, c in calendars if c is not None]
+    if any(c != known[0][1] for _, c in known[1:]):
+        listing = ", ".join(f"input {n}: {c}" for n, c in known)
+        raise UsageError(
+            f"'{dim}' coordinate calendars differ across inputs ({listing}); "
+            "convert them to one calendar first (convert-calendar)"
+        )
+
+    units = {}
     for name in sorted(first_vars):
         seen = [(n, variable_units(item[name])) for n, item in enumerate(dss, start=1)]
         present = [(n, u) for n, u in seen if u is not None]
@@ -48,6 +58,19 @@ def _check_compatible(dss, dim):
                 f"variable '{name}' has differing units across inputs ({listing}); "
                 "convert them to one unit first (unit-convert)"
             )
+        if present:
+            units[name] = present[0][1]
+    return units
+
+
+def _calendar(item, dim):
+    """Calendar of a datetime-like ``dim`` coordinate, else None."""
+    if dim not in item.coords:
+        return None
+    try:
+        return item[dim].dt.calendar
+    except (AttributeError, TypeError):
+        return None
 
 
 def _coerce(values):
@@ -80,7 +103,10 @@ def concat(ds, dim, coords, **kwargs):
         n = 1 if not isinstance(ds, (list, tuple)) else len(ds)
         raise UsageError(f"concat requires at least two --input paths (repeat -i), got {n}")
     dss = list(ds)
-    _check_compatible(dss, dim)
+    units = _check_compatible(dss, dim)
+    # Units are equal wherever present (checked above), so concatenate plain
+    # magnitudes: pint cannot join a unitless input with a unit-bearing one.
+    dss = [dequantify_dataset(d) for d in dss]
 
     if dim not in dss[0].dims or not all(dim in item.dims for item in dss):
         if coords:
@@ -90,7 +116,10 @@ def concat(ds, dim, coords, **kwargs):
             dss = [d.expand_dims({dim: [v]}) for d, v in zip(dss, vals, strict=True)]
         else:
             dss = [d.expand_dims(dim) for d in dss]
-    return xr.concat(dss, dim=dim)
+    out = xr.concat(dss, dim=dim)
+    for name, unit in units.items():
+        out[name].attrs["units"] = unit
+    return out
 
 
 if __name__ == "__main__":
