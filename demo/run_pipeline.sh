@@ -51,7 +51,7 @@ for COUNTRY in "${COUNTRIES[@]}"; do
     # Upstream daily_download2.0.yml runs a downscale step (dowscale_dekade.py) producing
     # dekadal_precip_downscaled.png. We run the downscale + plot here for parity with
     # the workflow steps.
-    forecasting-skills downscale          -i "$d/ecmwf_dekadal.zarr" -o "$d/ecmwf_dekadal_ds.zarr" --method linear-interpolation --target-resolution 0.25 --variable tp
+    forecasting-skills downscale          -i "$d/ecmwf_dekadal.zarr" -o "$d/ecmwf_dekadal_ds.zarr" --algorithm linear-interpolation --target-resolution 0.25 --variable tp
     forecasting-skills convert-to-totals  -i "$d/ecmwf_dekadal_ds.zarr" -o "$d/ecmwf_dekadal_ds_totals.zarr"
     forecasting-skills plot               -i "$d/ecmwf_dekadal_ds_totals.zarr" -o "$d/dekadal_precip_ds.png" --variable tp
 
