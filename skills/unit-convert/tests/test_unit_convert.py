@@ -138,3 +138,15 @@ def test_unit_convert_standard_name_with_to_units(tmp_path, unit_convert):
     )
 
     assert xr.open_zarr(out, consolidated=True)["precip"].attrs["standard_name"] == "custom_rate"
+
+
+def test_unit_convert_rejects_unparseable_target_units(tmp_path, unit_convert):
+    """Was an uncaught pint UndefinedUnitError (exit 1) once --to-units reached core."""
+    src = write_zarr(make_gridded(), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            unit_convert, "-i", str(src), "-o", str(out), "--to-units", "definitely_not_a_unit"
+        )
+    assert exc.value.code == 2
+    assert not out.exists()

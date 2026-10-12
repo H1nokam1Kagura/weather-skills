@@ -92,6 +92,9 @@ def downscale(
         ds = ds[[variable]]
     ds = ensure_normalized_longitude(ds, lon_dim)
     in_lat, in_lon = _spacing(ds, lat_dim), _spacing(ds, lon_dim)
+    if not (in_lat > 0 and in_lon > 0):
+        # A zero-spacing axis is not a grid; factor 1 used to hide this as a pass-through.
+        raise UsageError(f"input grid spacing is zero (lat {in_lat}, lon {in_lon})")
 
     if reference_grid is not None:
         ref = xr.open_zarr(reference_grid, consolidated=False)

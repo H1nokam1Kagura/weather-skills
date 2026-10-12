@@ -14,6 +14,7 @@ from weather_skills_core.units import (
     convert_dataarray,
     to_standard_units,
     units_equal,
+    ureg,
     variable_units,
 )
 
@@ -64,6 +65,10 @@ def unit_convert(ds, variable, to_units, to_standard, standard_name, **kwargs):
         names = [variable] if variable else None
         return to_standard_units(ds, variables=names)
 
+    try:
+        ureg.Unit(to_units)
+    except Exception:  # noqa: BLE001 -- any pint parse failure is a usage error
+        raise UsageError(f"--to-units {to_units!r} is not a recognised unit") from None
     if not variable and len(ds.data_vars) != 1:
         raise UsageError(
             f"input has {len(ds.data_vars)} data variables {list(ds.data_vars)}; "

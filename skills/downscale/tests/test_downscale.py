@@ -278,3 +278,22 @@ def test_downscale_qq_rejects_reference_grid_of_other_shape(tmp_path, downscale)
     with pytest.raises(SystemExit) as exc:
         _run_qq(downscale, tmp_path, src, ref_path)
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("factor", ["1", "2"])
+def test_downscale_rejects_zero_spacing_grid(tmp_path, downscale, factor):
+    """Repeated latitude values: was ZeroDivisionError (exit 1); factor 1 must not pass it through."""
+    src = write_zarr(make_gridded(lats=(0.0, 0.0, 0.0), lons=(10.0, 11.0)), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            downscale,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "out.zarr"),
+            "--algorithm",
+            "linear-interpolation",
+            "-f",
+            factor,
+        )
+    assert exc.value.code == 2
