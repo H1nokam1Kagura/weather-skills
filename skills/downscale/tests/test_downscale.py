@@ -154,3 +154,56 @@ def test_downscale_reference_grid_allows_near_equal_mixed_axes(tmp_path, downsca
         str(ref),
     )
     assert Path(out).exists()
+
+
+def _qq_pair(tmp_path, ref_units, ref_scale=1.0):
+    import numpy as np
+
+    src = make_gridded(n_time=4, lats=(1.0, 2.0), lons=(10.0, 11.0))
+    src["precip"].values[:] = np.arange(4)[:, None, None] + 1.0
+    ref = make_gridded(n_time=4, lats=(1.0, 2.0), lons=(10.0, 11.0))
+    ref["precip"].values[:] = (np.arange(4)[:, None, None] + 11.0) * ref_scale
+    if ref_units is None:
+        del ref["precip"].attrs["units"]
+    else:
+        ref["precip"].attrs["units"] = ref_units
+    return write_zarr(src, tmp_path / "src.zarr"), write_zarr(ref, tmp_path / "ref.zarr")
+
+
+def _run_qq(downscale, tmp_path, src, ref):
+    out = tmp_path / "out.zarr"
+    run_skill(
+        downscale,
+        "-i",
+        str(src),
+        "-o",
+        str(out),
+        "--algorithm",
+        "q-q",
+        "-f",
+        "1",
+        "--qq-reference",
+        str(ref),
+    )
+    return out
+
+
+def test_downscale_qq_maps_onto_reference_with_matching_units(tmp_path, downscale):
+    import numpy as np
+
+    src, ref = _qq_pair(tmp_path, "mm/day")
+    out = _run_qq(downscale, tmp_path, src, ref)
+    ds = xr.open_zarr(out, consolidated=True)
+    assert units_equal(ds["precip"].attrs.get("units"), "mm day-1")
+    np.testing.assert_allclose(
+        ds["precip"].isel(latitude=0, longitude=0).values, [11.0, 12.0, 13.0, 14.0]
+    )
+
+
+@pytest.mark.parametrize(("ref_units", "scale"), [("m day-1", 0.001), ("K", 1.0), (None, 1.0)])
+def test_downscale_qq_rejects_reference_units_mismatch(tmp_path, downscale, ref_units, scale):
+    src, ref = _qq_pair(tmp_path, ref_units, scale)
+    with pytest.raises(SystemExit) as exc:
+        _run_qq(downscale, tmp_path, src, ref)
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()

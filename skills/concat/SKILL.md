@@ -11,7 +11,7 @@ metadata:
 
 # concat
 
-Source-agnostic concatenation along a named dim. Inputs must share all other dims and variables. If the concat dim does not exist on the inputs, a new dim is created (use `--coords` to assign values).
+Source-agnostic concatenation along a named dim. Inputs must share all other dims and variables: every input must carry the same set of data variables, and every dim other than `--dim` must be present on all inputs with the same size and the same coordinate values. Otherwise the skill exits with status 2 naming the first mismatch, and no output is produced (it does not outer-join and NaN-fill). If the concat dim does not exist on the inputs, a new dim is created (use `--coords` to assign values).
 
 ## When to use
 

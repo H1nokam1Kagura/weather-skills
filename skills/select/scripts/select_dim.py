@@ -52,9 +52,20 @@ def _parse_value(raw, coord_vals, dim):
         parts = re.split(r"[T ]", raw, maxsplit=1)
         if len(parts) == 2 and re.search(r"[+-]", parts[1]):
             raise UsageError(f"--value '{raw}' not a naive ISO datetime")
-        return np.datetime64(raw)
+        try:
+            return np.datetime64(raw)
+        except ValueError:
+            raise UsageError(
+                f"--value '{raw}' not a naive ISO datetime for {dtype} coord '{dim}' "
+                "(e.g. 2026-06-01 or 2026-06-01T06:00)"
+            ) from None
     if np.issubdtype(dtype, np.timedelta64):
-        return pd.Timedelta(raw).to_timedelta64()
+        try:
+            return pd.Timedelta(raw).to_timedelta64()
+        except ValueError:
+            raise UsageError(
+                f"--value '{raw}' not a timedelta for {dtype} coord '{dim}' (e.g. 7D, 168h)"
+            ) from None
     if np.issubdtype(dtype, np.number):
         if _NUM_INT_RE.fullmatch(raw):
             return int(raw)
@@ -80,6 +91,8 @@ def select(ds, dim, index, value, **kwargs):
 
     if (index is None) == (value is None):
         raise UsageError("exactly one of --index or --value is required")
+    if dim not in ds.dims:
+        raise UsageError(f"--dim '{dim}' is not a dimension of the input (have {list(ds.dims)})")
     size = ds.sizes[dim]
     if index is not None:
         positions = []
@@ -88,12 +101,18 @@ def select(ds, dim, index, value, **kwargs):
             if not _INDEX_RE.fullmatch(raw):
                 raise UsageError(f"--index '{raw}' is not an integer")
             pos = int(raw)
+            if not -size <= pos < size:
+                raise UsageError(f"--index {raw} is out of range for dim '{dim}' (size {size})")
             canon = pos % size
             if canon in seen:
                 raise UsageError(f"--index {seen[canon]} and {raw} address the same element")
             seen[canon] = raw
             positions.append(pos)
     else:
+        # Without a coord variable xarray exposes a virtual 0..n-1 index, which
+        # would let a numeric --value silently match by position.
+        if dim not in ds.coords:
+            raise UsageError(f"dim '{dim}' has no coordinate variable; select it with --index")
         coord_vals = ds[dim].values
         positions, seen = [], {}
         for raw in value:

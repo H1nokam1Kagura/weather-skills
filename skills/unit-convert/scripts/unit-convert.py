@@ -14,6 +14,7 @@ from weather_skills_core.units import (
     convert_dataarray,
     to_standard_units,
     units_equal,
+    variable_units,
 )
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
@@ -46,25 +47,35 @@ _STANDARD_NAME_BY_UNITS = {
 )
 @weather_skill.argument(
     "--standard-name",
-    help="CF standard_name override. Ignored with --to-standard.",
+    help="CF standard_name override (only with --to-units).",
 )
 def unit_convert(ds, variable, to_units, to_standard, standard_name, **kwargs):
-    """Convert data variable(s). Omitting --variable converts all (--to-units) or recognized (--to-standard)."""
+    """Convert data variable(s). Omit --variable only for a single-var store (--to-units)."""
     if to_standard and to_units:
         raise UsageError("pass only one of --to-units or --to-standard")
     if not to_standard and not to_units:
         raise UsageError("pass --to-units or --to-standard")
+    if to_standard and standard_name is not None:
+        raise UsageError("--standard-name is only valid with --to-units")
+    if variable and variable not in ds.data_vars:
+        raise UsageError(f"--variable '{variable}' not in dataset (have {list(ds.data_vars)})")
 
     if to_standard:
         names = [variable] if variable else None
         return to_standard_units(ds, variables=names)
 
+    if not variable and len(ds.data_vars) != 1:
+        raise UsageError(
+            f"input has {len(ds.data_vars)} data variables {list(ds.data_vars)}; "
+            "--to-units needs --variable unless the store has exactly one"
+        )
     names = [variable] if variable else list(ds.data_vars)
     out = ds.copy()
     for name in names:
         da = ds[name]
-        src_units = da.attrs.get("units")
-        if not (isinstance(src_units, str) and src_units.strip()):
+        # Inputs arrive pint-quantified, so units live on the quantity, not attrs.
+        src_units = variable_units(da)
+        if src_units is None:
             raise UsageError(f"variable '{name}' has no units attr")
         if units_equal(src_units, to_units):
             converted_da, density_converted = da, False

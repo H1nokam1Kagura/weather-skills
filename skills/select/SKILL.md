@@ -45,9 +45,12 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/select_dim.py --input <in.zarr> --output <out
 ### Arguments
 
 - `--input`, `-i` — input Zarr.
-- `--output`, `-o` — output Zarr. Must be a distinct path: the same store as
-  the input (or one nested inside the other) is rejected. An existing path
-  here must be a directory (a store to replace); a plain file is rejected.
+- `--output`, `-o` — output Zarr. Use a distinct path from `--input`; this is
+  not checked: an output that is the same store as the input overwrites
+  (destroys) the input, and one nested inside it is written into the input
+  store. An existing directory
+  here is replaced; an existing plain file is not validated up front and the
+  write fails with a non-2 error from the shared output writer.
 - `--dim` — the dimension to select along (exactly one per run).
 - `--index` — integer position to select. Repeat once per position. Strict
   integers only (ASCII digits; no floats, signs other than a leading minus,
@@ -93,9 +96,10 @@ order; `--index 2 --index 0` reverses those two entries). Selecting by
 
 All other dims, coords, data variables, values, and `weather_skills_*` attrs pass
 through unchanged. On any argument, input, or selection validation error —
-missing or unreadable input, an output path that exists as a plain file,
-unknown dim, bad selector — the skill exits with code 2 and a clear `Error:`
-message; no output is produced.
+missing input, unknown dim, bad selector (out-of-range or duplicate index,
+absent, ambiguous or unparseable value, `--value` on a dim with no coordinate
+variable) — the skill exits with code 2 and a clear `Error:` message; no output
+is produced.
 
 ### Provenance
 
@@ -108,12 +112,10 @@ that order determines the output; index positions are recorded as canonical
 integers (`0` and `00` are the same selection). Inspect a written output's
 lineage with the `provenance` skill.
 
-Re-running with identical arguments against an unchanged input and an existing
-output is a cheap no-op — reuse the same output path. A cache hit requires the
-same skill `version`, the same flags (in the same order), the same input name,
-the same input content, and the same upstream history; any modification to the
-input forces a recompute (a renamed-but-unchanged input misses, and a modified
-same-named input misses).
+The skill performs no cache-hit check: re-running with identical arguments
+recomputes and rewrites `--output`. The recorded entry (skill `version`, flags
+in order, input basename and content hash, upstream history) is enough for a
+caller to decide whether an existing output is still current before re-running.
 
 ## Example
 

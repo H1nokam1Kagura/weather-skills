@@ -40,9 +40,11 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/unit-convert.py -i <in.zarr> -o <out.zarr> \
 - `--to-units` — target UDUNITS/CF units string (mutually exclusive with `--to-standard`).
 - `--to-standard` — convert recognized temp/precip vars to standard display units.
 - `--variable`, `-v` — restrict to a named data var. Omit with `--to-units` only when
-  the store has a single data var; omit with `--to-standard` to convert all recognized
-  temp/precip vars.
-- `--standard-name` — override output CF `standard_name` (only with `--to-units`).
+  the store has a single data var (a multi-variable store without `--variable` exits
+  2); omit with `--to-standard` to convert all recognized temp/precip vars. A name
+  that is not a data variable exits 2.
+- `--standard-name` — override output CF `standard_name` (only with `--to-units`;
+  combining it with `--to-standard` exits 2 rather than being ignored).
 
 ### Provenance
 

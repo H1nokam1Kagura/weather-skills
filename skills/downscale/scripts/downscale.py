@@ -15,6 +15,7 @@ import math
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.standard_dataset import detect_spatial_dims, detect_time_dim
 from weather_skills_core.standard_utils import ensure_normalized_longitude, grid_spacing
+from weather_skills_core.units import units_equal, variable_units
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -126,6 +127,8 @@ def downscale(
             lon_dim: (lon_dim, new_lon, dict(ds[lon_dim].attrs)),
         }
     )
+    # Regridding drops the pint quantity, so read the input units first.
+    in_units = {v: variable_units(ds[v]) for v in ds.data_vars}
     out = ds.regrid.linear(target)
 
     if algorithm == "q-q":
@@ -135,9 +138,19 @@ def downscale(
             if not np.allclose(out[d].values, ref[d].values, atol=1e-6, rtol=0):
                 raise UsageError(f"--qq-reference '{d}' must match post-downscale grid")
         ref = ref.assign_coords({lat_dim: out[lat_dim], lon_dim: out[lon_dim]})
-        for v in out.data_vars:
-            if v not in ref.data_vars:
-                continue
+        shared = [v for v in out.data_vars if v in ref.data_vars]
+        # Mapped values take the reference's numbers, so its units must match
+        # the input's or the output would carry the wrong units label.
+        for v in shared:
+            src_u, ref_u = in_units.get(v), variable_units(ref[v])
+            if (src_u is None) != (ref_u is None) or (
+                src_u is not None and not units_equal(src_u, ref_u)
+            ):
+                raise UsageError(
+                    f"--qq-reference variable '{v}' units {ref_u!r} differ from input "
+                    f"units {src_u!r}; convert one with unit-convert first"
+                )
+        for v in shared:
             mapped = xr.apply_ufunc(
                 _qmap_1d,
                 out[v],

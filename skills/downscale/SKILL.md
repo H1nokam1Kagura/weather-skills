@@ -66,7 +66,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/downscale.py --input <in.zarr> --output <out.
 - `--target-resolution` — target spacing in degrees; must be finer-or-equal (<=) to the input on each axis (near-equal counts as equal). Mutually exclusive with `--factor` and `--reference-grid`.
 - `--reference-grid` — path to a reference Zarr whose lat/lon grid defines the target. The reference grid must be finer-or-equal to the input (near-equal counts as equal, so a half-cell offset at the same nominal resolution is allowed). Mutually exclusive with `--factor` and `--target-resolution`.
 - `--variable`, `-v` — restrict to a single data variable. Default: process all.
-- `--qq-reference` — reference Zarr whose distribution the `q-q` method maps the output onto. Per-grid-cell empirical quantile mapping along `--time-dim`. The reference must already be on the post-downscale lat/lon grid; mismatches are an error. Required for `--algorithm q-q`.
+- `--qq-reference` — reference Zarr whose distribution the `q-q` method maps the output onto. Per-grid-cell empirical quantile mapping along `--time-dim`. The reference must already be on the post-downscale lat/lon grid; mismatches are an error. Every variable mapped (present in both) must carry the same `units` as the input (spelling-independent, e.g. `mm/day` = `mm day-1`); differing units, or units on only one side, exit 2 — convert first with `unit-convert`. Required for `--algorithm q-q`.
 - `--time-dim` — time dimension used as the sample axis for q-q mapping. Default: `time`. Both the output and the reference must have a dimension by this name.
 
 ### Output
@@ -74,7 +74,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/downscale.py --input <in.zarr> --output <out.
 Same shape as input except the lat/lon dims are finer. Non-spatial dims
 (`number`, `step`, `time`) are preserved. With `--algorithm q-q`, only data
 variables present in both the interpolated output and the `--qq-reference` are
-mapped; others pass through unchanged.
+mapped; others pass through unchanged. Mapped variables keep the input's
+`units`, which the units check above guarantees equal the reference's.
 
 ### Provenance
 
@@ -83,20 +84,14 @@ per-step entries `{skill, version, args, input}`. This skill reads the upstream
 input's `weather_skills_history` (default `[]` with a stderr warning if absent) and
 appends its own entry. `args` is the argparse namespace minus the
 `--input`/`--output` path strings — so `algorithm`, `factor`, `target_resolution`,
-`reference_grid`, `dims`, `variable`, `qq_reference`, and `time_dim` are
+`reference_grid`, `variable`, `qq_reference`, and `time_dim` are
 recorded under their argparse dest names (underscored). `input` is a
-`{basename, hash}` dict for `--input`. When `--reference-grid` and/or
-`--qq-reference` are supplied, the entry also carries a `reference_inputs`
-field: a list of `{basename, hash}` dicts content-hashing each supplied
-reference zarr's stored bytes, so editing a reference in place (same path,
-changed content) invalidates the cache and forces a recompute. `version` is
-the `_SKILL_VERSION` constant in `scripts/downscale.py`.
-Cache-hit comparison reads the existing output's `weather_skills_history`: a hit requires
-the upstream chain to match and the last entry's `skill`, `version`, `args`,
-`input.basename`, and `reference_inputs` to match the proposed new entry; on a
-hit the script returns without recomputing. The main `--input` hash is not part
-of the cache key (a renamed-but-unchanged input still hits on basename), but the
-secondary `reference_inputs` hashes are.
+`{basename, hash}` dict for `--input`. `--reference-grid` and `--qq-reference`
+are recorded only as the path strings given in `args`: their contents are not
+hashed, so editing a reference in place (same path, changed content) is not
+visible in the provenance entry. `version` is the `_SKILL_VERSION` constant in
+`scripts/downscale.py`. The skill performs no cache-hit check: every run
+recomputes and rewrites `--output`.
 
 ## Examples
 

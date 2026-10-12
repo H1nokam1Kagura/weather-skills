@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import xarray as xr
-from conftest import load_skill, make_gridded, run_skill, write_zarr
+from conftest import load_skill, make_forecast, make_gridded, run_skill, write_zarr
 from weather_skills_core.provenance import load_history
 
 
@@ -109,3 +109,67 @@ def test_select_one_station_keeps_identity_coords(tmp_path, select):
     assert "station_id" not in result.dims
     assert str(result["station_id"].values) == "TA00072"
     assert str(result["name"].values) == "Likoni"
+
+
+def _with_coordless_dim(tmp_path):
+    ds = make_gridded(n_time=3)
+    ds["member_data"] = ds["precip"].expand_dims(member=3, axis=-1)
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    assert "member" not in xr.open_zarr(src, consolidated=True).coords
+    return src
+
+
+def test_select_value_rejects_dim_without_coord(tmp_path, select):
+    src = _with_coordless_dim(tmp_path)
+    out = tmp_path / "out.zarr"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(select, "-i", str(src), "-o", str(out), "--dim", "member", "--value", "1")
+    assert exc.value.code == 2
+    assert not out.exists()
+
+
+def test_select_index_accepts_dim_without_coord(tmp_path, select):
+    src = _with_coordless_dim(tmp_path)
+    out = tmp_path / "out.zarr"
+    run_skill(select, "-i", str(src), "-o", str(out), "--dim", "member", "--index", "1")
+    assert "member" not in xr.open_zarr(out, consolidated=True).dims
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--dim", "nope", "--index", "0"),
+        ("--dim", "time", "--index", "3"),
+        ("--dim", "time", "--index", "-4"),
+        ("--dim", "time", "--value", "garbage"),
+        ("--dim", "time", "--value", "2026-13-45"),
+    ],
+)
+def test_select_bad_selector_exits_2(tmp_path, select, args):
+    src = write_zarr(make_gridded(n_time=3), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(select, "-i", str(src), "-o", str(out), *args)
+    assert exc.value.code == 2
+    assert not out.exists()
+
+
+def test_select_bad_timedelta_value_exits_2(tmp_path, select):
+    src = write_zarr(make_forecast(n_step=3), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            select, "-i", str(src), "-o", str(tmp_path / "o.zarr"), "--dim", "step", "--value", "x"
+        )
+    assert exc.value.code == 2
+
+
+def test_select_negative_index_and_values_accepted(tmp_path, select):
+    src = write_zarr(make_forecast(n_step=3), tmp_path / "in.zarr")
+    out_i = tmp_path / "i.zarr"
+    out_v = tmp_path / "v.zarr"
+    run_skill(select, "-i", str(src), "-o", str(out_i), "--dim", "step", "--index", "-3")
+    run_skill(select, "-i", str(src), "-o", str(out_v), "--dim", "step", "--value", "0D")
+    a = xr.open_zarr(out_i, consolidated=True)
+    b = xr.open_zarr(out_v, consolidated=True)
+    assert "step" not in a.dims and "step" not in b.dims
+    xr.testing.assert_identical(a["tp"].load(), b["tp"].load())

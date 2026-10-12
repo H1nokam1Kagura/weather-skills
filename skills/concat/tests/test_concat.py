@@ -61,3 +61,52 @@ def test_concat_rejects_single_input(tmp_path, concat):
     with pytest.raises(SystemExit) as exc:
         run_skill(concat, "-i", str(src), "-o", str(tmp_path / "out.zarr"), "--dim", "time")
     assert exc.value.code == 2
+
+
+def _concat_time(concat, tmp_path, a, b):
+    pa = write_zarr(a, tmp_path / "a.zarr")
+    pb = write_zarr(b, tmp_path / "b.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(concat, "-i", str(pa), "-i", str(pb), "-o", str(out), "--dim", "time")
+    return out
+
+
+def test_concat_rejects_mismatched_units(tmp_path, concat):
+    b = make_gridded(fill=2.0, start="2026-01-03")
+    b["precip"].attrs["units"] = "m day-1"
+    with pytest.raises(SystemExit) as exc:
+        _concat_time(concat, tmp_path, make_gridded(), b)
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_concat_accepts_equivalent_unit_spellings(tmp_path, concat):
+    b = make_gridded(fill=2.0, start="2026-01-03")
+    b["precip"].attrs["units"] = "mm/day"
+    out = _concat_time(concat, tmp_path, make_gridded(), b)
+    ds = xr.open_zarr(out, consolidated=True)
+    assert ds.sizes["time"] == 4
+    assert float(ds["precip"].isel(time=-1).mean()) == pytest.approx(2.0)
+
+
+def test_concat_rejects_different_data_variables(tmp_path, concat):
+    b = make_gridded(fill=2.0, start="2026-01-03")
+    b["extra"] = b["precip"] * 1
+    with pytest.raises(SystemExit) as exc:
+        _concat_time(concat, tmp_path, make_gridded(), b)
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_concat_rejects_mismatched_other_dim_coords(tmp_path, concat):
+    b = make_gridded(fill=2.0, start="2026-01-03", lats=(1.0, 2.0, 4.0))
+    with pytest.raises(SystemExit) as exc:
+        _concat_time(concat, tmp_path, make_gridded(), b)
+    assert exc.value.code == 2
+
+
+def test_concat_rejects_mismatched_other_dim_size(tmp_path, concat):
+    b = make_gridded(fill=2.0, start="2026-01-03", lons=(10.0, 11.0))
+    with pytest.raises(SystemExit) as exc:
+        _concat_time(concat, tmp_path, make_gridded(), b)
+    assert exc.value.code == 2
