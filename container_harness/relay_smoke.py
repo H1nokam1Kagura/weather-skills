@@ -158,6 +158,14 @@ def probes(targets, relay_host, relay_port):
     return [relay_row, *rows]
 
 
+def credential_like_name(path):
+    """A .env file, or a Kong-named file whose name also says key/token/secret/cred/env."""
+    low = os.path.basename(path).lower()
+    if low == ".env" or low.endswith(".env"):
+        return True
+    return "kong" in low and any(m in low for m in ("key", "token", "secret", "cred", "env"))
+
+
 def main():
     out = {"schema": "simkit.relay-smoke.container/1", "uid": os.getuid()}
     names = sorted(os.environ)
@@ -175,10 +183,12 @@ def main():
             low = name.lower()
             if low == ".env" or low.endswith(".env") or "kong" in low:
                 found.append(os.path.join(top, name))
-    # The repo legitimately ships Kong-named source files; list them, flag anything else.
+    # The repo legitimately ships Kong-named source files, and "kong" is a substring of
+    # unrelated system files (Hongkong CA certs, Asia/Hong_Kong); list them all, flag only
+    # credential-shaped names. The authoritative proof is the host-side VALUE scan.
     out["kong_named_files"] = sorted(found)
     out["credential_like_files"] = sorted(
-        f for f in found if not f.startswith("/opt/ctl/") and not f.endswith(".py")
+        f for f in found if not f.startswith("/opt/ctl/") and credential_like_name(f)
     )
     targets = json.loads(os.environ.get("SIMKIT_PROBE_TARGETS") or "{}")
 

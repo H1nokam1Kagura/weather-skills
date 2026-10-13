@@ -127,3 +127,12 @@ model/usage only).
       live+substituted stays BLOCKED_LIVE_ROLE_TRANSPORT; selector `substituted`/push smoke
       never select live cases, new selector `live` does. UNTESTED end to end (0 admitted).
 - [ ] R5 live relay-smoke on GHA (<=2 attempts total) — see Log.
+- 2026-10-13 relay-smoke attempt 1, run 38481482724 (eef7878): live call SUCCESS (container ->
+  relay -> Kong: model_observed claude-sonnet-4-6, request e8fb4f2ca700033137789159eb5ef767,
+  via 1.1 kong/3.15.0.5-enterprise-edition, 184 in / 38 out tokens); all 13 egress probes as
+  expected (relay connected; Kong by name/IP, 1.1.1.1, 8.8.8.8 tcp+udp, github, IMDS, runner IP,
+  docker0 unreachable; relay host ports 22/80 timeout); key scan 0 matches over 973 MB exported
+  fs + inspect + 17 artifact files; Docker 28.0.4 assigned the internal bridge gateway itself.
+  Job FAILED on one harness check only: the in-container credential-FILENAME heuristic matched
+  "kong" inside Hongkong CA certs / Asia/Hong_Kong (false positive). Fixed (credential_like_name
+  + test). Artifacts: %TEMP%/simkit-gh-relay/38481482724/.

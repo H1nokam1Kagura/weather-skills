@@ -227,3 +227,16 @@ def test_smoke_report_fails_when_a_blocked_target_connects(tmp_path, monkeypatch
     smoke["egress_probes"][1].update(observed="connected", passed=False)
     (out / "relay-smoke.container.json").write_text(json.dumps(smoke))
     assert relay_smoke_report.main(["x", str(out), str(relay)]) == 1
+
+
+def test_credential_file_heuristic_ignores_hongkong_system_files():
+    import relay_smoke
+
+    for benign in (
+        "/etc/ssl/certs/Hongkong_Post_Root_CA_3.pem",
+        "/usr/share/ca-certificates/mozilla/Hongkong_Post_Root_CA_3.crt",
+        "/usr/share/zoneinfo/Asia/Hong_Kong",
+    ):
+        assert not relay_smoke.credential_like_name(benign)
+    for bad in ("/home/x/.env", "/tmp/prod.env", "/tmp/kong_key.txt", "/root/KONG-TOKEN"):
+        assert relay_smoke.credential_like_name(bad)
