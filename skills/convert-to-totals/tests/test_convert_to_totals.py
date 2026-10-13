@@ -350,3 +350,91 @@ def test_refuses_weekly_extremes(tmp_path, aggregate, convert_to_totals, method)
     with pytest.raises(SystemExit) as exc:
         run_skill(convert_to_totals, "-i", str(agg), "-o", str(tmp_path / "out.zarr"))
     assert exc.value.code == 2
+
+
+@pytest.fixture(scope="module")
+def select():
+    return load_skill("select", "select_dim").select
+
+
+def test_monthly_totals_use_real_month_lengths(tmp_path, aggregate, convert_to_totals):
+    """Feb and Sep totals are rate × 28 / 30 days, not pint's 30.44-day month."""
+    for start, days in (("2026-02-01", 28), ("2026-09-01", 30)):
+        src = write_zarr(
+            make_gridded(n_time=days, fill=2.0, start=start), tmp_path / f"{start}.zarr"
+        )
+        agg = tmp_path / f"{start}_m.zarr"
+        out = tmp_path / f"{start}_tot.zarr"
+        run_skill(aggregate, "-i", str(src), "-o", str(agg), "--period", "monthly")
+        run_skill(convert_to_totals, "-i", str(agg), "-o", str(out))
+        result = xr.open_zarr(out, consolidated=True)
+        assert result["precip"].values == pytest.approx(2.0 * days)
+
+
+def test_monthly_series_totals_per_month(tmp_path, aggregate, convert_to_totals):
+    """Jan–Mar in one series: each month multiplied by its own length."""
+    src = write_zarr(make_gridded(n_time=90, fill=1.0, start="2026-01-01"), tmp_path / "in.zarr")
+    agg = tmp_path / "m.zarr"
+    out = tmp_path / "tot.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(agg), "--period", "monthly")
+    run_skill(convert_to_totals, "-i", str(agg), "-o", str(out))
+    result = xr.open_zarr(out, consolidated=True)
+    per_month = result["precip"].isel(latitude=0, longitude=0).values
+    assert per_month == pytest.approx([31.0, 28.0, 31.0])
+
+
+def test_monthly_select_then_totals_keeps_month_length(
+    tmp_path, aggregate, select, convert_to_totals
+):
+    """select collapses time: February's real length survives as aggregation_period."""
+    src = write_zarr(make_gridded(n_time=59, fill=2.0, start="2026-01-01"), tmp_path / "in.zarr")
+    agg = tmp_path / "m.zarr"
+    feb = tmp_path / "feb.zarr"
+    out = tmp_path / "tot.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(agg), "--period", "monthly")
+    run_skill(select, "-i", str(agg), "-o", str(feb), "--dim", "time", "--value", "2026-02-01")
+    assert xr.open_zarr(feb)["precip"].attrs[AGGREGATION_PERIOD_ATTR] == "28 day"
+    run_skill(convert_to_totals, "-i", str(feb), "-o", str(out))
+    assert xr.open_zarr(out)["precip"].values == pytest.approx(56.0)
+
+
+def test_select_keeps_coverage_so_partial_week_is_refused(
+    tmp_path, aggregate, select, convert_to_totals
+):
+    """A 2-of-7-day week selected out of a series is not turned into a 7-day total."""
+    src = write_zarr(make_gridded(n_time=9, fill=2.0), tmp_path / "in.zarr")
+    agg = tmp_path / "wk.zarr"
+    wk2 = tmp_path / "wk2.zarr"
+    out = tmp_path / "tot.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(agg), "--period", "weekly")
+    run_skill(select, "-i", str(agg), "-o", str(wk2), "--dim", "time", "--index", "1")
+    sel = xr.open_zarr(wk2)
+    assert float(sel[AGGREGATION_COVERAGE_COORD]) == pytest.approx(2 / 7)
+
+    with pytest.raises(SystemExit) as exc:
+        run_skill(convert_to_totals, "-i", str(wk2), "-o", str(out))
+    assert exc.value.code == 2
+
+
+def test_convert_reports_dropped_intervals(tmp_path, aggregate, convert_to_totals, capsys):
+    src = write_zarr(make_gridded(n_time=9, fill=2.0), tmp_path / "in.zarr")
+    agg = tmp_path / "wk.zarr"
+    out = tmp_path / "tot.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(agg), "--period", "weekly")
+    capsys.readouterr()
+    run_skill(convert_to_totals, "-i", str(agg), "-o", str(out))
+    err = capsys.readouterr().err
+    assert "Dropped 1 of 2 time interval(s)" in err
+    assert "2026-01-08" in err
+    assert xr.open_zarr(out).sizes["time"] == 1
+
+
+def test_convert_no_complete_interval_error_suggests_fix(tmp_path, convert_to_totals, capsys):
+    ds = make_gridded(n_time=1, fill=1.0)
+    ds["precip"].attrs[AGGREGATION_PERIOD_ATTR] = "7 day"
+    ds = ds.assign_coords({AGGREGATION_COVERAGE_COORD: ("time", [1 / 7])})
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    with pytest.raises(SystemExit):
+        run_skill(convert_to_totals, "-i", str(src), "-o", str(tmp_path / "out.zarr"))
+    err = capsys.readouterr().err
+    assert "--probe-latest" in err and "2026-01-01" in err

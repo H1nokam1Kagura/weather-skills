@@ -67,6 +67,13 @@ sample in the same sense); this skill performs no unit math or relabeling
 either way — use `unit-convert` to restamp units when needed. (For temporal
 totals specifically, use `aggregate-temporal` then `convert-to-totals`.)
 
+The statistic is appended to CF `cell_methods` (`number: standard_deviation`,
+`latitude: longitude: mean`). `std` and `sum` also rewrite `long_name`
+(`Standard deviation of Total precipitation across number`) and drop the
+product's `GRIB_name` / `short_name` / `comment`, so a plot does not label an
+ensemble spread as the quantity itself. `standard_name` stays, as CF encodes
+a statistic of a quantity with its `standard_name` plus `cell_methods`.
+
 NaNs are skipped (xarray's default `skipna`). Two method-specific
 conventions follow from that:
 

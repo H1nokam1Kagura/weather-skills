@@ -8,9 +8,10 @@
 """Downscale onto a finer grid (linear or empirical q-q)."""
 
 import math
+import sys
 
 from weather_skills_core import Dataset, UsageError, weather_skill
-from weather_skills_core.standard_dataset import detect_spatial_dims, detect_time_dim
+from weather_skills_core.standard_dataset import detect_spatial_dims
 from weather_skills_core.standard_utils import ensure_normalized_longitude, grid_spacing
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
@@ -29,17 +30,24 @@ def _target_coord(coord, new_spacing):
     return target[::-1] if coord[0] > coord[-1] else target
 
 
-def _qmap_1d(model, ref):
+def _qmap(values, model, ref):
+    """One cell: ``F_ref^-1(F_model(values))`` with empirical CDFs.
+
+    ``model`` and ``ref`` are the cell's climatology samples (any shape,
+    pooled); ``values`` keeps its shape.
+    """
     import numpy as np
 
-    out = np.full(model.shape, np.nan, dtype=float)
-    m_ok, r_ok = ~np.isnan(model), ~np.isnan(ref)
-    if not m_ok.any() or not r_ok.any():
+    values = np.asarray(values, dtype=float)
+    model, ref = np.ravel(model).astype(float), np.ravel(ref).astype(float)
+    out = np.full(values.shape, np.nan, dtype=float)
+    ok = ~np.isnan(values)
+    sorted_m, sorted_r = np.sort(model[~np.isnan(model)]), np.sort(ref[~np.isnan(ref)])
+    if not ok.any() or not sorted_m.size or not sorted_r.size:
         return out
-    sorted_m, sorted_r = np.sort(model[m_ok]), np.sort(ref[r_ok])
-    ranks = np.searchsorted(sorted_m, model[m_ok], side="right")
+    ranks = np.searchsorted(sorted_m, values[ok], side="right")
     quants = np.clip((ranks - 0.5) / sorted_m.size, 0.0, 1.0)
-    out[m_ok] = np.interp(quants, (np.arange(sorted_r.size) + 0.5) / sorted_r.size, sorted_r)
+    out[ok] = np.interp(quants, (np.arange(sorted_r.size) + 0.5) / sorted_r.size, sorted_r)
     return out
 
 
@@ -57,8 +65,17 @@ def _qmap_1d(model, ref):
 @weather_skill.argument("-f", "--factor", type=int)
 @weather_skill.argument("--target-resolution", type=float)
 @weather_skill.argument("--reference-grid")
-@weather_skill.argument("--qq-reference")
-@weather_skill.argument("--time-dim", default="time")
+@weather_skill.argument(
+    "--qq-reference",
+    help="q-q: observed climatology sample on the output grid (the target distribution).",
+)
+@weather_skill.argument(
+    "--qq-model",
+    help=(
+        "q-q: the model's own climatology sample (hindcasts / reforecasts) on the "
+        "input grid. Without it the input is its own model sample."
+    ),
+)
 def downscale(
     ds,
     variable,
@@ -67,7 +84,7 @@ def downscale(
     target_resolution,
     reference_grid,
     qq_reference,
-    time_dim,
+    qq_model,
     **kwargs,
 ):
     """Downscale onto a finer grid (linear or empirical q-q)."""
@@ -80,13 +97,51 @@ def downscale(
         raise UsageError("exactly one of --factor, --target-resolution, --reference-grid")
     if algorithm == "q-q" and not qq_reference:
         raise UsageError("--algorithm q-q requires --qq-reference")
-    if qq_reference and algorithm != "q-q":
-        raise UsageError("--qq-reference only valid with --algorithm q-q")
+    if (qq_reference or qq_model) and algorithm != "q-q":
+        raise UsageError("--qq-reference / --qq-model only valid with --algorithm q-q")
 
     lat_dim, lon_dim = detect_spatial_dims(ds)
     if variable:
         ds = ds[[variable]]
     ds = ensure_normalized_longitude(ds, lon_dim)
+
+    # q-q inputs are checked before the (slow) interpolation. Each cell's sample
+    # is every value along the non-spatial dims (years, days, members), pooled.
+    samples = {}
+    if algorithm == "q-q":
+        for flag, path in (("--qq-reference", qq_reference), ("--qq-model", qq_model)):
+            if path is None:
+                continue
+            other = xr.open_zarr(path, consolidated=False)
+            missing = [v for v in ds.data_vars if v not in other.data_vars]
+            if missing:
+                raise UsageError(
+                    f"{flag} has no variable {missing} (has {list(other.data_vars)}); "
+                    "rename one side (rename skill) so the names match, or limit the "
+                    "input with --variable"
+                )
+            for v in ds.data_vars:
+                if not set(other[v].dims) - {lat_dim, lon_dim}:
+                    raise UsageError(
+                        f"{flag} {v!r} has only {list(other[v].dims)}: q-q needs a "
+                        "climatology sample dim besides lat/lon (e.g. time over many "
+                        "years, or number)"
+                    )
+            samples[flag] = other
+        if qq_model is None:
+            for v in ds.data_vars:
+                if not set(ds[v].dims) - {lat_dim, lon_dim}:
+                    raise UsageError(
+                        f"--input {v!r} has no sample dim besides lat/lon and no "
+                        "--qq-model was given; pass the model climatology with --qq-model"
+                    )
+            print(
+                "Warning: no --qq-model, so the input is its own model climatology and "
+                "the output takes the --qq-reference distribution: a single forecast "
+                "becomes the reference climatology. Pass --qq-model <hindcasts.zarr> "
+                "to correct a forecast.",
+                file=sys.stderr,
+            )
     in_lat, in_lon = _spacing(ds, lat_dim), _spacing(ds, lon_dim)
 
     if reference_grid is not None:
@@ -126,26 +181,40 @@ def downscale(
     out = ds.regrid.linear(target)
 
     if algorithm == "q-q":
-        time_dim = detect_time_dim(out, time_dim)
-        ref = xr.open_zarr(qq_reference, consolidated=False)
+        ref = samples["--qq-reference"]
         for d in (lat_dim, lon_dim):
-            if not np.allclose(out[d].values, ref[d].values, atol=1e-6, rtol=0):
+            if ref[d].size != out[d].size or not np.allclose(
+                out[d].values, ref[d].values, atol=1e-6, rtol=0
+            ):
                 raise UsageError(f"--qq-reference '{d}' must match post-downscale grid")
         ref = ref.assign_coords({lat_dim: out[lat_dim], lon_dim: out[lon_dim]})
+        model = out
+        if qq_model is not None:
+            model = samples["--qq-model"]
+            model = ensure_normalized_longitude(model, lon_dim)[list(out.data_vars)]
+            model = model.regrid.linear(target)
         for v in out.data_vars:
-            if v not in ref.data_vars:
-                continue
+            # Distinct core-dim names so the three samples never broadcast together.
+            core = {
+                name: [d for d in da.dims if d not in (lat_dim, lon_dim)]
+                for name, da in (("in", out[v]), ("model", model[v]), ("ref", ref[v]))
+            }
             mapped = xr.apply_ufunc(
-                _qmap_1d,
-                out[v],
-                ref[v].rename({time_dim: "_qq_ref_time"}),
-                input_core_dims=[[time_dim], ["_qq_ref_time"]],
-                output_core_dims=[[time_dim]],
+                _qmap,
+                out[v].load(),
+                model[v].load().rename({d: f"_qq_model_{d}" for d in core["model"]}),
+                ref[v].load().rename({d: f"_qq_ref_{d}" for d in core["ref"]}),
+                input_core_dims=[
+                    core["in"],
+                    [f"_qq_model_{d}" for d in core["model"]],
+                    [f"_qq_ref_{d}" for d in core["ref"]],
+                ],
+                output_core_dims=[core["in"]],
                 vectorize=True,
                 output_dtypes=[float],
             )
             mapped.attrs = dict(out[v].attrs)
-            out[v] = mapped
+            out[v] = mapped.transpose(*out[v].dims)
     return out
 
 

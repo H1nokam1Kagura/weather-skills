@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 import pytest
+import xarray as xr
 from conftest import load_skill, make_forecast, make_gridded, run_skill, write_zarr
 
 
@@ -137,3 +138,19 @@ def test_max_values_zero_still_caps_data_sample(tmp_path, inspect_zarr, capsys):
     numeric = [v for v in precip["sample"] if v != "…"]
     assert len(numeric) == 256
     assert precip["sample"][-1] == "…"
+
+
+def test_timedelta_coords_and_key_attrs_are_readable(tmp_path, inspect_zarr, capsys):
+    ds = make_forecast(n_step=2)
+    ds = ds.assign_coords(step=np.array([0, 3 * 3600], dtype="timedelta64[s]").astype("m8[ns]"))
+    ds = xr.concat([ds, ds.assign_coords(step=ds.step + np.timedelta64(7, "D"))], dim="step")
+    ds["tp"].attrs.update(cell_methods="step: mean", aggregation_period="7 day")
+    src = write_zarr(ds, tmp_path / "in.zarr")
+
+    run_skill(inspect_zarr, "-i", str(src))
+
+    out = capsys.readouterr().out
+    assert "0 days, 0 days 03:00:00, 7 days, 7 days 03:00:00" in out
+    assert "long_name: Total precipitation" in out
+    assert "aggregation_period: 7 day" in out
+    assert "cell_methods: step: mean" in out

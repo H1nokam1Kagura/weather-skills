@@ -2,6 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "pandas",
 # ]
 # ///
 """Convert precipitation rates to period totals using stamped aggregation_period."""
@@ -17,6 +18,7 @@ from weather_skills_core.units import (
     STANDARD,
     assert_nonoverlapping_intervals,
     classify_variable,
+    coverage_values,
     filter_min_coverage,
     format_cell_methods,
     looks_like_rate_display_name,
@@ -100,10 +102,49 @@ def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
                     "only converts precipitation"
                 )
 
+    import numpy as np
+    import pandas as pd
+
     # After select collapses the only time/step sample, dims are spatial-only.
-    # aggregation_period on the variable is enough for the multiply; skip the
-    # coverage/overlap gates that need a time axis.
-    if dim is not None:
+    # aggregation_period on the variable is enough for the multiply; select
+    # keeps that bin's aggregation_coverage as a scalar coord, so the coverage
+    # gate still applies. The overlap gate needs a time axis.
+    recovery = (
+        "Incomplete intervals are dropped, not scaled up. Observations "
+        "usually end before the period does: fetch a window that ends on or "
+        "before the latest available day (e.g. resolve-time <query> --as-of "
+        "<the fetcher's --probe-latest day>). A forecast init may not reach "
+        "that lead yet."
+    )
+    if dim is None:
+        # Scalar after select; along e.g. a model dim after concat of selections.
+        cov = ds.coords.get(AGGREGATION_COVERAGE_COORD)
+        if cov is not None and (np.asarray(cov.values) < min_coverage - 1e-12).any():
+            raise UsageError(
+                f"the selected interval has aggregation_coverage "
+                f"{np.array2string(np.asarray(cov.values), precision=3)}, below "
+                f"--min-coverage {min_coverage}. {recovery}"
+            )
+    else:
+        cov = coverage_values(ds, dim)
+        if cov.size == ds.sizes[dim]:
+            low = cov < min_coverage - 1e-12
+            labels = [str(v) for v in pd.Index(np.asarray(ds[dim].values)[low])]
+            dropped = ", ".join(
+                f"{lab} ({c:.3g})" for lab, c in zip(labels[:10], cov[low][:10], strict=True)
+            )
+            dropped += ", ..." if low.sum() > 10 else ""
+            if low.all():
+                raise UsageError(
+                    f"no {dim} intervals meet --min-coverage {min_coverage} "
+                    f"(coverage: {dropped}). {recovery}"
+                )
+            if low.any():
+                print(
+                    f"Dropped {int(low.sum())} of {cov.size} {dim} interval(s) below "
+                    f"--min-coverage {min_coverage}: {dropped}",
+                    file=sys.stderr,
+                )
         ds = filter_min_coverage(ds, dim, min_coverage)
     out = ds.copy(deep=False)
     for name in names:
@@ -128,6 +169,10 @@ def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
         attrs["units"] = STANDARD["precip_amount"]["units"]
         attrs["standard_name"] = STANDARD["precip_amount"]["standard_name"]
         attrs["long_name"] = PRECIP_AMOUNT_LONG_NAME
+        # Product rate descriptions ("Average precipitation rate…", "prate")
+        # no longer describe a period total.
+        attrs.pop("comment", None)
+        attrs.pop("short_name", None)
         if looks_like_rate_display_name(attrs.get("GRIB_name")):
             attrs["GRIB_name"] = PRECIP_AMOUNT_LONG_NAME
         attrs["cell_methods"] = format_cell_methods(_sum_cell_methods_dim(da, dim), "sum")

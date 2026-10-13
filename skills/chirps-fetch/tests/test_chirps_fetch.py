@@ -98,7 +98,9 @@ def test_probe_latest_uses_catalog_time(capsys, fetch, mod):
 
     with patch.object(mod, "_open_catalog", side_effect=open_catalog):
         run_skill(fetch, "--probe-latest")
-    assert capsys.readouterr().out.strip() == "2026-09-15"
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "2026-09-15"
+    assert "latest=2026-09-15 (preliminary); final through 2026-08-31" in captured.err
 
 
 def test_catalog_ids(mod):

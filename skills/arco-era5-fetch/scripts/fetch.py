@@ -151,7 +151,28 @@ def fetch(start_time, end_time, bbox, variable, probe_latest, **kwargs):
     if probe_latest is not None:
         import numpy as np
 
-        print(np_to_date(np.max(_open_arco({})["time"].values)).isoformat())
+        # The store pre-allocates its time axis through 2050, so max(time) is not
+        # the data end. Start from the store's ERA5T stop attr and step back until
+        # one 2m_temperature point at 23 UTC is finite (one chunk read per day).
+        ds = _open_arco({})
+        stop = ds.attrs.get("valid_time_stop_era5t") or ds.attrs.get("valid_time_stop")
+        day = np.datetime64(stop or datetime.now(UTC).date().isoformat(), "D")
+        for _ in range(60):
+            hour = day + np.timedelta64(23, "h")
+            point = ds["2m_temperature"].sel(time=hour).isel(latitude=0, longitude=0)
+            if np.isfinite(point.values):
+                break
+            day -= np.timedelta64(1, "D")
+        else:
+            print("none")
+            return
+        if ds.attrs.get("valid_time_stop"):
+            print(
+                f"Note: days after {ds.attrs['valid_time_stop']} are preliminary ERA5T "
+                "(final ERA5 replaces them ~2-3 months later).",
+                file=sys.stderr,
+            )
+        print(np_to_date(day).isoformat())
         return
 
     import numpy as np
@@ -223,6 +244,28 @@ def fetch(start_time, end_time, bbox, variable, probe_latest, **kwargs):
         raise DataError(
             f"failed while reading from the ARCO-ERA5 store ({type(exc).__name__}: {exc})."
         ) from None
+
+    # Hours past the real data end are all-NaN (pre-allocated axis). Drop that
+    # tail instead of writing empty rows; never fill.
+    finite = np.zeros(ds.sizes["time"], dtype=bool)
+    for name in ds.data_vars:
+        if "time" in ds[name].dims:
+            other = [d for d in ds[name].dims if d != "time"]
+            finite |= ds[name].notnull().any(dim=other).values
+    if not finite.any():
+        raise DataError(
+            f"ARCO-ERA5 has no data yet in {start_iso}..{end_iso} "
+            "(the store's time axis runs ahead of the data). Run --probe-latest."
+        )
+    last = int(np.flatnonzero(finite)[-1])
+    if last < ds.sizes["time"] - 1:
+        print(
+            f"Warning: ARCO-ERA5 data ends {str(ds['time'].values[last])[:13]}; dropped "
+            f"{ds.sizes['time'] - 1 - last} all-NaN trailing hour(s). Effective end is "
+            "earlier than --end-time.",
+            file=sys.stderr,
+        )
+        ds = ds.isel(time=slice(0, last + 1))
 
     apply_write_encoding(
         ds,

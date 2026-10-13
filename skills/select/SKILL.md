@@ -83,8 +83,12 @@ rejects `--value` with an error directing to `--index`.
 A single selection (one `--index` or one `--value`) collapses the dim — it
 disappears from the output — AND drops leftover scalar coordinates on that dim
 (e.g. `step`, `valid_time`). Point identity is kept as scalar coords:
-`station_id` / `point_id`, `name`, `latitude` / `longitude`, `country`. Other
-coordinates that were already scalar on the input pass through. Multiple selections keep the dim with
+`station_id` / `point_id`, `name`, `latitude` / `longitude`, `country`. The
+selected bin's `aggregation_coverage` is also kept as a scalar coord, so
+`convert-to-totals` still refuses a partial interval after the time/step axis
+is gone. Collapsing a time axis stamped with a calendar `aggregation_period`
+(`1 month`) rewrites it to that bin's real length (`28 day` for February).
+Other coordinates that were already scalar on the input pass through. Multiple selections keep the dim with
 exactly those entries, in the order the flags were given (args order = output
 order; `--index 2 --index 0` reverses those two entries). Selecting by
 `--value` produces the same data as selecting the corresponding positions by

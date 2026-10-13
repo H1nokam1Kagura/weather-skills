@@ -142,3 +142,45 @@ def test_median_and_lat_weighted_mean(tmp_path, summarize_dim):
         "--lat-weighted",
     )
     assert xr.open_zarr(tmp_path / "latw.zarr")["precip"].values == pytest.approx(1 / 3)
+
+
+def test_std_relabels_spread(tmp_path, summarize_dim):
+    """A spread of precip totals is not labelled 'Total precipitation'."""
+    ds = make_gridded(n_time=3, fill=2.0)
+    ds["precip"].attrs.update(
+        units="mm",
+        long_name="Total precipitation",
+        standard_name="lwe_thickness_of_precipitation_amount",
+        cell_methods="time: sum",
+    )
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+
+    run_skill(summarize_dim, "-i", str(src), "-o", str(out), "--dim", "time", "--method", "std")
+
+    attrs = xr.open_zarr(out)["precip"].attrs
+    assert attrs["long_name"] == "Standard deviation of Total precipitation across time"
+    assert attrs["standard_name"] == "lwe_thickness_of_precipitation_amount"
+    assert attrs["units"] == "mm"
+    assert attrs["cell_methods"] == "time: sum time: standard_deviation"
+
+
+def test_mean_keeps_names_and_appends_cell_methods(tmp_path, summarize_dim):
+    src = write_zarr(make_gridded(n_time=3), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        summarize_dim,
+        "-i",
+        str(src),
+        "-o",
+        str(out),
+        "--dim",
+        "latitude",
+        "--dim",
+        "longitude",
+        "--method",
+        "mean",
+    )
+    attrs = xr.open_zarr(out)["precip"].attrs
+    assert attrs["standard_name"] == "lwe_precipitation_rate"
+    assert attrs["cell_methods"] == "latitude: longitude: mean"

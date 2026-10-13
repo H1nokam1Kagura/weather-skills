@@ -70,6 +70,23 @@ def summarize_dim(ds, variable, dim, method, lat_weighted, **kwargs):
             out[var] = da.weighted(latitude_weights(ds[lat_dim])).mean(dim=rdims, keep_attrs=True)
         else:
             out[var] = getattr(da, method)(dim=rdims, keep_attrs=True)
+        # Record the statistic (CF cell_methods). A spread or a sum is not the
+        # input quantity, so its long_name must not read "Total precipitation".
+        attrs = dict(out[var].attrs)
+        cf_method = {"std": "standard_deviation", "min": "minimum", "max": "maximum"}
+        step = f"{': '.join(rdims)}: {cf_method.get(method, method)}"
+        attrs["cell_methods"] = (
+            f"{attrs['cell_methods']} {step}" if attrs.get("cell_methods") else step
+        )
+        if method in ("std", "sum"):
+            label = "Standard deviation" if method == "std" else "Sum"
+            what = attrs.get("long_name") or attrs.get("standard_name") or var
+            attrs["long_name"] = f"{label} of {what} across {', '.join(rdims)}"
+            # standard_name stays: CF encodes a spread as the quantity's
+            # standard_name plus a cell_methods statistic.
+            for key in ("GRIB_name", "short_name", "comment"):
+                attrs.pop(key, None)
+        out[var].attrs = attrs
 
     for d in dims:
         if d in out.dims and all(d not in out[v].dims for v in out.data_vars):

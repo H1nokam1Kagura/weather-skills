@@ -8,6 +8,7 @@
 
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass
 
 import numpy as np
@@ -509,6 +510,22 @@ def indicator(ds, rule, variable, time_dim, detect, cumulative, probability, **k
     out.attrs["indicator_expanded"] = spec.expanded
     names = ", ".join(out.data_vars)
     print(f"indicator  {spec.source}  ({names})")
+    # Forward-looking rules (windows, within/after) cannot be decided at the end
+    # of the series: NaN there is "not yet known", not "no event".
+    ahead = max(c.window - step_days + (c.after or c.within or 0) for c in spec.clauses)
+    if ahead > 0:
+        import datetime as _dt
+
+        last = ds[dim].to_index()[-1]  # Timestamp, Timedelta (step), or cftime
+        decided = last - _dt.timedelta(days=ahead)
+        print(
+            f"Note: --rule {spec.source!r} looks {ahead} day(s) past each date, so dates "
+            f"after {decided} cannot be decided from data ending {last}: NaN there means "
+            "'not yet known', not 'no event'. With --detect first, a missing date means "
+            f"no event through {decided} or not yet known. Extend the input (later obs "
+            "or a longer forecast) to decide later dates.",
+            file=sys.stderr,
+        )
     return out
 
 

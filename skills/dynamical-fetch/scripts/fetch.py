@@ -268,8 +268,20 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, **k
         if not dsid:
             raise UsageError("--dataset is required (or pass it as --probe-latest <id>).")
         state = _open_dataset({}, dsid)
-        coord = "init_time" if state["shape"] in ("ensemble", "forecast") else "time"
-        print(np_to_date(np.max(state["ds"][coord].values)).isoformat())
+        is_fc = state["shape"] in ("ensemble", "forecast")
+        latest = np.max(state["ds"]["init_time" if is_fc else "time"].values)
+        if is_fc:
+            print(
+                f"Note: the {np_to_date(latest).isoformat()} init may still be publishing; "
+                "its long leads can be all-NaN for a few hours.",
+                file=sys.stderr,
+            )
+        elif latest != latest.astype("datetime64[D]"):
+            print(
+                f"Note: latest timestamp is {str(latest)[:16]}; that day is partial.",
+                file=sys.stderr,
+            )
+        print(np_to_date(latest).isoformat())
         return
 
     import numpy as np
@@ -329,13 +341,35 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, **k
         ds = ds.rename(rename)
         ds = ds.assign_coords(time=ds["init_time"]).drop_vars("init_time")
     else:
-        ds = ds.sel(time=slice(np.datetime64(start_iso), np.datetime64(end_iso)))
+        # --end-time is an inclusive calendar day: keep every sub-daily step of
+        # that day (IMERG half-hourly), not just its 00:00 instant.
+        day_end = np.datetime64(end_iso) + np.timedelta64(1, "D") - np.timedelta64(1, "ns")
+        ds = ds.sel(time=slice(np.datetime64(start_iso), day_end))
         if ds.sizes.get("time", 0) == 0:
             raise DataError(f"{dataset} has no data in {start_iso}..{end_iso}.")
         ds = ds.drop_vars([c for c in _DROP_COORDS if c in ds.coords])
 
     if variable:
         ds = ds[_resolve_variables(variable, ds.data_vars, dataset)]
+
+    # Catalog averaged fields (precip, 46-day daily means) are labelled at the END
+    # of their interval, so lead 0 is all-NaN. When every selected field is NaN
+    # there (same rule as ecmwf-fetch), drop lead 0 and relabel each remaining
+    # step to the previous step value: step = interval start. Using the previous
+    # value (not a fixed spacing) stays correct for GEFS 3 h -> 6 h leads.
+    # Instant fields (t2m on GEFS, winds, pressure levels) keep lead 0.
+    if is_forecast and ds.sizes.get("step", 0) > 1 and len(ds.data_vars) > 0:
+        first = ds.isel(step=0)
+        if all(bool(first[name].isnull().all()) for name in ds.data_vars):
+            starts = ds["step"].values[:-1]
+            ds = ds.isel(step=slice(1, None)).assign_coords(step=starts)
+            for name in ds.data_vars:
+                note = "dynamical-fetch relabelled steps to interval start (step = window start)."
+                ds[name].attrs["comment"] = f"{ds[name].attrs.get('comment', '')} {note}".strip()
+            print(
+                "Dropped all-NaN lead 0 and relabelled steps to interval start.",
+                file=sys.stderr,
+            )
     ds = _stack_pressure_levels(ds)
 
     print(f"Fetching dynamical:{dataset} (shape={shape})", file=sys.stderr)

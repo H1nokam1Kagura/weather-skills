@@ -1,6 +1,6 @@
 ---
 name: point-value
-description: Sample any gridded weather-skills standard dataset Zarr (IMERG, CHIRPS, ERA5, SMAP, ECMWF/GEFS forecasts) at point locations and write a point_obs (station_id) dataset. Points come from a station Zarr (TAHMO, GHCN-Daily, OpenAQ), repeatable --point LAT,LON[,ID], or a CSV. Use before grid-vs-station comparison — after it, difference / verify / plot-timeseries work against the station data directly. Methods nearest (default, containing cell), bilinear, or cell-mean (N x N neighborhood). Non-spatial dims (time, step, number, vertical) are kept.
+description: Sample any gridded weather-skills standard dataset Zarr (IMERG, CHIRPS, ERA5, SMAP, ECMWF/GEFS forecasts) at point locations and write a point_obs (station_id) dataset. Points come from a station Zarr (TAHMO, GHCN-Daily, OpenAQ), repeatable --point LAT,LON[,ID], or a CSV. Use before grid-vs-station comparison — after it, difference / verify (bias, MAE, hits per station) / plot-timeseries work against the station data directly. Methods nearest (default, containing cell), bilinear, or cell-mean (N x N neighborhood). Non-spatial dims (time, step, number, vertical) are kept.
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/point_value.py *)
@@ -51,8 +51,10 @@ Points set to NaN are listed on stderr.
   non-spatial input dims are kept.
 - Variables keep names, units, and attrs, so `difference -i sampled.zarr -i
   stations.zarr` works once names match (`rename` / `unit-convert` if not).
-- Coords: requested `latitude` / `longitude`, plus `grid_latitude` /
-  `grid_longitude`: the center of the sampled cell.
+- Coords: requested `latitude` / `longitude` (the CF latitude/longitude),
+  plus `grid_latitude` / `grid_longitude`: the center of the sampled cell,
+  in plain `degrees` so CF lat/lon detection does not mistake them for the
+  station position. NaN for points set to NaN.
 - Provenance: standard `weather_skills_history`. With `--points`, both Zarrs
   are hashed as inputs.
 

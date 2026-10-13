@@ -329,3 +329,88 @@ def test_merge_pressure_group_renames_vertical(mod):
     assert "vertical" in merged.dims
     assert "pressure_level" not in merged.dims
     assert mod._resolve_variables(["t"], merged.data_vars, "er") == ["temperature"]
+
+
+def _end_labelled_forecast_ds():
+    """GEFS-like uneven leads: precip NaN at lead 0, t2m instant (finite)."""
+    inits = np.array([np.datetime64("2026-01-01")])
+    steps = np.array([0, 3, 6, 12], dtype="timedelta64[h]").astype("timedelta64[ns]")
+    shape = (1, 4, 2, 2)
+    precip = np.arange(np.prod(shape), dtype=float).reshape(shape)
+    precip[:, 0] = np.nan
+    return xr.Dataset(
+        {
+            "precipitation_surface": (
+                ("init_time", "lead_time", "latitude", "longitude"),
+                precip,
+                {"units": "mm day-1"},
+            ),
+            "temperature_2m": (
+                ("init_time", "lead_time", "latitude", "longitude"),
+                np.ones(shape),
+                {"units": "degree_Celsius"},
+            ),
+        },
+        coords={
+            "init_time": inits,
+            "lead_time": steps,
+            "latitude": [1.0, 2.0],
+            "longitude": [10.0, 11.0],
+        },
+    )
+
+
+def _fetch_forecast(tmp_path, mod, fetch, ds, *extra):
+    out = tmp_path / "out.zarr"
+    with patch.object(mod, "_open_dataset", return_value={"ds": ds, "shape": "forecast"}):
+        run_skill(fetch, "--dataset", "t", "--date", "2026-01-01", *extra, "-o", str(out))
+    return xr.open_zarr(out, consolidated=True)
+
+
+def test_end_labelled_lead0_dropped_and_relabelled_to_start(tmp_path, mod, fetch):
+    ds = _end_labelled_forecast_ds()
+    written = _fetch_forecast(tmp_path, mod, fetch, ds, "-v", "precip")
+    hours = (written["step"].values / np.timedelta64(1, "h")).tolist()
+    # Previous-step relabel: (0,3]->0, (3,6]->3, (6,12]->6 (uneven spacing kept).
+    assert hours == [0, 3, 6]
+    np.testing.assert_array_equal(
+        written["precipitation_surface"].values,
+        ds["precipitation_surface"].values[0, 1:],
+    )
+    assert "interval start" in written["precipitation_surface"].attrs["comment"]
+
+
+def test_lead0_kept_when_any_requested_field_is_finite(tmp_path, mod, fetch):
+    ds = _end_labelled_forecast_ds()
+    written = _fetch_forecast(tmp_path, mod, fetch, ds, "-v", "precip", "-v", "temperature_2m")
+    hours = (written["step"].values / np.timedelta64(1, "h")).tolist()
+    assert hours == [0, 3, 6, 12]
+
+
+def test_end_time_includes_whole_sub_daily_day(tmp_path, mod, fetch):
+    times = np.arange(
+        np.datetime64("2026-01-01T00:00"),
+        np.datetime64("2026-01-03T00:30"),
+        np.timedelta64(30, "m"),
+    )
+    ds = xr.Dataset(
+        {"precipitation_surface": (("time", "latitude", "longitude"), np.ones((len(times), 1, 1)))},
+        coords={"time": times, "latitude": [1.0], "longitude": [10.0]},
+    )
+    ds["precipitation_surface"].attrs["units"] = "mm day-1"
+    out = tmp_path / "out.zarr"
+    with patch.object(mod, "_open_dataset", return_value={"ds": ds, "shape": "analysis"}):
+        run_skill(
+            fetch,
+            "--dataset",
+            "t",
+            "--start-time",
+            "2026-01-01",
+            "--end-time",
+            "2026-01-02",
+            "-o",
+            str(out),
+        )
+    written = xr.open_zarr(out, consolidated=True)
+    assert written.sizes["time"] == 96
+    assert str(written["time"].values[-1])[:16] == "2026-01-02T23:30"

@@ -135,11 +135,15 @@ def point_value(
         out = ds.isel(anchor)
 
     out = out.drop_vars([lat_dim, lon_dim]).where(xr.DataArray(keep, dims=dim))
+    # Where each value was sampled. Plain "degrees", not degrees_north/east, so
+    # CF latitude/longitude detection still finds only the point's own lat/lon.
+    grid_lat = {"long_name": "latitude of the sampled grid cell centre", "units": "degrees"}
+    grid_lon = {"long_name": "longitude of the sampled grid cell centre", "units": "degrees"}
     out = out.assign_coords(
         {
             **pts.coords,
-            "grid_latitude": (dim, np.where(keep, glat[ilat], np.nan), {"units": "degrees_north"}),
-            "grid_longitude": (dim, np.where(keep, glon[ilon], np.nan), {"units": "degrees_east"}),
+            "grid_latitude": (dim, np.where(keep, glat[ilat], np.nan), grid_lat),
+            "grid_longitude": (dim, np.where(keep, glon[ilon], np.nan), grid_lon),
         }
     ).transpose(dim, ...)
     out[dim].attrs["cf_role"] = "timeseries_id"

@@ -1,6 +1,6 @@
 ---
 name: inspect-zarr
-description: "Inspect a weather-skills standard dataset Zarr — print dimension sizes, coordinate values, and a data-variable summary (names, dims, dtype, units, min/max/mean, finite/NaN counts, truncated value sample). Use when you need to see what is in a Zarr before clipping, selecting, aggregating, or plotting, or to confirm values after a fetch. Data arrays can be huge: this skill never dumps them in full."
+description: "Inspect a weather-skills standard dataset Zarr — print dimension sizes, coordinate values, and a data-variable summary (names, dims, dtype, units, long_name/standard_name/cell_methods/aggregation_period, min/max/mean, finite/NaN counts, truncated value sample). Use when you need to see what is in a Zarr before clipping, selecting, aggregating, or plotting, or to confirm values after a fetch. Data arrays can be huge: this skill never dumps them in full."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/inspect_zarr.py *)
@@ -13,8 +13,10 @@ metadata:
 
 Read-only dump of a Zarr store's structure **and** a bounded look at the
 data. Prints dimension sizes, every coordinate (with values), and for each
-data variable: dtype, shape, units, min/max/mean, finite vs NaN counts, and
-a truncated sample of cells. It does not write an output store.
+data variable: dtype, shape, units, key attrs (`long_name`, `standard_name`,
+`cell_methods`, `aggregation_period`, `data_interval`), min/max/mean, finite
+vs NaN counts, and a truncated sample of cells. Timedelta coords (`step`)
+print as durations (`7 days`, `0 days 03:00:00`), not nanoseconds. It does not write an output store.
 
 **Data arrays can be huge.** Stats scan the array (that can take time on a
 large store) but stdout stays small: a handful of numbers plus a sample
@@ -78,6 +80,7 @@ Coordinates:
 
 Data variables:
   precip (time, latitude, longitude) float64 2 × 3 × 4 [mm d-1]
+    standard_name: lwe_precipitation_rate
     finite 24/24  min 1  max 1  mean 1
     sample: 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
 ```
@@ -86,7 +89,7 @@ A truncated coordinate line ends with `(N values)`. A truncated data sample
 ends with `(K of N cells)`.
 
 **json** — the same information as `dims`, `coords` (`values` / `truncated` /
-`size`), and `data_vars` (plus `n`, `n_finite`, `n_nan`, `min`, `max`,
+`size`), and `data_vars` (plus `attrs`, `n`, `n_finite`, `n_nan`, `min`, `max`,
 `mean`, `sample`, `sample_truncated`). Non-finite numbers in JSON are
 `null`. Use `provenance` for `weather_skills_history`.
 

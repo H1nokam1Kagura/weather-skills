@@ -124,12 +124,20 @@ def _latest_day(dataset_id: str) -> date | None:
 def fetch(start_time, end_time, bbox, probe_latest, **kwargs):
     """Fetch CHIRPS precipitation from the dynamical.org catalog (final, prelim fallback) and write a weather-skills standard dataset Zarr."""
     if probe_latest is not None:
-        found = [
-            day for day in (_latest_day(_FINAL_ID), _latest_day(_PRELIM_ID)) if day is not None
-        ]
+        final_day = _latest_day(_FINAL_ID)
+        prelim_day = _latest_day(_PRELIM_ID)
+        found = [day for day in (final_day, prelim_day) if day is not None]
         if not found:
             raise DataError("CHIRPS probe found no time coordinate on the dynamical.org catalogs")
-        print(max(found).isoformat())
+        latest = max(found)
+        if final_day is not None and latest > final_day:
+            print(
+                f"latest={latest.isoformat()} (preliminary); final through {final_day.isoformat()}",
+                file=sys.stderr,
+            )
+        else:
+            print(f"latest={latest.isoformat()} (final)", file=sys.stderr)
+        print(latest.isoformat())
         return
 
     import xarray as xr

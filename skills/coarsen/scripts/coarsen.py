@@ -5,7 +5,7 @@
 #   "xarray-regrid",
 # ]
 # ///
-"""Coarsen/align onto a target grid (geometry only, linear)."""
+"""Coarsen/align onto a target grid (linear interpolation or conservative area mean)."""
 
 import math
 
@@ -82,8 +82,30 @@ def _clip_reference_axis(input_vals, ref_vals):
     type=float,
     help="Grid offset in degrees; points at offset + k*resolution (with --target-resolution).",
 )
-def coarsen(ds, variable, reference_grid, target_resolution, offset, **kwargs):
-    """Coarsen/align onto a target grid (geometry only, linear)."""
+@weather_skill.argument(
+    "--method",
+    default="linear",
+    choices=["linear", "conservative"],
+    help=(
+        "linear: interpolate at each target point (realigns, same-resolution shifts). "
+        "conservative: area-weighted mean of the source cells inside each target "
+        "cell — use it to coarsen fine obs (0.05°) onto a coarse forecast grid."
+    ),
+)
+@weather_skill.argument(
+    "--min-fraction",
+    type=float,
+    default=1.0,
+    help=(
+        "With --method conservative: least fraction of a target cell's area that "
+        "must have finite source data (default 1.0: any missing source cell makes "
+        "the target cell NaN). Lower it to average only the finite part."
+    ),
+)
+def coarsen(
+    ds, variable, reference_grid, target_resolution, offset, method, min_fraction, **kwargs
+):
+    """Coarsen/align onto a target grid (linear interpolation or conservative area mean)."""
     import xarray as xr
     import xarray_regrid  # noqa: F401
 
@@ -103,6 +125,10 @@ def coarsen(ds, variable, reference_grid, target_resolution, offset, **kwargs):
         )
     if target_resolution is not None and target_resolution <= 0:
         raise UsageError("--target-resolution must be > 0")
+    if not 0.0 < min_fraction <= 1.0:
+        raise UsageError("--min-fraction must be in (0, 1]")
+    if method != "conservative" and min_fraction != 1.0:
+        raise UsageError("--min-fraction applies only to --method conservative")
 
     lat_dim, lon_dim = detect_spatial_dims(ds)
     if variable:
@@ -145,6 +171,13 @@ def coarsen(ds, variable, reference_grid, target_resolution, offset, **kwargs):
             lon_dim: (lon_dim, new_lon, lon_attrs),
         }
     )
+    if method == "conservative":
+        # Area-weighted (cos-lat) mean over each target cell. nan_threshold is the
+        # largest NaN area fraction kept, so 1 - min_fraction. Missing source
+        # cells are never filled; at the default they make the target cell NaN.
+        return ds.regrid.conservative(
+            target, latitude_coord=lat_dim, nan_threshold=1.0 - min_fraction
+        )
     return ds.regrid.linear(target)
 
 

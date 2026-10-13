@@ -61,6 +61,10 @@ the window (`precip count-below 1 10d >= 7`). Consecutive clauses have no
 `after Nd` shifts the clause N days later. `within Nd` is true if the clause
 is true on **any** of the next N days (incomplete look-ahead is NaN). `not`
 inverts that clause. `after` and `within` cannot appear on the same clause.
+Windows look forward too, so the last dates of the input cannot be decided
+(27 days for `icpac-onset`). The skill prints the last decidable date on
+stderr: after it, NaN means "not yet known", not "no event", and a
+`--detect first` map with no date there may simply be undecided.
 
 ### Aliases
 

@@ -2,6 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "pandas",
 # ]
 # ///
 """Forecast vs observation verification: hits, bias, or MAE."""
@@ -9,6 +10,7 @@
 import sys
 
 import numpy as np
+import pandas as pd
 import pint
 import pint_xarray
 import xarray as xr
@@ -103,11 +105,17 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
                 "with aggregate-temporal / convert-to-totals first."
             ) from None
     fc, truth = xr.align(fc, truth, join="inner")
-    if any(size == 0 for size in fc.sizes.values()):
+    empty = [d for d, size in fc.sizes.items() if size == 0]
+    if empty:
+        spans = []
+        for d in empty:
+            a, b = pd.Index(pair[0][d].values), pd.Index(pair[1][d].values)
+            spans.append(f"{d}: forecast {a[0]} … {a[-1]} vs obs {b[0]} … {b[-1]}")
         raise UsageError(
-            "no overlapping coordinates between --forecast and --obs; "
-            "coarsen --obs --reference-grid <forecast.zarr> and align time "
-            "(step-to-time / aggregate-temporal) first."
+            f"no overlapping {', '.join(empty)} labels between --forecast and --obs "
+            f"({'; '.join(spans)}). Labels must match exactly: for lat/lon, coarsen "
+            "--obs --reference-grid <forecast.zarr>; for time, run step-to-time on "
+            "the forecast and aggregate both with the same bins (--end-time)."
         )
     # Differences keep their units (a temperature bias is delta_degC).
     error = fc - truth
@@ -136,7 +144,7 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
     attrs = {
         k: v
         for k, v in forecast[fc_name].attrs.items()
-        if k not in ("standard_name", "GRIB_name", "GRIB_paramId")
+        if k not in ("standard_name", "GRIB_name", "GRIB_paramId", "short_name", "comment")
     }
     attrs["verify_metric"] = metric
     if metric == "hits":
@@ -170,8 +178,12 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
         u = f"{ureg.Unit(u_fc or u_obs):~}" if (u_fc or u_obs) else ""
         u_suffix = f" {u}" if u else ""
         value = None
+        # Gridded: cos-lat weighted mean. Stations (point-value output): plain
+        # mean over every station and time with both values.
+        how = "cos-lat mean" if lat is not None else f"mean of {int(finite.sum())} values"
         if lat is None:
-            summary = f"{metric} n/a  (no latitude dim)"
+            if bool(finite.any()):
+                value = float(field.where(finite).mean())
         else:
             weights = latitude_weights(field[lat]).broadcast_like(field)
             if bool(finite.any()):
@@ -179,13 +191,13 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
                 den = weights.where(finite).sum(skipna=True)
                 if den != 0 and np.isfinite(float(den)):
                     value = float(num / den)
-            if value is None:
-                summary = f"{metric} n/a  (no finite cells)"
-            elif metric == "bias":
-                sign = "+" if value >= 0 else ""
-                summary = f"bias {sign}{value:.2g}{u_suffix}  (cos-lat mean)"
-            else:
-                summary = f"MAE {value:.2g}{u_suffix}  (cos-lat mean)"
+        if value is None:
+            summary = f"{metric} n/a  (no finite cells)"
+        elif metric == "bias":
+            sign = "+" if value >= 0 else ""
+            summary = f"bias {sign}{value:.2g}{u_suffix}  ({how})"
+        else:
+            summary = f"MAE {value:.2g}{u_suffix}  ({how})"
     print(f"verify  {summary}")
 
     out = field.to_dataset()

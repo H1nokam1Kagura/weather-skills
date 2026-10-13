@@ -148,3 +148,17 @@ def test_as_pa_hpa_and_already_pa(mod):
     assert mod._as_pa(hpa).values == pytest.approx([100000.0, 85000.0])
     pa = xr.DataArray([100000.0, 85000.0], dims="vertical", attrs={"units": "Pa"})
     assert mod._as_pa(pa).values == pytest.approx([100000.0, 85000.0])
+
+
+def test_dynamical_names_auto_detected(tmp_path, zmt):
+    """dynamical-fetch 46-day pressure_level writes specific_humidity / wind_u."""
+    src = write_zarr(
+        make_qu().rename({"q": "specific_humidity", "u": "wind_u"}), tmp_path / "in.zarr"
+    )
+    out = tmp_path / "out.zarr"
+
+    run_skill(zmt, "-i", str(src), "-o", str(out))
+
+    ds = xr.open_zarr(out, consolidated=True)
+    expected = abs(np.trapezoid(np.full(3, 0.1), x=np.array([1000.0, 850.0, 500.0]) * 100.0)) / G
+    assert ds["viwve"].values == pytest.approx(expected)

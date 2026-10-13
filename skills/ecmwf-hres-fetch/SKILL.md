@@ -66,13 +66,15 @@ gymnastics are needed.
 
 ```
 uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --date YYYY-MM-DD --bbox N/W/S/E [--run 0|6|12|18] [-v VAR ...] --output <path.zarr>
-uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest
+uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest   # stdout YYYY-MM-DD; stderr: latest --run
 ```
 
 ### Arguments
 
 - `--date` — forecast init date. Absolute ISO date `YYYY-MM-DD`. Calendar
-  day: `resolve-time latest`. Latest published init: `--probe-latest`. HRES
+  day: `resolve-time latest`. Latest published init: `--probe-latest`
+  (prints `YYYY-MM-DD` for `--date`; stderr names the latest run hour, e.g.
+  `--date 2026-10-13 --run 12`). HRES
   runs four times daily (00/06/12/18 UTC); requesting a date/run with nothing
   published yet exits non-zero with a clear message — publication lags real
   time by roughly 6-9 hours, there is no fixed multi-day embargo like S2S.

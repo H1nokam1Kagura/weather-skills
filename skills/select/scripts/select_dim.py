@@ -10,6 +10,13 @@
 import re
 
 from weather_skills_core import Dataset, UsageError, weather_skill
+from weather_skills_core.units import (
+    AGGREGATION_COVERAGE_COORD,
+    AGGREGATION_PERIOD_ATTR,
+    format_duration,
+    interval_days,
+    ureg,
+)
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -24,6 +31,9 @@ _KEEP_SCALAR_COORDS = frozenset(
         "longitude",
         "lon",
         "country",
+        # The selected bin's coverage, so convert-to-totals can still refuse a
+        # partial interval after the time/step axis is gone.
+        AGGREGATION_COVERAGE_COORD,
     }
 )
 _INDEX_RE = re.compile(r"-?[0-9]+")
@@ -112,7 +122,18 @@ def select(ds, dim, index, value, **kwargs):
             for c in out.coords
             if out[c].ndim == 0 and c not in pre_scalar and c not in _KEEP_SCALAR_COORDS
         ]
-        return out.drop_vars(drop)
+        out = out.drop_vars(drop)
+        # A calendar aggregation_period ("1 month") is a different length per
+        # label. The label is dropped here, so stamp this bin's real length.
+        for name in out.data_vars:
+            period = out[name].attrs.get(AGGREGATION_PERIOD_ATTR)
+            calendar = isinstance(period, str) and re.search(r"month|year", period)
+            if calendar and ds[dim].dtype.kind in "MO":  # datetime64 or cftime labels
+                days = interval_days(ds[dim].isel({dim: [positions[0]]}), period)[0]
+                out[name].attrs[AGGREGATION_PERIOD_ATTR] = format_duration(
+                    ureg.Quantity(float(days), "day")
+                )
+        return out
     return ds.isel({dim: positions})
 
 

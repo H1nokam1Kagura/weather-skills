@@ -305,8 +305,8 @@ def _standardize(ds):
     metavar="IDENT",
     probe=True,
     help=(
-        "Print the latest available init as YYYY-MM-DDTHH on stdout and exit. "
-        "Does not download fields."
+        "Print the latest init date (YYYY-MM-DD, usable as --date) on stdout and "
+        "exit; stderr names the latest run hour. Does not download fields."
     ),
 )
 def fetch(bbox, date, run, variable, probe_latest, **kwargs):
@@ -319,7 +319,14 @@ def fetch(bbox, date, run, variable, probe_latest, **kwargs):
             latest = client.latest(stream="oper", type="fc", step=0, levtype="sfc", param="2t")
         except Exception as exc:  # noqa: BLE001
             raise DataError(f"could not determine the latest HRES init ({exc}).") from None
-        print(latest.strftime("%Y-%m-%dT%H"))
+        # stdout is a bare date so it passes straight to --date (whose 00 UTC run
+        # is published whenever any run that day is); stderr names the run hour.
+        print(
+            f"Latest run: {latest:%Y-%m-%d} {latest:%H} UTC "
+            f"(--date {latest:%Y-%m-%d} --run {latest.hour})",
+            file=sys.stderr,
+        )
+        print(latest.strftime("%Y-%m-%d"))
         return
 
     if bbox is None:

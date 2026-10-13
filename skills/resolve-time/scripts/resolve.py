@@ -22,7 +22,7 @@ _LAST_RE = re.compile(r"^last-(\d+)([dwmy])$")
 _NOW_RE = re.compile(r"^now-(\d+)([dwmy])$")
 _QUERY_HELP = (
     "queries: latest|now|today, yesterday, last-<N>d|w|m|y, now-<N>d|w|m|y, "
-    "this-week|month|year, last-week|month|year, YYYY-MM-DD, "
+    "this-week|dekad|month|year, last-week|dekad|month|year, YYYY-MM-DD, "
     "YYYY-MM-DD/YYYY-MM-DD, YYYY-MM, YYYY. "
     'Map English like "the last two weeks" to last-2w — do not pass free text.'
 )
@@ -81,6 +81,13 @@ def _parse(query: str, as_of: date) -> tuple[date, date, str]:
     if q == "last-week":
         start = as_of - timedelta(days=as_of.weekday() + 7)
         return start, start + timedelta(days=6), "range"
+    # Calendar dekads: days 1-10, 11-20, 21-end of month.
+    if q in ("this-dekad", "last-dekad"):
+        start = date(as_of.year, as_of.month, min((as_of.day - 1) // 10, 2) * 10 + 1)
+        if q == "this-dekad":
+            return start, as_of, "range"
+        end = start - timedelta(days=1)
+        return date(end.year, end.month, min((end.day - 1) // 10, 2) * 10 + 1), end, "range"
     if q == "this-month":
         return date(as_of.year, as_of.month, 1), as_of, "range"
     if q == "last-month":

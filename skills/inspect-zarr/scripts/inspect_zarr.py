@@ -2,6 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "pandas",
 # ]
 # ///
 """Print dimensions, coordinates, and a bounded data-variable summary of a Zarr."""
@@ -19,6 +20,14 @@ _SKILL_VERSION = "0.0.2"
 # exceeds this many values, even when --max-values is 0 (which still dumps
 # every *coordinate* value).
 _DATA_SAMPLE_CAP = 256
+# Variable attrs worth showing: what the values are and how they were made.
+_KEY_ATTRS = (
+    "long_name",
+    "standard_name",
+    "cell_methods",
+    "aggregation_period",
+    "data_interval",
+)
 
 
 def _plain(da):
@@ -42,6 +51,16 @@ def _fmt(v):
     if isinstance(v, np.datetime64):
         s = str(np.datetime_as_string(v, timezone="naive"))
         return s.split("T", 1)[0] if "T00:00:00" in s else s
+    if isinstance(v, np.timedelta64):
+        # Lead times as "7 days" / "0 days 03:00:00", not raw nanoseconds.
+        import pandas as pd
+
+        td = pd.Timedelta(v)
+        if pd.isna(td):
+            return "NaT"
+        if td % pd.Timedelta(days=1) == pd.Timedelta(0):
+            return f"{td.days} day" if td.days == 1 else f"{td.days} days"
+        return str(td)
     v = v.item() if isinstance(v, np.generic) else v
     return v if type(v) in (int, float, str, bool) else str(v)
 
@@ -111,6 +130,7 @@ def _data_var(name, da, max_values):
         "shape": [int(s) for s in da.shape],
         "dtype": str(arr.dtype),
         "units": _units(da),
+        "attrs": {k: str(da.attrs[k]) for k in _KEY_ATTRS if da.attrs.get(k) is not None},
         **stats,
         "sample": [_jsonable(v) for v in sample],
         "sample_truncated": truncated,
@@ -176,6 +196,8 @@ def inspect_zarr(ds, format, max_values, **kwargs):
         units = f" [{v['units']}]" if v["units"] else ""
         shape = " × ".join(map(str, v["shape"])) or "scalar"
         print(f"  {v['name']} ({', '.join(v['dims'])}) {v['dtype']} {shape}{units}")
+        for key, val in v["attrs"].items():
+            print(f"    {key}: {val}")
         if v["n_finite"] is not None:
             print(
                 f"    finite {v['n_finite']}/{v['n']}  "

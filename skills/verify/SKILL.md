@@ -1,6 +1,6 @@
 ---
 name: verify
-description: "Forecast vs observation verification on a shared grid — hits (event classification), bias (forecast − obs), or MAE (|forecast − obs|). Cell-by-cell only: coarsen --obs onto the forecast lat/lon grid first, and align time with step-to-time / aggregate-temporal. The output Zarr is the metric field to plot with plot-verify. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid."
+description: "Forecast vs observation verification on a shared grid or shared stations — hits (event classification), bias (forecast − obs), or MAE (|forecast − obs|). Cell-by-cell only: put fine obs on the coarse forecast grid first with coarsen --reference-grid <forecast.zarr> --method conservative (area mean; linear would point-sample), and align time with step-to-time / aggregate-temporal. For stations, run point-value on the grid first; then verify pairs station by station. The output Zarr is the metric field to plot with plot-verify. Do not coarsen inputs just to draw them; plot with two heatmap traces keeps each dataset on its own grid."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py *)
@@ -53,8 +53,12 @@ grid of obs, forecast, and verification maps, use `plot-verify`.
   skill assessment on a shared grid.
 
 **Match obs to the forecast, not the reverse.** Coarsen `--obs` onto the
-forecast's lat/lon spacing and offset before this skill. Do not `downscale`
-the forecast onto the obs grid. That shared grid is for the subtraction
+forecast's lat/lon spacing and offset before this skill, with
+`coarsen --reference-grid <forecast.zarr> --method conservative` when the
+obs are much finer (CHIRPS 0.05° vs a 1.5° forecast): that averages every
+obs cell inside the forecast cell, while the default linear method samples
+the few cells next to its centre. Do not `downscale` the forecast onto the
+obs grid. That shared grid is for the subtraction
 here, not for drawing the two fields: `plot` with two heatmap traces
 keeps each on its own grid. Run `step-to-time` on a classic forecast first. For a precip
 threshold in `mm`, run `aggregate-temporal` then `convert-to-totals` first.
@@ -79,12 +83,27 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py \
 - `--threshold` — event cutoff for `--metric hits` only (default `1`).
 - `--output`, `-o` — output Zarr.
 
+### Station data
+
+To verify a grid against stations, sample the grid at the stations with
+`point-value --points <stations.zarr>` first, then pass the sampled Zarr and
+the station Zarr as `--forecast` / `--obs` (same variable name and units;
+`rename` / `unit-convert` if not). Pairs inner-join on `station_id` and
+`time`, so only days both report are scored. The printed score is the plain
+mean over every station and time with both values (there is no latitude
+grid to weight). Do not pass a raw grid with a station Zarr: the two have no
+shared lat/lon labels.
+
 ### Output
 
 One verification data variable (`event_hit`, `bias`, or `mae`). Hits output
 carries CF `flag_values` `-1, 0, 1` and `flag_meanings`
-`disagree below hit`. A regional score is printed to stdout (hit rate for
-hits; cos-lat weighted mean for bias/mae).
+`disagree below hit`. Bias and MAE keep the input `units`. A regional score
+is printed to stdout (hit rate for hits; cos-lat weighted mean for bias/mae
+on a grid, plain mean on stations).
+
+If the inputs share no labels on some dim, the error names that dim and
+both ranges (e.g. weekly obs labelled one day off the forecast weeks).
 
 ## Examples
 
@@ -93,8 +112,7 @@ hits; cos-lat weighted mean for bias/mae).
 uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py \
     --forecast /tmp/s2s_weekly.zarr --obs /tmp/chirps_weekly.zarr \
     --metric hits --variable precip --threshold 1 -o /tmp/hits.zarr
-uv run skills/plot/scripts/plot.py -i /tmp/hits.zarr -o /tmp/hits.png \
-    --spec '{"title":"Weekly rain ≥ 1 mm"}'
+# then draw /tmp/hits.zarr with the plot skill (or plot-verify for a lead-week grid)
 
 # Bias error field
 uv run ${CLAUDE_SKILL_DIR}/scripts/verify.py \

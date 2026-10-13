@@ -1,6 +1,6 @@
 ---
 name: submit-feedback
-description: Build a prefilled GitHub new-issue link the user clicks to file feedback under their own GitHub account. You supply the title and body; the skill URL-encodes them and checks that the link fits GitHub's length limit. Use when a user wants to report a bug or suggestion about the skills.
+description: Build a prefilled GitHub new-issue link the user clicks to file feedback under their own GitHub account. You supply the title and body; the skill URL-encodes them and checks that the link fits GitHub's length limit. Use when a user wants to report a bug or suggestion about the skills; pass --repo for the repo that owns the skill so it reaches the right tracker.
 license: MIT
 compatibility: Requires Python 3.12 and uv. Builds a URL string only; reads no credentials, makes no network request, and writes no file.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/build_url.py *)
@@ -52,17 +52,24 @@ verifies it fits.
 ## Usage
 
 ```
-uv run ${CLAUDE_SKILL_DIR}/scripts/build_url.py --title <title> (--body <text> | --body-file <path>)
+uv run ${CLAUDE_SKILL_DIR}/scripts/build_url.py --title <title> (--body <text> | --body-file <path>) \
+    [--repo NAME]
 ```
 
-Issues are always filed to the `rhiza-research/forecasting-skills` repository;
-the target is built in and not configurable.
+Issues go to a `rhiza-research` repository: by default
+`forecasting-skills`. When the report is about a skill installed from another
+rhiza-research skill repo, pass `--repo` with the repo that owns that skill
+(its name is in the skill's install source or README) so the issue lands in
+the right tracker. Only allow-listed repos are accepted; `--help` lists them.
 
 ### Arguments
 - `--title` — the issue title. Required, must not be empty.
 - `--body` — the issue body as a markdown string.
 - `--body-file` — a path to read the body from instead. Exactly one of `--body`
   or `--body-file` is required.
+- `--repo` — the rhiza-research repository that owns the skill the report is
+  about. Default `forecasting-skills`. Any repo outside the allow-list is an
+  input error.
 
 ## Output and exit codes
 
@@ -72,8 +79,8 @@ the target is built in and not configurable.
   length, the limit, how far over it is, and roughly how many characters to cut
   from the body. Shorten the body and run again.
 - **Input error (exit 2):** an empty title, both or neither body source, a
-  missing / unreadable / non-UTF-8 `--body-file`, or a title so long it alone
-  exceeds the URL limit. The reason goes to stderr.
+  missing / unreadable / non-UTF-8 `--body-file`, a `--repo` outside the
+  allow-list, or a title so long it alone exceeds the URL limit. The reason goes to stderr.
 
 ## What to tell the user
 

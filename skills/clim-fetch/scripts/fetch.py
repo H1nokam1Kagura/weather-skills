@@ -108,7 +108,35 @@ def _open_remote(dataset: str, variable: str, window: int) -> tuple[xr.Dataset, 
     key = _object_key(dataset, variable, 1)
     daily = _open_zarr_or_none(key)
     if daily is None:
-        raise DataError(f"failed to open remote climatology gs://{_BUCKET}/{key}.")
+        # Most often the dataset/variable pair does not exist (e.g. era5 tmp2m).
+        # List what the bucket does carry so the caller can pick a real pair.
+        import json
+        import urllib.request
+
+        listing_url = (
+            f"https://storage.googleapis.com/storage/v1/b/{_BUCKET}/o"
+            "?prefix=climatologies/&delimiter=/"
+        )
+        try:
+            with urllib.request.urlopen(listing_url, timeout=30) as resp:
+                prefixes = json.load(resp).get("prefixes", [])
+        except Exception:  # noqa: BLE001 — listing is a hint only
+            prefixes = []
+        pairs = []
+        for prefix in prefixes:
+            stem = prefix.removeprefix("climatologies/").removesuffix("_1d.zarr/")
+            for ds_id in _DATASETS:
+                if stem.startswith(ds_id + "_") and prefix.endswith("_1d.zarr/"):
+                    pairs.append(f"--dataset {ds_id} --variable {stem[len(ds_id) + 1 :]}")
+        hint = (
+            "Available climatologies:\n  " + "\n  ".join(pairs)
+            if pairs
+            else "Could not list the bucket to show available pairs."
+        )
+        raise DataError(
+            f"no climatology for --dataset {dataset} --variable {variable} "
+            f"(gs://{_BUCKET}/{key} could not be opened).\n{hint}"
+        )
     return daily, False
 
 

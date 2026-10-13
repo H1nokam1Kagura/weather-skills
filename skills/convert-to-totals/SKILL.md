@@ -1,6 +1,6 @@
 ---
 name: convert-to-totals
-description: Convert precipitation rates to period totals (mm) by multiplying by the stamped aggregation_period — calendar months by their real length. Use as a terminal step before plotting, after aggregate-temporal. Converts precipitation only; other variables pass through unchanged. Refuses precip totals (would double-count) and overlapping intervals — run select on time/step first. Default --min-coverage 1.0; lowering it fills missing days with the bin mean and is rarely appropriate.
+description: Convert precipitation rates to period totals (mm) by multiplying by the stamped aggregation_period — calendar months by their real length. Use as a terminal step before plotting, after aggregate-temporal. Converts precipitation only; other variables pass through unchanged. Refuses precip totals (would double-count) and overlapping intervals — run select on time/step first. Default --min-coverage 1.0 drops incomplete intervals (listed on stderr); lowering it fills missing days with the bin mean and is rarely appropriate.
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/convert_to_totals.py *)
@@ -52,7 +52,11 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/convert_to_totals.py \
   missing days are filled with that mean — an estimate, not an observed total.
   When that happens the skill warns on stderr and keeps `aggregation_coverage`
   on the output so the estimated bins stay identifiable; say so when reporting
-  those totals. If no intervals remain, the skill errors.
+  those totals. Dropped intervals are listed on stderr with their coverage.
+  If no intervals remain, the skill errors and says how to recover: usually
+  the data end before the last period does, so fetch a window that ends on or
+  before the fetcher's `--probe-latest` day (`resolve-time <query> --as-of
+  <that day>`).
 - `--variable`, `-v` — limit to named precipitation variables (default: every
   precipitation-rate variable). Naming a variable that is not precipitation
   exits non-zero; with no `--variable` and no precipitation rate in the input,
@@ -82,14 +86,16 @@ refused — **run `select`** (`--dim time` or `--dim step`, by `--index` or
 `--value`) to keep a non-overlapping subset, then convert-to-totals. A
 **single** time/step point (one aggregated bin) is allowed — including after
 `select` has already collapsed that dim away (spatial-only map) for a fixed
-period. In that case conversion uses the stamped `aggregation_period` alone;
-`--min-coverage` and the overlap gate do not apply.
+period. In that case conversion uses the stamped `aggregation_period` alone, and
+`--min-coverage` checks the scalar `aggregation_coverage` that `select` keeps;
+the overlap gate does not apply.
 
 ### Output metadata
 
 - Amount `units` / precip `standard_name` when applicable.
 - Precip `long_name` → `Total precipitation` (replaces product/rate names; the
-  quantity is now a period total). Rate-like `GRIB_name` is rewritten the same way.
+  quantity is now a period total). Rate-like `GRIB_name` is rewritten the same
+  way, and the product's rate `comment` / `short_name` are dropped.
 - `cell_methods` → `{dim}: sum`.
 - `aggregation_coverage` removed when every converted bin is complete; kept
   when `--min-coverage` below 1.0 let incomplete (estimated) bins through.

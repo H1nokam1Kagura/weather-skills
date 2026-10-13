@@ -1,6 +1,6 @@
 ---
 name: arco-era5-fetch
-description: Fetch ARCO-ERA5 reanalysis (temperature, wind, precipitation, pressure, and more) for a date range and region from the public, credential-free Google Cloud Zarr store, and write a weather-skills standard dataset Zarr. Use when a task needs multi-variable gridded reanalysis ground truth for comparison, verification, or downstream clipping/aggregation/plotting.
+description: Fetch ARCO-ERA5 reanalysis (temperature, wind, precipitation, pressure, and more) for a date range and region from the public, credential-free Google Cloud Zarr store, and write a weather-skills standard dataset Zarr. Use when a task needs multi-variable gridded reanalysis ground truth for comparison, verification, or downstream clipping/aggregation/plotting. Data lags real time by ~6 days (ERA5T); run --probe-latest and end the window there — hours past the data end are dropped with a stderr warning.
 license: MIT
 compatibility: Requires Python 3.12 and uv. Reads the public ARCO-ERA5 analysis-ready Zarr from Google Cloud (gs://gcp-public-data-arco-era5) over anonymous access; no credentials required.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
@@ -42,8 +42,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest
 ```
 
 ### Arguments
-- `--start-time`, `--end-time` — inclusive date range. Each value is an absolute ISO date `YYYY-MM-DD`. Calendar windows: `resolve-time last-2w`. Latest published day: `--probe-latest`.
-- `--probe-latest` — print the latest available `YYYY-MM-DD` on stdout and exit (Zarr time coordinate). No `-o`.
+- `--start-time`, `--end-time` — inclusive date range. Each value is an absolute ISO date `YYYY-MM-DD`. Calendar windows: `resolve-time last-2w --as-of <probe-latest>`. Latest published day: `--probe-latest`. If the window runs past the data end, the all-NaN trailing hours are dropped (never filled) and stderr prints the effective end; a window with no data at all exits non-zero.
+- `--probe-latest` — print the last day with data (`YYYY-MM-DD`) on stdout and exit. No `-o`. The store pre-allocates its time axis through 2050, so this reads the store's ERA5T stop date and checks one `2m_temperature` point at 23 UTC (stepping back if empty). Typical lag is ~6 days. stderr notes that days after the final-ERA5 stop (~2-3 months back) are preliminary ERA5T.
 - `--bbox` — spatial subset `N/W/S/E` decimal degrees. Longitudes are normalized
   to the [-180, 180) convention, so negative west/east values select correctly on
   ERA5's native 0..360 grid. The slice follows each axis's own order, so any

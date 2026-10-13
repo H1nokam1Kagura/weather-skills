@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import xarray as xr
-from conftest import load_skill, make_forecast, make_gridded, run_skill, write_zarr
+from conftest import load_skill, make_forecast, make_gridded, make_point_obs, run_skill, write_zarr
 from weather_skills_core.provenance import load_history
 
 
@@ -214,3 +214,34 @@ def test_total_against_rate_is_refused(tmp_path, verify_fn):
     with pytest.raises(SystemExit) as exc:
         _verify(tmp_path, verify_fn, total, make_gridded(n_time=1, fill=2.0), "--metric", "mae")
     assert exc.value.code == 2
+
+
+def test_station_bias_scores_and_keeps_units(tmp_path, verify_fn, capsys):
+    """point_obs pairs (after point-value) get a plain-mean score and keep units."""
+    fc = write_zarr(make_point_obs(fill=3.0), tmp_path / "fc.zarr")
+    obs = write_zarr(make_point_obs(fill=1.0), tmp_path / "obs.zarr")
+    out = tmp_path / "bias.zarr"
+
+    run_skill(
+        verify_fn, "--forecast", str(fc), "--obs", str(obs), "--metric", "bias", "-o", str(out)
+    )
+
+    assert "bias +2 mm / d  (mean of 6 values)" in capsys.readouterr().out
+    bias = xr.open_zarr(out)["bias"]
+    assert bias.attrs["units"] == "mm day-1"
+    assert float(bias.mean()) == pytest.approx(2.0)
+
+
+def test_no_overlap_error_names_the_dim(tmp_path, verify_fn, capsys):
+    fc = write_zarr(make_gridded(n_time=2, start="2026-01-02"), tmp_path / "fc.zarr")
+    obs = write_zarr(make_gridded(n_time=1, start="2026-01-01"), tmp_path / "obs.zarr")
+
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            verify_fn, "--forecast", str(fc), "--obs", str(obs), "--metric", "bias",
+            "-o", str(tmp_path / "out.zarr"),
+        )  # fmt: skip
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "no overlapping time labels" in err
+    assert "2026-01-02" in err and "2026-01-01" in err

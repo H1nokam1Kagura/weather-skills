@@ -190,3 +190,63 @@ def test_coarsen_requires_mode(tmp_path, coarsen):
     with pytest.raises(SystemExit) as exc:
         run_skill(coarsen, "-i", str(src), "-o", str(tmp_path / "out.zarr"))
     assert exc.value.code == 2
+
+
+def _fine_grid():
+    """0.25° grid over [0, 2) x [10, 12): two 1° cells per axis, distinct box means."""
+    import numpy as np
+
+    lats = tuple(np.arange(0.125, 2.0, 0.25))
+    lons = tuple(np.arange(10.125, 12.0, 0.25))
+    ds = make_gridded(n_time=1, lats=lats, lons=lons)
+    rng = np.random.default_rng(0)
+    ds["precip"].values = rng.gamma(1.0, 5.0, ds["precip"].shape)
+    return ds
+
+
+def _run(coarsen, src, out, *extra):
+    run_skill(
+        coarsen,
+        "-i",
+        str(src),
+        "-o",
+        str(out),
+        "--target-resolution",
+        "1.0",
+        "--offset",
+        "0.5",
+        *extra,
+    )
+    return xr.open_zarr(out)["precip"]
+
+
+def test_conservative_is_box_mean_not_point_sample(tmp_path, coarsen):
+    ds = _fine_grid()
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    got = _run(coarsen, src, tmp_path / "out.zarr", "--method", "conservative")
+    box = ds["precip"].sel(latitude=slice(0, 1), longitude=slice(10, 11)).mean()
+    cell = got.sel(latitude=0.5, longitude=10.5).squeeze()
+    assert float(cell) == pytest.approx(float(box), rel=1e-3)
+    assert units_equal(got.attrs["units"], "mm day-1")
+
+
+def test_conservative_missing_cell_is_nan_unless_min_fraction(tmp_path, coarsen):
+    ds = _fine_grid()
+    ds["precip"][0, 0, 0] = float("nan")  # one of 16 source cells in the (0.5, 10.5) box
+    src = write_zarr(ds, tmp_path / "in.zarr")
+
+    strict = _run(coarsen, src, tmp_path / "a.zarr", "--method", "conservative")
+    assert bool(strict.sel(latitude=0.5, longitude=10.5).isnull().all())
+    assert bool(strict.sel(latitude=1.5, longitude=11.5).notnull().all())
+
+    partial = _run(
+        coarsen, src, tmp_path / "b.zarr", "--method", "conservative", "--min-fraction", "0.9"
+    )
+    assert bool(partial.sel(latitude=0.5, longitude=10.5).notnull().all())
+
+
+def test_min_fraction_requires_conservative(tmp_path, coarsen):
+    src = write_zarr(_fine_grid(), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run(coarsen, src, tmp_path / "out.zarr", "--min-fraction", "0.5")
+    assert exc.value.code == 2

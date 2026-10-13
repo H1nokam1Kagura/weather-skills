@@ -437,3 +437,24 @@ def test_detect_first_is_unknown_after_a_gap(tmp_path, indicator_fn):
         "first",
     )
     assert np.isnat(_cell(out, "indicator_time").values)
+
+
+def test_lookahead_tail_is_reported(tmp_path, indicator_fn, capsys):
+    """icpac-onset looks 27 days ahead: say which dates cannot be decided yet."""
+    src = write_zarr(_daily(40, fill=10.0), tmp_path / "in.zarr")
+    run_skill(
+        indicator_fn, "-i", str(src), "-o", str(tmp_path / "out.zarr"),
+        "--rule", "icpac-onset", "--detect", "first",
+    )  # fmt: skip
+    err = capsys.readouterr().err
+    assert "looks 27 day(s) past each date" in err
+    assert "after 2026-01-13" in err  # data end 2026-02-09 minus 27 days
+
+
+def test_backward_free_rule_has_no_tail_note(tmp_path, indicator_fn, capsys):
+    src = write_zarr(_daily(10, fill=10.0), tmp_path / "in.zarr")
+    run_skill(
+        indicator_fn, "-i", str(src), "-o", str(tmp_path / "out.zarr"),
+        "--rule", "precip sum 1d >= 5",
+    )  # fmt: skip
+    assert "looks" not in capsys.readouterr().err

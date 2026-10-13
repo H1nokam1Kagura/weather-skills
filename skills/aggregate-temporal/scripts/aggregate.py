@@ -513,8 +513,9 @@ def _rolling_aggregation_period(ds, dim, window, interval):
 @weather_skill.argument(
     "--period",
     help=(
-        "Calendar/step window: daily, weekly, dekadal, monthly, or a pint "
-        "duration in whole days (e.g. '21 day'). Mutex with --window."
+        "Calendar/step window: daily, weekly (7 days), dekadal (a fixed 10 days, "
+        "not calendar dekads 1-10/11-20/21-end), monthly (calendar months), or "
+        "a pint duration in whole days (e.g. '21 day'). Mutex with --window."
     ),
 )
 @weather_skill.argument(
@@ -669,6 +670,12 @@ def aggregate(
                 file=sys.stderr,
             )
     elif end_time is not None:
+        if spec["key"] == "monthly":
+            raise UsageError(
+                "--end-time anchors fixed-width bins; monthly bins are already "
+                "calendar months (1st to 1st). Drop --end-time, or use a whole-day "
+                "--period such as '30 day'."
+            )
         out = _aggregate_time_anchored(
             ds,
             dim,
@@ -679,6 +686,34 @@ def aggregate(
         )
     else:
         out = _aggregate_time_resample(ds, dim, spec, method)
+
+    # Incomplete bins are kept with their coverage; convert-to-totals drops them
+    # at its default --min-coverage 1.0. Say so now, not three steps later.
+    import numpy as np
+    import pandas as pd
+
+    cov = np.asarray(out[AGGREGATION_COVERAGE_COORD].values, dtype=float)
+    low = cov < 1.0 - 1e-12
+    if low.any():
+        labels = pd.Index(np.asarray(out[dim].values)[low])
+        listed = ", ".join(
+            f"{lab} ({c:.3g})" for lab, c in zip(labels[:10], cov[low][:10], strict=True)
+        )
+        listed += ", ..." if low.sum() > 10 else ""
+        print(
+            f"Warning: {int(low.sum())} of {cov.size} {spec['key']} bin(s) are "
+            f"incomplete (aggregation_coverage < 1): {listed}. convert-to-totals "
+            "drops them at its default --min-coverage 1.0.",
+            file=sys.stderr,
+        )
+        # Interior partial bins of a back-to-back resample mean the input has gaps.
+        if dim != "step" and end_time is None and low[1:-1].any():
+            print(
+                f"Bins run back to back from {pd.Index(out[dim].values)[0]}, so a "
+                "series with gaps (e.g. one window per year after concat) straddles "
+                "bins. Aggregate each segment before concat.",
+                file=sys.stderr,
+            )
 
     return _stamp_attrs(out, dim, spec["agg"], method, interval, data_interval=spec["agg"])
 

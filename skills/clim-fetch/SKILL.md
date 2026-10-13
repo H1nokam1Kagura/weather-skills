@@ -1,6 +1,6 @@
 ---
 name: clim-fetch
-description: Fetch a precomputed daily climatology (avg + std) for a `--dataset` (imerg_final, era5, chirps, ecmwf_ifs, oisst, ...) from Sheerwater's public GCS mirror, select one `--prediction-timedelta` lead, optionally roll it up to a coarser `--window` in days, and expand it onto a requested `--start-time`/`--end-time` calendar window, so timestamps line up with the rest of a pipeline's data. Precipitation sources default to `--variable precip`; OISST sea-surface temperature uses `--dataset oisst --variable sst`. Optional `--bbox N/W/S/E` (compose with resolve-region) subsets before download. Use when a task needs a climatological baseline for anomalies, verification, or comparison — not live observations (use imerg-fetch, dynamical-fetch, arco-era5-fetch, oisst-fetch, etc. for those).
+description: Fetch a precomputed daily climatology (avg + std) for a `--dataset` (imerg_final, era5, chirps, ecmwf_ifs, oisst, ...) from Sheerwater's public GCS mirror, select one `--prediction-timedelta` lead, optionally roll it up to a coarser `--window` in days, and expand it onto a requested `--start-time`/`--end-time` calendar window, so timestamps line up with the rest of a pipeline's data. Precipitation sources default to `--variable precip`; OISST sea-surface temperature uses `--dataset oisst --variable sst`. Optional `--bbox N/W/S/E` (compose with resolve-region) subsets before download. Output vars are `<var>_avg` / `<var>_std` (e.g. `precip_avg`), so rename `precip_avg` to `precip` before `difference` against obs. No ERA5 temperature climatology (era5 is precip only); an unknown pair exits listing the available ones. Use when a task needs a climatological baseline for anomalies, verification, or comparison — not live observations (use dynamical-fetch, chirps-fetch, oisst-fetch, etc.).
 license: MIT
 compatibility: Requires Python 3.12 and uv. Reads a static climatology Zarr from the public GCS bucket sheerwater-public-datalake over anonymous HTTPS; no credentials required.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
@@ -64,7 +64,11 @@ variable — pass `--variable sst`.
 | `gefs` | GEFS reforecast daily climatology — `precip`, `tmp2m` (2m temperature) |
 
 More datasets are added by mirroring a new Zarr under the same bucket
-convention — no CLI change needed once added.
+convention — no CLI change needed once added. A `--dataset`/`--variable`
+pair that is not mirrored (e.g. `--dataset era5 --variable tmp2m`) exits
+non-zero and lists every available pair. There is no ERA5 or observed
+temperature climatology; the only 2 m temperature one is the model
+reforecast `--dataset gefs --variable tmp2m`.
 
 ## Usage
 
@@ -125,7 +129,7 @@ separate aggregation step itself which is prone to errors:
 
 ### Output
 
-Zarr with dims `(time, latitude, longitude)` where `time` is exactly the requested
+Zarr with dims `latitude`, `longitude`, `time` (in that order) where `time` is exactly the requested
 calendar window (real dates, not the source's 1904 placeholder). Data
 variables are named `<variable>_avg` (climatological mean) and
 `<variable>_std` (climatological standard deviation), where `<variable>`
@@ -154,6 +158,24 @@ Two dates far apart within the window but sharing a day-of-year (e.g. two
 different years' June 15) get **identical** climatology values by design —
 that is the point of the day-of-year gather.
 
+### Anomalies against observations: match the variable name
+
+`difference` subtracts variables **by name**, and only names present in
+both inputs. An observation fetcher writes `precip` (or `sst`) while this
+skill writes `precip_avg` / `precip_std`, so the pair shares no variable.
+Rename the climatology mean first, then difference:
+
+```bash
+uv run skills/rename/scripts/rename.py -i clim.zarr -o clim_precip.zarr \
+    --variable precip_avg --to-name precip
+uv run skills/difference/scripts/difference.py -i obs.zarr -i clim_precip.zarr \
+    -v precip -o anom.zarr
+```
+
+Both inputs must be on the same footing first (both rates, or both totals
+over the same window — see the weekly recipe below). For a standardized
+anomaly, `standardize-anomaly --climatology` reads `<var>_avg` / `<var>_std`
+directly; no rename needed.
 ### Provenance
 
 The output carries a `weather_skills_history` provenance chain; inspect it

@@ -23,7 +23,7 @@ _SKILL_VERSION = "0.0.1"
 G = 9.80665
 
 HUMIDITY_NAMES = ("q", "specific_humidity", "hus", "humidity")
-WIND_NAMES = ("u", "u_component_of_wind", "ua", "uwnd", "eastward_wind")
+WIND_NAMES = ("u", "wind_u", "u_component_of_wind", "ua", "uwnd", "eastward_wind")
 
 _HPA_UNITS = frozenset(
     {"hpa", "millibar", "millibars", "mb", "mbar", "hectopascal", "hectopascals"}
@@ -130,7 +130,7 @@ def _column_ivt(qu: xr.DataArray, vdim: str) -> xr.DataArray:
 )
 @weather_skill.argument(
     "--wind-variable",
-    help="Zonal-wind variable name. Default: u / ua / uwnd / eastward_wind.",
+    help="Zonal-wind variable name. Default: u / wind_u / ua / uwnd / eastward_wind.",
 )
 @weather_skill.argument(
     "--integrate",

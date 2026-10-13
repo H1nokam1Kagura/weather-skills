@@ -1,6 +1,6 @@
 ---
 name: tahmo-fetch
-description: Fetch TAHMO station observations for specific station IDs (or all TA stations in a bbox) and write a point_obs weather-skills standard dataset Zarr. Use --list-stations --bbox N/W/S/E first to see deployment stations in a region, then --station TA00025 (repeatable) to fetch chosen ids. Use when a task needs in-situ African station rainfall/temperature/humidity/pressure, e.g. to compare against gridded satellite or forecast data.
+description: Fetch TAHMO station observations for specific station IDs (or all TA stations in a bbox) and write a point_obs weather-skills standard dataset Zarr. Every call, including --list-stations and --probe-latest, needs TAHMO_API_USERNAME and TAHMO_API_PASSWORD in the environment. Use --list-stations --bbox N/W/S/E first to see deployment stations in a region, then --station TA00025 (repeatable) to fetch chosen ids. Use when a task needs in-situ African station rainfall/temperature/humidity/pressure, e.g. to compare against gridded satellite or forecast data.
 license: MIT
 compatibility: Requires Python 3.12 and uv. Installs the TAHMO Python SDK directly from GitHub (git+https://github.com/rhiza-research/tahmo-api) via uv script metadata. Requires TAHMO_API_USERNAME and TAHMO_API_PASSWORD in the environment.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
@@ -39,6 +39,12 @@ Do not pass a country name. Resolve a place to `--bbox N/W/S/E` with
 `resolve-region`, list stations in that box, then fetch the ids you want — or
 fetch every TA station in the box.
 
+## Credentials
+
+Every call — fetch, `--list-stations`, and `--probe-latest` — needs
+`TAHMO_API_USERNAME` and `TAHMO_API_PASSWORD` in the environment. Without
+them the skill exits non-zero before contacting TAHMO.
+
 ## When to use
 
 - A task needs recent daily in-situ observations for specific TAHMO stations
@@ -56,7 +62,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest
 ```
 
 ### Arguments
-- `--list-stations` — query the TAHMO deployment API and print TA stations in
+- `--list-stations` — (needs credentials) query the TAHMO deployment API and print TA stations in
   `--bbox` as TSV on stdout (`station_id`, `name`, `latitude`, `longitude`,
   `country` as ISO 3166-1 alpha-2). No `-o`. Use this so the agent can choose
   which stations to fetch. An empty box prints the header and `0 stations`.

@@ -546,3 +546,41 @@ def test_window_refused_across_missing_rows(tmp_path, aggregate, stamp_interval)
             "7",
         )
     assert exc.value.code == 2
+
+
+def test_incomplete_bins_warn_on_stderr(tmp_path, aggregate, capsys):
+    src = write_zarr(make_gridded(n_time=9, fill=2.0), tmp_path / "in.zarr")
+    run_skill(aggregate, "-i", str(src), "-o", str(tmp_path / "out.zarr"), "--period", "weekly")
+    err = capsys.readouterr().err
+    assert "1 of 2 weekly bin(s) are incomplete" in err
+    assert "2026-01-08" in err
+
+
+def test_gappy_series_warns_bins_straddle_segments(tmp_path, aggregate, capsys):
+    """Two 7-day windows a year apart (as after concat): interior bins straddle."""
+    import xarray as xr
+
+    parts = [make_gridded(n_time=7, start=s) for s in ("2024-10-20", "2025-10-20")]
+    ds = xr.concat(parts, dim="time")
+    ds["precip"].attrs["data_interval"] = "1 day"  # as fetchers stamp daily data
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    run_skill(aggregate, "-i", str(src), "-o", str(tmp_path / "out.zarr"), "--period", "weekly")
+    err = capsys.readouterr().err
+    assert "Aggregate each segment before concat" in err
+
+
+def test_monthly_refuses_end_time(tmp_path, aggregate):
+    src = write_zarr(make_gridded(n_time=40), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            aggregate,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "out.zarr"),
+            "--period",
+            "monthly",
+            "--end-time",
+            "2026-02-01",
+        )
+    assert exc.value.code == 2
