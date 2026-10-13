@@ -38,7 +38,11 @@ GetExitCodeProcess != STILL_ACTIVE, immune to a real exit code of 259) is record
 reports exited (Windows fails TerminateProcess on an exited process with
 ERROR_ACCESS_DENIED) exited on its own between that check and the call, and is recorded
 as ``exited_before_signal``. Neither is in ``signalled_pids``/``signalled``; both stay
-in ``signal_attempts`` and ``exited_before_signal``. Residual race, not closable from
+in ``signal_attempts`` and ``exited_before_signal``. A TerminateProcess refused on a
+process that is still running is an attempt, not a signal: it is recorded in
+``signal_attempts`` and ``signal_denied`` (once per PID; dropped if a later round signals
+it) and adds an exhaustive reason. ``signalled_pids`` lists each PID once across stop
+rounds, in first-signal order. Residual race, not closable from
 user mode: a process already inside ExitProcess when TerminateProcess succeeds is
 listed as signalled although it was ending, so its own end time may precede the
 signal by a few microseconds. An empty signal list is never exhaustive evidence (D4).
@@ -397,10 +401,18 @@ def launch_in_census_job(argv, backend=None, on_suspended=None, **popen_kwargs):
             backend.assign_suspended_and_resume(
                 job, proc.pid, before_resume=lambda: on_suspended(proc)
             )
-    except BaseException:
-        proc.kill()
-        proc.wait()
-        backend.close_job(job)
+    except BaseException as exc:
+        try:  # close_job runs even if kill/wait raise; the original failure propagates
+            for step in (proc.kill, lambda: proc.wait(timeout=30)):
+                try:
+                    step()
+                except BaseException as cleanup_exc:
+                    try:
+                        exc.add_note(f"launch cleanup also failed: {type(cleanup_exc).__name__}")
+                    except BaseException:
+                        pass
+        finally:
+            backend.close_job(job)
         raise
     return proc, CensusJob(backend, job, assigned_before_resume=True)
 
@@ -654,8 +666,8 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
     journal.halt()
     reasons = []
     attempts = [] if attempts is None else attempts
-    signalled = []
-    signalled_entries = []
+    signalled = {}  # pid -> first successful entry: each PID listed once across rounds
+    denied = {}  # pid -> first denied entry, dropped if a later round signals it
     exited_before = []
     unproven_found = []
     rounds = 0
@@ -709,9 +721,16 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
                     entry["result"] = "exited_before_signal"
                     exited_before.append(entry)
                     continue
-                entry["result"] = "ok" if ok else "denied"
-                signalled.append(member.pid)
-                signalled_entries.append(entry)
+                if ok:
+                    entry["result"] = "ok"
+                    signalled.setdefault(member.pid, entry)
+                    denied.pop(member.pid, None)
+                else:
+                    # A refused TerminateProcess on a live process is an attempt, not a
+                    # signal (W2 review signal_stop.py:713): never in signalled_pids.
+                    entry["result"] = "denied"
+                    if member.pid not in signalled:
+                        denied.setdefault(member.pid, entry)
             for member in live:
                 if member.handle is not None:
                     backend.wait(member.handle, settle_ms)
@@ -733,6 +752,10 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
         _finish_job(journal, job, reasons, job_info)
     for pid in unproven_found:
         reasons.append(f"owned process {pid} has unprovable ancestry (parent exited unobserved)")
+    if denied:
+        reasons.append(
+            "TerminateProcess denied for live process(es): " + ",".join(str(pid) for pid in denied)
+        )
     if not signalled:
         reasons.append("empty signal list: never exhaustive evidence (D4)")
     if journal.rejections:
@@ -746,10 +769,14 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
         "schema": SCHEMA,
         "controller_pid": journal.controller_pid,
         "root_pid": journal.root.pid,
-        "signalled_pids": signalled,
+        "signalled_pids": list(signalled),
         "signalled": [
             {k: e[k] for k in ("pid", "parent_pid", "created_100ns", "result")}
-            for e in signalled_entries
+            for e in signalled.values()
+        ],
+        "signal_denied": [
+            {k: e[k] for k in ("pid", "parent_pid", "created_100ns", "result", "winerror")}
+            for e in denied.values()
         ],
         "exited_before_signal": [
             {k: e[k] for k in ("pid", "parent_pid", "created_100ns", "result")}
