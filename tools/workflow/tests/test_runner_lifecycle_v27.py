@@ -745,6 +745,53 @@ def test_process_events_join_the_controller_sequence(tmp_path, monkeypatch):
     assert validations[0]["validation"]["verdict"] == "PASS"
 
 
+class SilentProcesses(EventProcesses):
+    """Satisfies supports_process_receipts but never calls on_event."""
+
+    def run(self, argv, cwd, env, tool=None):
+        self.tools.append(tool)
+        return FakeProcesses.run(self, argv, cwd, env)
+
+
+class NoExitProcesses(EventProcesses):
+    """Emits launch_check and process_launch, then drops process_exit."""
+
+    def run(self, argv, cwd, env, tool=None):
+        real, kept = self.on_event, []
+        self.on_event = lambda kind, details: (
+            kept.append(kind) or (real(kind, details) if kind != "process_exit" else None)
+        )
+        try:
+            return super().run(argv, cwd, env, tool=tool)
+        finally:
+            self.on_event = real
+
+
+@pytest.mark.parametrize("manager", [SilentProcesses, NoExitProcesses])
+def test_process_record_without_receipts_is_refused(tmp_path, monkeypatch, manager):
+    """W2 review runner.py:89: the interface check alone let a silent manager release."""
+    base = controller(tmp_path, monkeypatch)
+    (tmp_path / "ev").mkdir()
+    c = runner.Controller(
+        base.repo,
+        base.request,
+        base.source,
+        tmp_path / "ev",
+        manager(),
+        ReceiptRoles(),
+        dispatch_evidence_mode=True,
+    )
+    monkeypatch.setattr(c, "inspect_source", lambda: {"test": "metadata fixture"})
+    with pytest.raises(Refused) as caught:
+        c.run()
+    assert caught.value.gate == "gate_evidence"
+    result = result_json(c)
+    assert result["terminal"]["outcome"] != "RELEASED"
+    assert result["terminal"]["failed_gate"] == "gate_evidence"
+    assert result["terminal"]["reason"] == "process_receipts_missing"
+    assert dispatch_events(c.root)[-1]["terminal"]["failed_gate"] == "gate_evidence"
+
+
 def test_signal_stop_event_is_recorded(tmp_path, monkeypatch):
     processes = EventProcesses()
     (tmp_path / "run2").mkdir()
