@@ -49,3 +49,9 @@ laptop's Docker (memory-starved).
   with --network none; same untraced). In-container projection import failed (no PYTHONPATH).
   One infra fix: Natural Earth shapes fetched at image build into read-only CARTOPY_DATA_DIR;
   PYTHONPATH=/opt/ctl for the projection step.
+- 2026-10-13 GHA run 38459814556 (80d1862): 31/31 regression checks PASS; projection now
+  imports (UNAVAILABLE: adapter_support.evidence_projection not on this branch, as expected).
+  Canary still INCOMPLETE at plot-onset: cfeature.BORDERS auto-scaled to 10m
+  (trace: ne_10m_admin_0_boundary_lines_land.shp), only 110m was seeded. Fix committed LOCALLY
+  and NOT pushed (one-infra-fix budget spent; no loop): seed 10m/50m/110m boundary lines.
+  Pushing this commit re-runs the workflow.
