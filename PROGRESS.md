@@ -4,7 +4,7 @@ Branch: feat/simkit-w3-review-shadow-snowyowl. WIP file requested by the coordin
 
 ## Done so far
 - Read brief, P0 entries (CAP-REREVIEW, CAP-SHADOW, CAP-DENY-WRITE, CAP-METRIC, CAP-ROLE-INPUT-PATCH, CAP-FIXTURE-OP), decisions CP-E09/E14/E17/E18, frozen E09/E05-P1/E15-P1 cases, EVIDENCE_CONTRACT structures.
-- No code changes yet.
+- Code written: shadow.py, write_boundary.py, policy.py, agents.py prompt, catalog build_id, runner.py hunks, e2e_injections ops.
 
 ## Design decided
 - shadow.py: role `shadow_policy`, invoked after GOAL_CHECKED/PLAN_VALIDATED/ONSET_CHECKED/DATA_VERIFIED in policy_mode "shadow";
@@ -25,7 +25,7 @@ Branch: feat/simkit-w3-review-shadow-snowyowl. WIP file requested by the coordin
 4. tests/test_rereview_shadow_v27.py; run full suites + ruff.
 
 ## Test status
-Not run yet (no changes).
+Existing tools/workflow/tests all pass after code changes; new test file not yet written.
 
 ## Open questions
 - Re-entering _run after return-to-review needs a one-line change in run(); reported as outside strict region.

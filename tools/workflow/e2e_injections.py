@@ -6,12 +6,15 @@ The caller owns oracle evaluation and live/fixture role selection.
 
 import copy
 import json
+import os
 import re
+import tomllib
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
-from .catalog import tree_hash
+from . import write_boundary
+from .catalog import RUNTIME_MANIFEST, tree_hash
 from .contracts import digest
 
 
@@ -44,6 +47,26 @@ KNOWN_HOOKS = frozenset(
     }
 )
 APPROVAL_CONDITIONS = ("schema_valid", "binding_valid", "controller_accepted", "approval_committed")
+FIXTURE_OPERATIONS = frozenset(
+    {
+        "FX-REPORT-RESERIALIZE",
+        "FX-SRC-META-ATTR",
+        "FX-SRC-CELL-INCREMENT",
+        "FX-ONSET-CELL-SHIFT",
+        "FX-DEF-PARAM-EDIT",
+        "FX-DEF-TOUCH",
+        "FX-STDERR-APPEND",
+        "FX-RUNTIME-MANIFEST-BUMP",
+    }
+)
+DEFINITIONS_FILE = "skills/onset-date/references/onset_definitions.toml"
+# Reviewed adapter mapping: frozen FX-DEF-PARAM-EDIT parameter name -> registry field
+# (onset_definitions.toml [definitions.<ref>] trigger.total_mm is the trigger accumulation).
+DEFINITION_PARAMETERS = {"trigger_accumulation_mm": ("trigger", "total_mm")}
+# Reviewed adapter mapping for CAP-ROLE-INPUT-PATCH (E08-P2): the frozen verifier evidence path
+# /evidence/verify-run(<artifact>) is the controller's verifier payload /gates/<artifact>
+# (runner.py DATA_VERIFIED: gates keyed by artifact name hold the verify-run gate reports).
+VERIFIER_EVIDENCE_PATH = re.compile(r"^/evidence/verify-run\(([A-Za-z0-9_-]+)\)(/.*)?$")
 
 
 def validate_dependencies(schedule):
@@ -72,8 +95,8 @@ def unsupported_requirements(case):
     for i, spec in enumerate(case.get("injection_schedule", [])):
         op, payload, hook = spec["operation"], spec.get("payload", {}), spec["hook"]
         reason = None
-        if op == "inject_metric":
-            reason = "resource/budget metric adapter unavailable"
+        if op == "inject_metric" and not metered(payload):
+            reason = "resource metric adapter unavailable"
         elif op == "request_transition" and (
             payload.get("action") != "resume" or "budget_override" in payload
         ):
@@ -84,12 +107,7 @@ def unsupported_requirements(case):
             hook != "after_transition" or payload.get("pending_operation") != "none"
         ):
             reason = "midprocess crash adapter unavailable"
-        elif op == "mutate_fixture" and payload["fixture_operation"] not in {
-            "FX-REPORT-RESERIALIZE",
-            "FX-SRC-META-ATTR",
-            "FX-SRC-CELL-INCREMENT",
-            "FX-ONSET-CELL-SHIFT",
-        }:
+        elif op == "mutate_fixture" and payload["fixture_operation"] not in FIXTURE_OPERATIONS:
             reason = "fixture operation adapter unavailable: " + payload["fixture_operation"]
         elif op not in {
             "json_patch",
@@ -98,11 +116,20 @@ def unsupported_requirements(case):
             "request_transition",
             "deny_write",
             "mutate_fixture",
+            "inject_metric",
         }:
             reason = "unknown operation: " + op
         if reason:
             findings.append({"index": i, "reason": reason})
     return findings
+
+
+def metered(payload):
+    """Every reading in an inject_metric payload names a controller budget meter."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("also", {}), dict):
+        return False
+    names = {payload.get("metric"), *payload.get("also", {})}
+    return names <= set(write_boundary.METERED) and payload.get("timing") in (None, "immediate")
 
 
 def json_patch(value, operations):
@@ -502,6 +529,8 @@ class InjectionHooks:
                     raise UnsupportedInjection("tool stdout is not a gate JSON document") from exc
             else:
                 raise UnsupportedInjection("no mutable payload at selected hook")
+            if operation == "json_patch" and point == "before_role" and event["role"] == "verifier":
+                payload = self._map_verifier_paths(payload, record)
             if operation == "json_patch":
                 if (
                     point == "after_role"
@@ -544,14 +573,86 @@ class InjectionHooks:
                 return False
             raise UnsupportedInjection("role transition request channel is not implemented")
         if operation == "deny_write":
-            args = payload["args"]
-            if point != "before_tool" or args.get("denial_source") != "injected_fault":
-                raise UnsupportedInjection("unsupported denial boundary")
-            raise PermissionError(args.get("errno", 13), args["message"])
+            return self._deny_write(payload, point, event, controller, record)
+        if operation == "inject_metric":
+            return self._inject_metric(payload, controller, record)
         if operation == "mutate_fixture":
             self._fixture(payload, event, controller, record)
             return False
         raise UnsupportedInjection(f"operation not implemented: {operation}")
+
+    @staticmethod
+    def _map_verifier_paths(payload, record):
+        if not isinstance(payload, list):
+            return payload
+        mapped, changed = [], False
+        for op in payload:
+            match = isinstance(op, dict) and isinstance(op.get("path"), str)
+            match = match and VERIFIER_EVIDENCE_PATH.match(op["path"])
+            if match:
+                op = {**op, "path": "/gates/" + match.group(1) + (match.group(2) or "")}
+                changed = True
+            mapped.append(op)
+        if changed:
+            record["adapter_mapping"] = "/evidence/verify-run(<artifact>) -> /gates/<artifact>"
+        return mapped
+
+    @staticmethod
+    def _deny_write(payload, point, event, controller, record):
+        """FX-INJECT-PERMISSION-ERROR: arm the controller write boundary for one artifact.
+        The fault fires when the controller commits that artifact, never at launch."""
+        if not isinstance(payload, dict) or payload.get("fixture_operation") not in (
+            None,
+            "FX-INJECT-PERMISSION-ERROR",
+        ):
+            raise UnsupportedInjection("unsupported denial payload")
+        args = payload.get("args") or {}
+        artifact = args.get("artifact")
+        if (
+            point not in {"before_tool", "after_transition"}
+            or args.get("denial_source") != "injected_fault"
+            or args.get("errno", 13) != 13
+            or not isinstance(args.get("message"), str)
+            or artifact not in getattr(controller, "paths", {})
+            or artifact == "source"
+            or not hasattr(controller, "context")
+        ):
+            raise UnsupportedInjection("unsupported denial boundary")
+        if point == "before_tool":
+            argv = event.get("argv", [])
+            output = argv[argv.index("--output") + 1] if "--output" in argv else None
+            if output is None or str(controller.paths[artifact]) != str(output):
+                raise UnsupportedInjection("selected tool does not write the denied artifact")
+        try:
+            write_boundary.boundary_for(controller).inject_denial(
+                artifact, args.get("errno", 13), args["message"]
+            )
+        except ValueError as exc:
+            raise UnsupportedInjection(str(exc)) from exc
+        record.update(
+            effect="armed controller write boundary",
+            artifact=artifact,
+            denial_source="injected_fault",
+        )
+        return False
+
+    @staticmethod
+    def _inject_metric(payload, controller, record):
+        """CAP-METRIC budget half: deliver meter readings; the injection flag stays here."""
+        if not metered(payload) or not hasattr(controller, "context"):
+            raise UnsupportedInjection("metric reading channel unavailable for this payload")
+        readings = {payload["metric"]: payload.get("value"), **payload.get("also", {})}
+        for metric, value in readings.items():
+            if type(value) not in (int, float):
+                raise UnsupportedInjection(f"metric reading is not a number: {metric}")
+        applied = [write_boundary.meter_reading(controller, m, v) for m, v in readings.items()]
+        record.update(
+            injected_reading=True,
+            readings=[
+                {"metric": r["metric"], "value": r["value"], "index": r["index"]} for r in applied
+            ],
+        )
+        return False
 
     def _owned(self, path):
         path = Path(path)
@@ -576,6 +677,17 @@ class InjectionHooks:
             if not record["bytes_differ"]:
                 raise UnsupportedInjection("report reserialization did not change bytes")
             return
+        if operation == "FX-STDERR-APPEND":
+            return self._stderr_append(args, event, record)
+        if operation in {"FX-DEF-PARAM-EDIT", "FX-DEF-TOUCH", "FX-RUNTIME-MANIFEST-BUMP"}:
+            try:
+                return {
+                    "FX-DEF-PARAM-EDIT": self._definition_edit,
+                    "FX-DEF-TOUCH": self._definition_touch,
+                    "FX-RUNTIME-MANIFEST-BUMP": self._manifest_bump,
+                }[operation](args, controller, record)
+            except UnsupportedInjection as exc:
+                raise UnsupportedInjection(f"{operation}: {exc}") from exc
         if operation not in {"FX-SRC-META-ATTR", "FX-SRC-CELL-INCREMENT", "FX-ONSET-CELL-SHIFT"}:
             raise UnsupportedInjection(f"fixture operation not implemented: {operation}")
         import numpy as np
@@ -616,3 +728,113 @@ class InjectionHooks:
         record["after_hash"] = tree_hash(path)
         if record["before_hash"] == record["after_hash"]:
             raise UnsupportedInjection("fixture mutation did not alter content")
+
+    @staticmethod
+    def _stderr_append(args, event, record):
+        """FX-STDERR-APPEND: the literal becomes the last stderr line of this invocation."""
+        process = event.get("process")
+        if process is None or not isinstance(process.get("stderr"), str):
+            raise UnsupportedInjection("stderr append needs a captured tool process")
+        if args.get("tool") != event.get("skill") or not isinstance(args.get("text"), str):
+            raise UnsupportedInjection("stderr append names another tool or no text")
+        before = {"stdout": process.get("stdout"), "exit_code": process.get("exit_code")}
+        record["before_hash"] = digest(process["stderr"])
+        separator = "\n" if process["stderr"] and not process["stderr"].endswith("\n") else ""
+        process["stderr"] += separator + args["text"]
+        record["after_hash"] = digest(process["stderr"])
+        if {"stdout": process.get("stdout"), "exit_code": process.get("exit_code")} != before:
+            raise UnsupportedInjection("stderr append altered stdout or exit code")
+
+    def _repo_file(self, controller, relative):
+        repo = getattr(controller, "repo", None)
+        if repo is None:
+            raise UnsupportedInjection("no controller repository at this boundary")
+        path = self._owned(Path(repo) / relative)
+        if not path.is_file():
+            raise UnsupportedInjection(f"fixture target missing: {relative}")
+        return path
+
+    def _definition_edit(self, args, controller, record):
+        """FX-DEF-PARAM-EDIT on the disposable repo copy, one field, all others preserved."""
+        if args.get("parameter") not in DEFINITION_PARAMETERS:
+            raise UnsupportedInjection(f"unmapped definition parameter: {args.get('parameter')}")
+        section, field = DEFINITION_PARAMETERS[args["parameter"]]
+        ref = args.get("definition_ref")
+        path = self._repo_file(controller, DEFINITIONS_FILE)
+        text = path.read_bytes().decode("utf-8")
+        parsed = tomllib.loads(text)
+        try:
+            current = parsed["definitions"][ref][section][field]
+        except (KeyError, TypeError) as exc:
+            raise UnsupportedInjection(f"definition field missing: {ref}.{section}.{field}") from exc
+        if type(current) not in (int, float) or current != args.get("from"):
+            raise UnsupportedInjection("definition field does not hold the declared from value")
+        new = args.get("to")
+        if type(new) not in (int, float) or new == current:
+            raise UnsupportedInjection("definition edit does not change the value")
+        new = float(new) if isinstance(current, float) else new
+        lines = text.splitlines(keepends=True)
+        header = f"[definitions.{ref}]"
+        try:
+            start = next(i for i, line in enumerate(lines) if line.strip() == header)
+        except StopIteration as exc:
+            raise UnsupportedInjection("definition table not in dotted-key form") from exc
+        end = next(
+            (i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")),
+            len(lines),
+        )
+        key = re.compile(
+            rf"^(\s*{re.escape(section)}\.{re.escape(field)}\s*=\s*)([^#\r\n]*?)(\s*(#.*)?\r?\n?)$"
+        )
+        hits = [i for i in range(start + 1, end) if key.match(lines[i])]
+        if len(hits) != 1:
+            raise UnsupportedInjection("definition field is not one dotted-key line")
+        match = key.match(lines[hits[0]])
+        lines[hits[0]] = match.group(1) + repr(new) + match.group(3)
+        edited = "".join(lines)
+        expected = copy.deepcopy(parsed)
+        expected["definitions"][ref][section][field] = new
+        if tomllib.loads(edited) != expected:
+            raise UnsupportedInjection("definition edit would change other fields")
+        record["before_hash"] = tree_hash(path)
+        path.write_bytes(edited.encode("utf-8"))
+        record["after_hash"] = tree_hash(path)
+        record["adapter_mapping"] = f"{args['parameter']} -> definitions.{ref}.{section}.{field}"
+        if record["before_hash"] == record["after_hash"]:
+            raise UnsupportedInjection("fixture mutation did not alter content")
+
+    def _definition_touch(self, args, controller, record):
+        """FX-DEF-TOUCH: last-write time advanced; content (and its hash) unchanged."""
+        delta = args.get("mtime_delta_seconds")
+        if type(delta) not in (int, float) or delta <= 0:
+            raise UnsupportedInjection("touch needs a positive mtime_delta_seconds")
+        path = self._repo_file(controller, DEFINITIONS_FILE)
+        info = path.stat()
+        record["before_hash"] = tree_hash(path)
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + int(delta * 1_000_000_000)))
+        record["after_hash"] = tree_hash(path)
+        record["mtime_delta_seconds"] = (path.stat().st_mtime_ns - info.st_mtime_ns) / 1e9
+        if record["before_hash"] != record["after_hash"]:
+            raise RuntimeError("touch altered definition content")
+        if record["mtime_delta_seconds"] < delta:
+            raise UnsupportedInjection("filesystem did not advance the last-write time")
+
+    def _manifest_bump(self, args, controller, record):
+        """FX-RUNTIME-MANIFEST-BUMP: the runtime manifest's build_id on the disposable copy."""
+        if args.get("field") != "build_id":
+            raise UnsupportedInjection("only the runtime manifest build_id can be bumped")
+        value = args.get("value")
+        path = self._repo_file(controller, RUNTIME_MANIFEST)
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise UnsupportedInjection("runtime manifest is not JSON") from exc
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("build_id"), str):
+            raise UnsupportedInjection("runtime manifest has no build_id")
+        if not isinstance(value, str) or not value or value == manifest["build_id"]:
+            raise UnsupportedInjection("bump value must be a new nonempty build_id")
+        record["before_hash"] = tree_hash(path)
+        record["build_id_from"] = manifest["build_id"]
+        path.write_text(json.dumps({**manifest, "build_id": value}, indent=2) + "\n", encoding="utf-8")
+        record["after_hash"] = tree_hash(path)
+        record["build_id_to"] = value
