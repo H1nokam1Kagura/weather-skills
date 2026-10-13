@@ -167,10 +167,16 @@ class WeatherAdapter(Adapter):
         raw = review_evidence.text_hash(process["stdout"])
         first = len(hooks.records)
         hooks("after_tool", event, controller)
+        new = hooks.records[first:]
+        applied = any(r.get("status") == "APPLIED" for r in new)
         return {
             "hash_algorithm": REPORT_HASH_ALGORITHM,
             "raw_report_hash": raw,
-            "delivered_report_hash": review_evidence.text_hash(process["stdout"]),
+            # Only a report an entry was actually applied to counts as delivered.
+            "delivered": applied,
+            "delivered_report_hash": review_evidence.text_hash(process["stdout"])
+            if applied
+            else None,
             "raw_report_record": "process manager process record (unpatched stdout)",
             "delivered_report_record": "after_tool process consumed by read_gate",
             "records": json.loads(json.dumps(hooks.records[first:])),

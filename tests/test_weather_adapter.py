@@ -180,7 +180,7 @@ def test_dependency_dispatch_methods_report_observed_dispositions_only():
     assert [e["disposition"] for e in report["entries"]] == ["INACTIVE", "INACTIVE"]
     assert {e["reason"] for e in report["entries"]} == {"boundary_not_reached"}
     approval = adapter.dispatch_after_accepted_review(hooks)
-    assert [e["id"] for e in approval["entries"]] == ["approve-1"]
+    assert [(e["id"], e["disposition"]) for e in approval["entries"]] == [("approve-1", "INACTIVE")]
     assert approval["accepted_approvals"] == 0
     with pytest.raises(AdapterRefusal):
         adapter.dispatch_dependent_schedule(object())

@@ -364,7 +364,7 @@ def test_gate_report_patch_delivers_only_selected_report(frozen, tmp_path):
     result = adapter.patch_gate_report(hooks, onset, controller)
     assert onset["process"]["stdout"] == untouched
     assert result["records"] == []
-    assert result["raw_report_hash"] == result["delivered_report_hash"]
+    assert result["delivered"] is False and result["delivered_report_hash"] is None
     read_gate(onset["process"], "verify-run.gate/1", controller.paths["onset"], replay=True)
 
     selected = verify_event(controller, "map")

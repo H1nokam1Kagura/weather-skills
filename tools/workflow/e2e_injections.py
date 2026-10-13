@@ -369,7 +369,10 @@ class InjectionHooks:
             return False
         binding = event.get("binding_hash")
         if scope == "initial":
-            return self.initial_binding is None or binding in (None, self.initial_binding)
+            # An unobserved binding never matches; the first observed one defines "initial".
+            if not isinstance(binding, str) or not binding:
+                return False
+            return self.initial_binding is None or binding == self.initial_binding
         if scope == "child_of_initial":
             return (
                 isinstance(self.initial_binding, str)
