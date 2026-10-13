@@ -45,7 +45,7 @@ def test_roles_have_no_tools_and_no_shared_session(monkeypatch, tmp_path):
         {"is_error": True},
         {"total_cost_usd": 1.1},
         {"total_cost_usd": float("nan")},
-        {"result": '```json\n{"verdict":"PASS"}\n```'},
+        {"result": 'Verdict:\n```json\n{"verdict":"PASS"}\n```'},
         {"result": "[]"},
         {"session_id": ""},
     ],

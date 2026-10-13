@@ -1,6 +1,7 @@
 """Tool-free role calls. Only controller-observed CLI envelopes count as invocations."""
 
 import json
+import re
 import shutil
 import uuid
 
@@ -48,6 +49,80 @@ PROMPTS = {
 }
 
 
+# Opt-in prompt suffixes, shared by every transport (agents.Roles and kong_roles.KongRoles) so
+# the two cannot drift. role_prompt() is the only composition point.
+REVIEW_EVIDENCE_REQUEST_SUFFIX = (
+    " In this opt-in invocation follow review_evidence_request for the versioned "
+    "plan envelope and emitted claims. Keep the executable typed plan unchanged."
+)
+REVIEW_EVIDENCE_SUFFIX = (
+    " Review the exact review_evidence envelope and its plan_claims. Only its "
+    "bound sources are citable. Citation identity checks do not establish "
+    "entailment or computational correctness; do not treat them as support."
+)
+REVIEW_RATIONALE_SUFFIX = (
+    " The envelope rationale is the planner's own explanation and is part of "
+    "the reviewed binding; reject the plan if the rationale is false."
+)
+CLAIM_CHECK_SUFFIX = (
+    " claim_check is the controller's pre-review gate record: verbatim citation "
+    "identity, controller-computed derivable facts and an evidence-checker verdict "
+    "that is not authority. None of it is an approval; judge the scientific "
+    "interpretation yourself."
+)
+
+
+def role_prompt(role, payload):
+    """System prompt for one invocation: the role prompt plus the payload's opt-in suffixes."""
+    prompt = PROMPTS[role]
+    if role in {"planner", "repairer"} and "review_evidence_request" in payload:
+        prompt += REVIEW_EVIDENCE_REQUEST_SUFFIX
+    if role == "reviewer" and "review_evidence" in payload:
+        prompt += REVIEW_EVIDENCE_SUFFIX
+        if "rationale" in payload["review_evidence"]:
+            prompt += REVIEW_RATIONALE_SUFFIX
+    if role == "reviewer" and "claim_check" in payload:
+        prompt += CLAIM_CHECK_SUFFIX
+    return prompt
+
+
+# One output rule for every transport: exactly one JSON object, optionally wrapped in exactly
+# one ```json fence, and nothing else. Prose, a second object/fence, an untagged or other-tagged
+# fence, duplicate keys and NaN/Infinity are rejected. The receipt records the rule and form.
+OUTPUT_NORMALIZATION = "json-object/optional-single-json-fence/v1"
+_FENCE = re.compile(r"```json[ \t]*\r?\n(?P<body>.*?)\r?\n[ \t]*```", re.DOTALL)
+
+
+def _unique_pairs(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate key {key!r} in role output")
+        value[key] = item
+    return value
+
+
+def _no_constant(name):
+    raise ValueError(f"non-standard JSON constant {name} in role output")
+
+
+def parse_role_object(text):
+    """Return (object, form) where form is "bare" or "json_fence"; raise ValueError otherwise."""
+    if not isinstance(text, str):
+        raise ValueError("role output is not text")
+    stripped = text.strip()
+    form = "bare"
+    if stripped.startswith("```"):
+        match = _FENCE.fullmatch(stripped)
+        if match is None or "```" in match["body"]:
+            raise ValueError("role output fence is not exactly one ```json block")
+        stripped, form = match["body"], "json_fence"
+    value = json.loads(stripped, object_pairs_hook=_unique_pairs, parse_constant=_no_constant)
+    if not isinstance(value, dict):
+        raise ValueError("role output must be an object")
+    return value, form
+
+
 class Roles:
     def __init__(self, processes, workspace, budget=5, model="sonnet"):
         self.processes = processes
@@ -72,30 +147,7 @@ class Roles:
                 "invocation_id": invocation,
                 "process_boundary": "NOT_ENTERED",
             }
-        prompt = PROMPTS[role]
-        if role in {"planner", "repairer"} and "review_evidence_request" in payload:
-            prompt += (
-                " In this opt-in invocation follow review_evidence_request for the versioned "
-                "plan envelope and emitted claims. Keep the executable typed plan unchanged."
-            )
-        if role == "reviewer" and "review_evidence" in payload:
-            prompt += (
-                " Review the exact review_evidence envelope and its plan_claims. Only its "
-                "bound sources are citable. Citation identity checks do not establish "
-                "entailment or computational correctness; do not treat them as support."
-            )
-            if "rationale" in payload["review_evidence"]:
-                prompt += (
-                    " The envelope rationale is the planner's own explanation and is part of "
-                    "the reviewed binding; reject the plan if the rationale is false."
-                )
-        if role == "reviewer" and "claim_check" in payload:
-            prompt += (
-                " claim_check is the controller's pre-review gate record: verbatim citation "
-                "identity, controller-computed derivable facts and an evidence-checker verdict "
-                "that is not authority. None of it is an approval; judge the scientific "
-                "interpretation yourself."
-            )
+        prompt = role_prompt(role, payload)
         command = [
             executable,
             "-p",
@@ -154,9 +206,7 @@ class Roles:
             if not isinstance(session, str) or not session or session in self.sessions:
                 raise ValueError("missing or repeated independent session identity")
             self.sessions.add(session)
-            value = json.loads(envelope["result"])
-            if not isinstance(value, dict):
-                raise ValueError("role output must be an object")
+            value, output_form = parse_role_object(envelope["result"])
         except (ValueError, KeyError, TypeError) as exc:
             raise Refused(f"invalid {role} envelope: {exc}") from exc
         self.receipts.append(
@@ -168,6 +218,8 @@ class Roles:
                 "output_hash": digest(value),
                 "cost_usd": cost,
                 "model_usage": envelope.get("modelUsage", {}),
+                "output_normalization": OUTPUT_NORMALIZATION,
+                "output_form": output_form,
             }
         )
         if role == "reviewer" and "review_evidence" in payload:

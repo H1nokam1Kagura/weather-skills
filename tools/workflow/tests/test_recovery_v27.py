@@ -830,6 +830,9 @@ def test_no_transport_retry_after_release_or_without_a_recorder(tmp_path, monkey
 
 
 def test_kong_transport_retries_a_pre_write_fault_once(tmp_path, monkeypatch):
+    # Model ids are validated against the observed roster at construction (D16 wiring).
+    monkeypatch.setitem(kong_roles.NATIVE_ROSTER, "m", "test fixture, not a gateway id")
+
     class KongTransport(RoleTransport):
         def run(self, argv, cwd, env, stdin="", tool=None):
             self.role_calls += 1

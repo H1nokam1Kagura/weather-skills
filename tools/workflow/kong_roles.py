@@ -1,19 +1,60 @@
 """Opt-in live role transport through the Gates Foundation Kong AI Gateway (native Anthropic).
 
 Same ``ask(role, payload)`` contract as ``agents.Roles``; the receipt adds the identity the
-API itself reports (``model_observed`` is the response ``model`` field, never the request).
+API itself reports (``model_observed`` is the response ``model`` field, never the request) and
+the exact non-content settings the worker sent (``settings_sent``, echoed by the worker from
+the request body it built).
+
+Shared with ``agents.Roles`` so the transports cannot drift:
+- the system prompt, including every opt-in review-evidence suffix (``agents.role_prompt``);
+- the output rule (``agents.parse_role_object``, recorded as ``output_normalization``):
+  exactly one JSON object, optionally wrapped in exactly one ```json fence, nothing else.
+  Assistant prefill was not chosen: it is unprobed on this route and the probed model
+  generation is not known to accept it.
 
 Key isolation: this process never reads a key or a ``.env``. Each call launches a short
 worker under the kit's own interpreter (``python -I -c WORKER_SOURCE``) with its working
 directory at the kit root; the kit's ``kong_client`` loads the consumer key into *that*
 process only and the worker prints a key-free JSON envelope.
 
+Per-role models (D16 / CP-F1). Ids may only come from ``NATIVE_ROSTER`` (what the gateway is
+evidenced to serve on this route). Every role below is judgment-measured by at least one
+frozen live case, so no role is downgraded by default; ``claude-sonnet-4-6`` is also the
+only model PROBED on the native route. Overrides are explicit (``models=`` /
+``--role-model``) and recorded in every receipt and in run provenance.
+
+| Role | Default | Rationale |
+|---|---|---|
+| compiler | claude-sonnet-4-6 | Mechanical schema copy, but E02-P2 measures resistance to a post-authorization zero_fill nudge and E03-P2 to impersonated scope widening |
+| planner | claude-sonnet-4-6 | Scientific judgment (rolling window, last eligible date); E06/E13 claims |
+| repairer | claude-sonnet-4-6 | Must fix the genuine finding and refuse tempting scope expansion (E07-P2) |
+| reviewer | claude-sonnet-4-6 | Core judgment: scope drift, stale approvals, false rationale (E04-E06) |
+| evidence_checker | claude-sonnet-4-6 | Entailment of omitted confirmation clauses (E13-P2); not a simple-claim role |
+| verifier | claude-sonnet-4-6 | Mostly mechanical, but E08-P2 plants a FAIL in the verifier's own evidence copy |
+| router | claude-sonnet-4-6 | Shadow policy must resist a quoted plausible-but-wrong action (E09-P2) |
+
+No cheaper model is available on this route today: the cheap candidate ``claude-haiku-4-5``
+was refused by the gateway's native-route model validator in the 2026-10-13 wiring smoke
+(``NATIVE_REJECTED``). A cheaper default for compiler/verifier/router needs a model the native
+route accepts, a probe, and a held-out comparison on the cases named above.
+
+Budget (D16; spend is untracked by owner ruling):
+- ``budget_guard="on"`` (default): a cited price table prices the OBSERVED model; the remaining
+  ceiling is reserved before launch and an unpriced or unknown outcome keeps it (fail closed).
+  Without a price this allows one call per run, by design.
+- ``budget_guard="off"``: no price table may be given; nothing is reserved; every receipt
+  records ``cost_usd: null`` with ``cost_basis: "untracked"``. ``spent`` therefore stays at its
+  checkpointed value and is NOT a measure of Kong spend; run provenance says so
+  (``provenance()``). The workflow CLI selects this for ``--roles kong``.
+
 Outcome semantics (mirrors ``Roles``; UNKNOWN never becomes success):
 - ``Refused``: nothing was sent (unknown role, budget, policy, worker failed pre-send), or a
   response came back and is not a valid role answer (cost still reconciled when computable).
 - ``KongOutcomeUnknown``: a request may have reached the gateway and no valid answer was
-  observed (HTTP error, timeout, crash, unparseable worker output). The budget reservation is
-  kept, because the call may have been billed.
+  observed (HTTP error, timeout, crash, unparseable worker output). With the guard on the
+  budget reservation is kept, because the call may have been billed.
+
+No retries: the worker builds a client with the kit defaults and this transport never re-asks.
 
 Data policy: only Not Sensitive, synthetic content may be sent; the constructor requires an
 explicit acknowledgement and the transport is never selected by default.
@@ -26,7 +67,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from .agents import PROMPTS
+from .agents import OUTPUT_NORMALIZATION, PROMPTS, parse_role_object, role_prompt
 from .catalog import child_environment
 from .contracts import Refused, digest
 from .recovery import transport_call
@@ -41,15 +82,33 @@ KIT_PYTHON = KIT_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else 
 TRANSPORT = "kong-native-anthropic"
 DEFAULT_MODEL = "claude-sonnet-4-6"  # PROBED OK on /v2/anthropic/v1/messages (kit, 2026-10-06)
 
+# Model ids the native route is OBSERVED to serve (kong-ai-gateway references/probe-log.md,
+# plus this repo's completion-evidence/kong-live-probe). Nothing else is accepted. The kit's
+# CODE-only native ids (ET fallback roster: claude-sonnet-5, claude-opus-4-8, claude-opus-4-7)
+# are deliberately absent until a live probe shows the gateway accepts them.
+NATIVE_ROSTER = {
+    "claude-sonnet-4-6": "PROBED native: kit small_text PASS 2026-10-06 (run fc4dfd14); "
+    "role calls SUCCESS 2026-10-13 (WIRING-RESULT.json)",
+}
+# Ids the native route refused live. Kept so a refusal names its evidence.
+NATIVE_REJECTED = {
+    "claude-haiku-4-5": "HTTP 400 'property model validation failed: matches none of the enum "
+    "values' on /v2/anthropic, 2026-10-13, request f2c338128953ca05ed84677558b20f2f "
+    "(WIRING-RESULT.json shape C); routable on the Unified route only",
+}
+ROLE_MODELS = {role: DEFAULT_MODEL for role in PROMPTS}
+BUDGET_GUARDS = ("on", "off")
+
 # USD per million tokens, keyed by the OBSERVED model id. Deliberately empty: no price table
 # with a citable source is pinned in this repo or the Kong kit, and Kong exposes no per-call
 # cost. Callers may pass ``prices={model: {"input_per_mtok", "output_per_mtok", "source"}}``;
 # an entry without a ``source`` citation is rejected. Without a price, cost_usd is null with a
-# reason, and the pre-call reservation of the remaining ceiling is kept (fail closed).
+# reason, and (guard on) the pre-call reservation of the remaining ceiling is kept.
 PINNED_PRICES = {}
 
 # Runs under the kit interpreter. Stdlib + kit only; prints exactly one JSON object.
-# "sent" is False only while no request can have left the process.
+# "sent" is False only while no request can have left the process. "sent_settings" echoes
+# every non-content field of the body actually passed to the SDK.
 WORKER_SOURCE = r"""
 import json, sys, time
 out = {"sent": False}
@@ -70,6 +129,8 @@ try:
     inspect.signature(client.messages.create).bind(**body)  # SDK argument check, pre-send
     out["sdk"] = "anthropic-python " + version("anthropic")
     out["mock"] = kong_client.is_mock_url(cfg.gateway_url)
+    out["sent_settings"] = {k: v for k, v in body.items() if k not in ("system", "messages")}
+    out["sent_keys"] = sorted(body)
     started = time.monotonic()
     out["sent"] = True
     try:
@@ -125,6 +186,25 @@ def price_usage(model, usage, prices):
     return cost, entry["source"]
 
 
+def role_models(overrides=None, default=DEFAULT_MODEL):
+    """The full per-role model map; ValueError on an unknown role or an unevidenced model id."""
+
+    def check(model, where):
+        if model not in NATIVE_ROSTER:
+            refused = NATIVE_REJECTED.get(model)
+            detail = f" (refused live: {refused})" if refused else ""
+            raise ValueError(f"model {model!r} {where}is not on the observed native roster{detail}")
+
+    check(default, "")
+    models = {role: default for role in PROMPTS}
+    for role, model in dict(overrides or {}).items():
+        if role not in PROMPTS:
+            raise ValueError(f"unknown role {role!r} in model map")
+        check(model, f"for {role} ")
+        models[role] = model
+    return models
+
+
 class KongRoles:
     def __init__(
         self,
@@ -136,6 +216,8 @@ class KongRoles:
         temperature=None,
         prices=None,
         *,
+        models=None,
+        budget_guard="on",
         data_policy_ack=False,
         kit_root=KIT_ROOT,
         kit_python=None,
@@ -152,6 +234,10 @@ class KongRoles:
                 or not all(_finite(entry.get(k)) for k in ("input_per_mtok", "output_per_mtok"))
             ):
                 raise Refused(f"price for {name!r} needs finite rates and a cited source")
+        if budget_guard not in BUDGET_GUARDS:
+            raise ValueError("budget_guard must be 'on' or 'off'")
+        if budget_guard == "off" and prices:
+            raise ValueError("budget_guard 'off' means untracked spend; give no price table")
         if type(max_tokens) is not int or not 1 <= max_tokens <= 64000:
             raise Refused("max_tokens must be an integer in 1..64000")
         if temperature is not None and not (_finite(temperature) and temperature <= 1):
@@ -160,7 +246,9 @@ class KongRoles:
         self.workspace = workspace
         self.budget = budget
         self.spent = 0.0
-        self.model = model
+        self.model = model  # default id; Controller checkpoints and restores this field
+        self.models = role_models(models, model)
+        self.budget_guard = budget_guard
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.prices = prices
@@ -173,6 +261,31 @@ class KongRoles:
         self.sessions = set()
         self.unknown_outcomes = []
 
+    def provenance(self):
+        """Run-level transport configuration, recorded once per run by the workflow CLI."""
+        return {
+            "schema": "workflow.role-transport/1",
+            "transport": TRANSPORT,
+            "mode": "live",
+            "data_policy": "Not Sensitive synthetic content only (acknowledged)",
+            "default_model": self.model,
+            "models": dict(self.models),
+            "model_evidence": {m: NATIVE_ROSTER[m] for m in sorted(set(self.models.values()))},
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "thinking": None,
+            "retries": 0,
+            "output_normalization": OUTPUT_NORMALIZATION,
+            "budget_guard": self.budget_guard,
+            "cost_tracking": "priced" if self.budget_guard == "on" else "untracked",
+            "spent_field_semantics": (
+                "reconciled priced cost plus kept reservations"
+                if self.budget_guard == "on"
+                else "not a measure of Kong spend: calls are untracked and reserve nothing"
+            ),
+            "budget_usd": self.budget,
+        }
+
     def _environment(self):
         env = child_environment(Path(self.workspace).parent / "scratch")
         env.update(self.worker_env)
@@ -181,12 +294,10 @@ class KongRoles:
     def ask(self, role, payload):
         if role not in PROMPTS or self.budget - self.spent < 0.05:
             raise Refused("role unavailable or aggregate model budget exhausted")
-        if "review_evidence" in payload or "review_evidence_request" in payload:
-            # Roles.ask appends inline prompt suffixes for these; they are not importable,
-            # and a copied suffix would let the two transports drift silently.
-            raise Refused("review-evidence prompt variants are not available on the Kong transport")
         if not self.kit_python.is_file():
             raise Refused("Kong kit interpreter unavailable")
+        guarded = self.budget_guard == "on"
+        model = self.models.get(role, self.model)
         invocation = str(uuid.uuid4())
         session = str(uuid.uuid4())
         dispatch_context = getattr(self, "dispatch_context", None)
@@ -196,10 +307,10 @@ class KongRoles:
                 "invocation_id": invocation,
                 "process_boundary": "NOT_ENTERED",
             }
-        prompt = PROMPTS[role]
-        user = json.dumps(payload)
+        prompt = role_prompt(role, payload)
+        user = json.dumps(payload)  # same serializer as Roles.ask and review_evidence.capture
         request = {
-            "model": self.model,
+            "model": model,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "system": prompt,
@@ -207,9 +318,10 @@ class KongRoles:
         }
         command = [str(self.kit_python), "-I", "-c", WORKER_SOURCE, str(self.kit_root / "scripts")]
         spent_before = self.spent
-        # Reserve the remaining ceiling before launch, exactly as Roles does: an unpriced or
-        # unknown outcome cannot create fresh budget, on resume or otherwise.
-        self.spent = self.budget
+        if guarded:
+            # Reserve the remaining ceiling before launch, exactly as Roles does: an unpriced
+            # or unknown outcome cannot create fresh budget, on resume or otherwise.
+            self.spent = self.budget
         if dispatch_context is not None:
             self.dispatch_observer(dict(self.dispatch_observation))
             self.dispatch_observation["process_boundary"] = "ENTERED"
@@ -243,6 +355,7 @@ class KongRoles:
             "request_id": error.get("request_id"),
             "error_type": envelope.get("error_type"),
             "hint": error.get("hint"),
+            "model_requested": model,
         }
         if not envelope["sent"]:
             self.spent = spent_before  # provably nothing left the worker
@@ -252,9 +365,12 @@ class KongRoles:
 
         observed = envelope.get("model")
         usage = envelope.get("usage")
-        cost, cost_basis = price_usage(observed, usage, self.prices)
-        if cost is not None:
-            self.spent = spent_before + cost
+        if guarded:
+            cost, cost_basis = price_usage(observed, usage, self.prices)
+            if cost is not None:
+                self.spent = spent_before + cost
+        else:
+            cost, cost_basis = None, "untracked"
         try:
             if self.spent > self.budget:
                 raise ValueError("aggregate budget exhausted")
@@ -262,9 +378,7 @@ class KongRoles:
                 raise ValueError("response carries no model identity")
             if session in self.sessions:
                 raise ValueError("repeated independent session identity")
-            value = json.loads(envelope.get("text") or "")
-            if not isinstance(value, dict):
-                raise ValueError("role output must be an object")
+            value, output_form = parse_role_object(envelope.get("text"))
         except (ValueError, TypeError) as exc:
             raise Refused(f"invalid {role} Kong response: {exc}") from exc
         self.sessions.add(session)
@@ -277,16 +391,22 @@ class KongRoles:
                 "output_hash": digest(value),
                 "cost_usd": cost,
                 "cost_basis": cost_basis,
-                "model_requested": self.model,
+                "budget_guard": self.budget_guard,
+                "model_requested": model,
                 "model_observed": observed,
-                "model_match": observed == self.model,
+                "model_match": observed == model,
                 "settings": {
                     "max_tokens": self.max_tokens,
                     "temperature": self.temperature,  # None: not sent, provider default
                     "system_prompt_hash": text_hash(prompt),
                     "thinking": None,  # not requested; no reasoning setting is claimed
+                    "retries": 0,
                     "sdk": envelope.get("sdk"),
                 },
+                "settings_sent": envelope.get("sent_settings"),
+                "sent_keys": envelope.get("sent_keys"),
+                "output_normalization": OUTPUT_NORMALIZATION,
+                "output_form": output_form,
                 "stdin_hash": text_hash(user),
                 "usage": usage,
                 "stop_reason": envelope.get("stop_reason"),
@@ -299,15 +419,23 @@ class KongRoles:
                 "mode": "live",
             }
         )
+        if role == "reviewer" and "review_evidence" in payload:
+            # Same block Roles.ask records; Controller.ask binds it to the review capture.
+            self.receipts[-1]["dispatch"] = {
+                "stdin_hash": text_hash(user),
+                "system_prompt": prompt,
+                "system_prompt_hash": text_hash(prompt),
+            }
         return value
 
     def _unknown(self, role, invocation, reason, evidence):
-        # Keep the reservation: the request may have been billed.
+        # Guard on: keep the reservation, the request may have been billed.
         record = {
             "role": role,
             "invocation_id": invocation,
             "outcome": "UNKNOWN",
             "reason": reason,
+            "budget_guard": self.budget_guard,
             **evidence,
         }
         self.unknown_outcomes.append(record)
