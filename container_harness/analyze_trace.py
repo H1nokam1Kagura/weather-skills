@@ -68,8 +68,14 @@ SYSCALL = re.compile(
 )
 UNFINISHED = re.compile(r"^(\w+)\((.*) <unfinished \.\.\.>$", re.S)
 RESUMED = re.compile(r"^<\.\.\. (\w+) resumed>(.*)$", re.S)
-TERMINAL = re.compile(r"^\+\+\+ (exited with (\d+)|killed by (\w+)(?: \(core dumped\))?|superseded by execve.*) \+\+\+$")
+TERMINAL = re.compile(
+    r"^\+\+\+ (exited with (\d+)|killed by (\w+)(?: \(core dumped\))?|superseded by execve.*) \+\+\+$"
+)
 DELIVERY = re.compile(r"^--- (SIG\w+) \{(.*)\} ---$")
+# strace messages that say nothing about trace completeness (only "attached" for a followed
+# child, which -q normally suppresses). Everything else that strace prints is a problem.
+BENIGN_STRACE = re.compile(r"^strace: Process \d+ attached$")
+USER_SI_CODES = {"SI_USER", "SI_TKILL", "SI_QUEUE"}
 
 
 # ------------------------------------------------------------------ low-level parsing
@@ -155,7 +161,19 @@ def parse_int(token):
 
 
 class Event:
-    __slots__ = ("ts", "tid", "seg", "line", "kind", "name", "args", "raw_args", "ret", "dec", "tail")
+    __slots__ = (
+        "ts",
+        "tid",
+        "seg",
+        "line",
+        "kind",
+        "name",
+        "args",
+        "raw_args",
+        "ret",
+        "dec",
+        "tail",
+    )
 
     def __init__(self, ts, tid, seg, line, kind, **kw):
         self.ts, self.tid, self.seg, self.line, self.kind = ts, tid, seg, line, kind
@@ -210,8 +228,17 @@ def parse_trace_file(path, tid):
             if tm:
                 if pending:  # a call that never returned (process exited inside it)
                     segments[-1].append(
-                        Event(ts, tid, seg, lineno, "syscall", name=pending[0],
-                              raw_args=pending[1], args=split_args(pending[1]), ret="?")
+                        Event(
+                            ts,
+                            tid,
+                            seg,
+                            lineno,
+                            "syscall",
+                            name=pending[0],
+                            raw_args=pending[1],
+                            args=split_args(pending[1]),
+                            ret="?",
+                        )
                     )
                     pending = None
                 segments[-1].append(Event(ts, tid, seg, lineno, "exit", tail=tm.group(1)))
@@ -227,17 +254,34 @@ def parse_trace_file(path, tid):
             if sm:
                 segments[-1].append(
                     Event(
-                        ts, tid, seg, lineno, "syscall", name=sm.group(1), raw_args=sm.group(2),
-                        args=split_args(sm.group(2)), ret=sm.group(3),
-                        dec=sm.group(4)[1:-1] if sm.group(4) else None, tail=sm.group(5).strip(),
+                        ts,
+                        tid,
+                        seg,
+                        lineno,
+                        "syscall",
+                        name=sm.group(1),
+                        raw_args=sm.group(2),
+                        args=split_args(sm.group(2)),
+                        ret=sm.group(3),
+                        dec=sm.group(4)[1:-1] if sm.group(4) else None,
+                        tail=sm.group(5).strip(),
                     )
                 )
                 continue
             anomalies.append({"file": path.name, "line": lineno, "unparsed": rest[:200]})
     if pending:
         segments[-1].append(
-            Event(0, tid, len(segments) - 1, -1, "syscall", name=pending[0], raw_args=pending[1],
-                  args=split_args(pending[1]), ret="?")
+            Event(
+                0,
+                tid,
+                len(segments) - 1,
+                -1,
+                "syscall",
+                name=pending[0],
+                raw_args=pending[1],
+                args=split_args(pending[1]),
+                ret="?",
+            )
         )
     if segments and not segments[-1] and len(segments) > 1:
         segments.pop()
@@ -310,6 +354,8 @@ def analyze(outdir, run_dir=None):
     # ---- harness completion and tracer exit
     if status.get("complete") != "1":
         problem("HARNESS_INCOMPLETE", "entry script did not record completion")
+    if status.get("harness_killed_tracer") == "1":
+        problem("TRACER_KILLED", "the harness killed the tracer during the run")
     if "untraced_exit" in status:
         tracer["status"] = "NOT_RUN"
         problem("NOT_TRACED", "run executed without the tracer (overhead baseline)")
@@ -317,12 +363,18 @@ def analyze(outdir, run_dir=None):
     files = sorted(trace_dir.glob("t.*")) if trace_dir.is_dir() else []
     if not files and tracer["status"] != "NOT_RUN":
         problem("NO_TRACE", "no trace files")
-    strace_msgs = []
+    # strace's own diagnostics share stderr with the tree (strace -q already suppresses the
+    # attach/detach chatter). Anything else that strace says (lost tracee, ptrace errors,
+    # "Process N detached" after a tracer-side failure, ...) makes the trace untrusted. A tree
+    # that prints a fake "strace: " line can only make evidence MISSING, never fill it.
+    strace_msgs, benign_msgs = [], []
     if (outdir / "root.stderr").exists():
-        for line in (outdir / "root.stderr").read_text(encoding="utf-8", errors="replace").splitlines():
+        text = (outdir / "root.stderr").read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
             if line.startswith("strace: "):
-                strace_msgs.append(line)
+                (benign_msgs if BENIGN_STRACE.match(line) else strace_msgs).append(line)
     tracer["strace_messages"] = strace_msgs
+    tracer["strace_benign_messages"] = benign_msgs[:20]
     if strace_msgs:
         problem("TRACER_MESSAGES", strace_msgs[:20])
 
@@ -346,9 +398,16 @@ def analyze(outdir, run_dir=None):
     for tid, (segs, _) in by_tid.items():
         for si, seg in enumerate(segs):
             for ev in seg:
-                if ev.kind == "syscall" and ev.name in ("clone", "clone3", "fork", "vfork") and ev.ok and ev.rv > 0:
+                if (
+                    ev.kind == "syscall"
+                    and ev.name in ("clone", "clone3", "fork", "vfork")
+                    and ev.ok
+                    and ev.rv > 0
+                ):
                     flags = ev.raw_args if ev.name.startswith("clone") else ""
-                    clones.setdefault(ev.rv, []).append((ev.ts, tid, si, flags, "CLONE_THREAD" in flags))
+                    clones.setdefault(ev.rv, []).append(
+                        (ev.ts, tid, si, flags, "CLONE_THREAD" in flags)
+                    )
     for v in clones.values():
         v.sort()
     roots = []
@@ -365,7 +424,7 @@ def analyze(outdir, run_dir=None):
                 seg_origin[(tid, i)] = c
         else:
             problem("INCONSISTENT", f"tid {tid}: {len(segs)} segments vs {len(cl)} clone returns")
-    for child, cl in clones.items():
+    for child in clones:
         if child not in by_tid:
             problem("INCONSISTENT", f"clone returned {child} but no trace file exists for it")
     if len(roots) != 1 and files:
@@ -414,10 +473,18 @@ def analyze(outdir, run_dir=None):
     for key, p in procs.items():
         if p.creator is None and p.pid != root_tid:
             problem("INCONSISTENT", f"process {key} has no resolvable creator")
-        if len(by_tid[p.pid][0]) > 1:
-            notes["pid_reuse"].append({"pid": p.pid, "generations": len(by_tid[p.pid][0])})
+    for tid, (segs, _) in sorted(by_tid.items()):
+        if len(segs) > 1:
+            notes["pid_reuse"].append({"pid": tid, "generations": len(segs)})
 
     root_key = tkey(root_tid, 0) if root_tid is not None else None
+    # (clone return ts, parent tid) -> child process key: pgid and cwd are inherited AT the
+    # clone, not at the child's first traced event (a group kill can land in between).
+    clone_child = {
+        (origin[0], origin[1]): owner[tkey(tid, si)]
+        for (tid, si), origin in seg_origin.items()
+        if origin is not None and not origin[4] and tkey(tid, si) in procs
+    }
 
     # harness-known untraced processes (pid namespace closure)
     harness = {}
@@ -440,8 +507,8 @@ def analyze(outdir, run_dir=None):
 
     # ---- global replay in time order
     all_events = []
-    for tid, (segs, _) in by_tid.items():
-        for si, seg in enumerate(segs):
+    for segs, _ in by_tid.values():
+        for seg in segs:
             all_events += seg
     all_events.sort(key=lambda e: (e.ts, e.tid, e.line))
 
@@ -488,7 +555,9 @@ def analyze(outdir, run_dir=None):
         }
     links = {}
     if (outdir / "baseline_links.tsv").exists():
-        for line in (outdir / "baseline_links.tsv").open(encoding="utf-8", errors="surrogateescape"):
+        for line in (outdir / "baseline_links.tsv").open(
+            encoding="utf-8", errors="surrogateescape"
+        ):
             if "\t" in line:
                 a, b = line.rstrip("\n").split("\t", 1)
                 links[a] = b
@@ -514,7 +583,11 @@ def analyze(outdir, run_dir=None):
                 prefix = "/".join(parts[:i])
                 if prefix in links:
                     target = links[prefix]
-                    base = target if target.startswith("/") else posixpath.join(posixpath.dirname(prefix), target)
+                    base = (
+                        target
+                        if target.startswith("/")
+                        else posixpath.join(posixpath.dirname(prefix), target)
+                    )
                     path = posixpath.normpath(posixpath.join(base, *parts[i:]))
                     changed = True
                     break
@@ -586,52 +659,89 @@ def analyze(outdir, run_dir=None):
         if src in links:
             links[dst] = links.pop(src)
 
-    for ev in all_events:
-        pkey = proc_of(ev)
-        if pkey is None:
-            continue
+    deliveries, kills, analyzer_errors = [], [], []
+
+    def replay_one(ev, pkey):
+        nonlocal shell_launches, io_uring_ok
         p = procs.get(pkey)
         if pkey not in started and p is not None:  # first sighting: inherit pgid and cwd
             started.add(pkey)
             if p.creator is not None:
                 pgid.setdefault(pkey, pgid.get(p.creator))
                 cwd.setdefault(pkey, cwd.get(p.creator))
+        if ev.kind == "delivery":
+            fields = dict(re.findall(r"(\w+)=([^,}]+)", ev.raw_args))
+            deliveries.append(
+                {
+                    "receiver_pid": procs[pkey].pid,
+                    "receiver_tid": ev.tid,
+                    "signal": ev.name,
+                    "si_code": fields.get("si_code"),
+                    "si_pid": parse_int(fields.get("si_pid")),
+                    "ts_ns": ev.ts,
+                }
+            )
+            return
+        if ev.kind == "exit":
+            km = re.match(r"killed by (\w+)", ev.tail)
+            if km and ev.tid == procs[pkey].pid:
+                kills.append({"pid": ev.tid, "signal": km.group(1), "ts_ns": ev.ts})
+            return
         if ev.kind != "syscall":
-            continue
+            return
         for m in re.finditer(r"AT_FDCWD<(/(?:[^>\\]|\\.)*)>", ev.raw_args):
             cwd[pkey] = m.group(1)
         name, a = ev.name, ev.args
         if name in ("clone", "clone3", "fork", "vfork") and ev.ok and ev.rv > 0:
-            continue  # structure already built; child's inheritance happens at first sighting
+            ck = clone_child.get((ev.ts, ev.tid))
+            if ck is not None and ck not in started:
+                started.add(ck)
+                pgid.setdefault(ck, pgid.get(pkey))
+                cwd.setdefault(ck, cwd.get(pkey))
+            return  # structure already built
         if name == "setsid" and ev.ok:
             pgid[pkey] = procs[pkey].pid
-            continue
+            return
         if name == "setpgid" and ev.ok and len(a) >= 2:
             tpid = parse_int(a[0]) or procs[pkey].pid
             g = parse_int(a[1]) or tpid
             target = alive_incarnation(tpid, ev.ts)
             if target is not None and not target.harness:
                 pgid[target.key] = g
-            continue
+            return
         if name == "prctl" and a and a[0] == "PR_SET_PDEATHSIG":
-            notes["kernel_signal_setups"].append({"pid": ev.tid, "call": "prctl(PR_SET_PDEATHSIG)", "args": ev.raw_args[:120]})
-        if name == "prctl" and a and a[0] == "PR_SET_CHILD_SUBREAPER" and len(a) > 1 and a[1] != "0":
+            notes["kernel_signal_setups"].append(
+                {"pid": ev.tid, "call": "prctl(PR_SET_PDEATHSIG)", "args": ev.raw_args[:120]}
+            )
+        if (
+            name == "prctl"
+            and a
+            and a[0] == "PR_SET_CHILD_SUBREAPER"
+            and len(a) > 1
+            and a[1] != "0"
+        ):
             procs[pkey].subreaper = True
         if name == "fcntl" and len(a) > 1 and a[1] in ("F_SETOWN", "F_SETOWN_EX", "F_SETSIG"):
-            notes["kernel_signal_setups"].append({"pid": ev.tid, "call": "fcntl(" + a[1] + ")", "args": ev.raw_args[:120]})
+            notes["kernel_signal_setups"].append(
+                {"pid": ev.tid, "call": "fcntl(" + a[1] + ")", "args": ev.raw_args[:120]}
+            )
         if name in ("alarm", "setitimer", "timer_create"):
-            notes["kernel_signal_setups"].append({"pid": ev.tid, "call": name, "args": ev.raw_args[:120]})
+            notes["kernel_signal_setups"].append(
+                {"pid": ev.tid, "call": name, "args": ev.raw_args[:120]}
+            )
         if name.startswith("io_uring"):
-            notes["io_uring_calls"].append({"pid": ev.tid, "call": name, "ret": ev.ret, "tail": ev.tail[:80]})
+            notes["io_uring_calls"].append(
+                {"pid": ev.tid, "call": name, "ret": ev.ret, "tail": ev.tail[:80]}
+            )
             if name == "io_uring_setup" and ev.ok:
                 io_uring_ok = True
-            continue
+            return
         if name == "memfd_create" and ev.ok:
             notes["memfd_unnamed"].append({"pid": ev.tid, "name": unquote(a[0])[0] if a else None})
-            continue
+            return
         if name == "pidfd_open" and ev.ok and a:
             pidfds.setdefault(pkey, {})[ev.rv] = parse_int(a[0])
-            continue
+            return
         if name in ("execve", "execveat"):
             path = unquote(a[0] if name == "execve" else a[1])[0] if a else None
             if ev.ok:
@@ -639,8 +749,10 @@ def analyze(outdir, run_dir=None):
                 if path and posixpath.basename(path) in SHELLS:
                     shell_launches += 1
             else:
-                notes["exec_failures"].append({"pid": ev.tid, "path": path, "ret": ev.ret, "tail": ev.tail[:60]})
-            continue
+                notes["exec_failures"].append(
+                    {"pid": ev.tid, "path": path, "ret": ev.ret, "tail": ev.tail[:60]}
+                )
+            return
         if name in ("chdir", "fchdir") and ev.ok and a:
             if name == "chdir":
                 newcwd = resolve(pkey, None, unquote(a[0])[0], ev)
@@ -651,13 +763,25 @@ def analyze(outdir, run_dir=None):
                 for other in procs[pkey].threads:  # threads share the fs struct
                     if other in procs:
                         cwd[other] = newcwd
-            continue
+            return
         if name in SIGNAL_SYSCALLS:
-            record_signal(ev, pkey, procs, harness, pgid, pidfds, alive_incarnation, thread_owner,
-                          attempts, notes, unresolved_targets, root_tid)
-            continue
+            record_signal(
+                ev,
+                pkey,
+                procs,
+                harness,
+                pgid,
+                pidfds,
+                alive_incarnation,
+                thread_owner,
+                attempts,
+                notes,
+                unresolved_targets,
+                root_tid,
+            )
+            return
         if not ev.ok:
-            continue
+            return
         # ---- filesystem creation / removal
         if name in ("open", "creat", "openat", "openat2"):
             at = name.startswith("openat")
@@ -667,17 +791,36 @@ def analyze(outdir, run_dir=None):
             path_arg = unquote(a[1] if at else a[0])[0] if a else None
             if "O_TMPFILE" in flags:
                 notes["o_tmpfile_unnamed"].append(
-                    {"dir": ev.dec or resolve(pkey, a[0] if at else None, path_arg, ev), "pid": ev.tid}
+                    {
+                        "dir": ev.dec or resolve(pkey, a[0] if at else None, path_arg, ev),
+                        "pid": ev.tid,
+                    }
                 )
-                continue
+                return
             if "O_CREAT" not in flags:
-                continue
-            target = ev.dec if ev.dec and ev.dec.startswith("/") else resolve(pkey, a[0] if at else None, path_arg, ev)
+                return
+            target = (
+                ev.dec
+                if ev.dec and ev.dec.startswith("/")
+                else resolve(pkey, a[0] if at else None, path_arg, ev)
+            )
             add(canon(target), name, ev, pkey)
         elif name in ("mkdir", "mknod"):
-            add(resolve(pkey, None, unquote(a[0])[0], ev), name, ev, pkey, "dir" if name == "mkdir" else "node")
+            add(
+                resolve(pkey, None, unquote(a[0])[0], ev),
+                name,
+                ev,
+                pkey,
+                "dir" if name == "mkdir" else "node",
+            )
         elif name in ("mkdirat", "mknodat"):
-            add(resolve(pkey, a[0], unquote(a[1])[0], ev), name, ev, pkey, "dir" if name == "mkdirat" else "node")
+            add(
+                resolve(pkey, a[0], unquote(a[1])[0], ev),
+                name,
+                ev,
+                pkey,
+                "dir" if name == "mkdirat" else "node",
+            )
         elif name in ("symlink", "symlinkat"):
             target = unquote(a[0])[0]
             dst = (
@@ -693,13 +836,19 @@ def analyze(outdir, run_dir=None):
         elif name == "linkat":
             add(resolve(pkey, a[2], unquote(a[3])[0], ev), name, ev, pkey, "hardlink")
         elif name == "rename":
-            move(resolve(pkey, None, unquote(a[0])[0], ev), resolve(pkey, None, unquote(a[1])[0], ev), name, ev, pkey)
+            move(
+                resolve(pkey, None, unquote(a[0])[0], ev),
+                resolve(pkey, None, unquote(a[1])[0], ev),
+                name,
+                ev,
+                pkey,
+            )
         elif name in ("renameat", "renameat2"):
             src = resolve(pkey, a[0], unquote(a[1])[0], ev)
             dst = resolve(pkey, a[2], unquote(a[3])[0], ev)
             flags = a[4] if len(a) > 4 else ""
             if "RENAME_EXCHANGE" in flags:
-                continue  # both entries existed before and after
+                return  # both entries existed before and after
             move(src, dst, name, ev, pkey)
             if "RENAME_WHITEOUT" in flags:
                 add(src, name + "(whiteout)", ev, pkey, "node")
@@ -715,6 +864,56 @@ def analyze(outdir, run_dir=None):
                 sp = unquote(m.group(1))[0]
                 if sp and not sp.startswith("\x00") and not m.group(1).startswith('"\\0'):
                     add(resolve(pkey, None, sp, ev), "bind(AF_UNIX)", ev, pkey, "socket")
+
+    for ev in all_events:
+        pkey = proc_of(ev)
+        if pkey is None:
+            continue
+        try:
+            replay_one(ev, pkey)
+        except Exception as exc:  # never guess past an event we could not read
+            analyzer_errors.append(
+                {"tid": ev.tid, "line": ev.line, "call": ev.name, "error": repr(exc)[:200]}
+            )
+    if analyzer_errors:
+        problem("ANALYZER_ERROR", analyzer_errors[:20])
+
+    # ---- receiver-side cross-check of signal capture. A user-sent signal (si_code SI_USER /
+    # SI_TKILL / SI_QUEUE) delivered from a pid of the traced tree must match a recorded
+    # kill-family attempt of that sender at that receiver; one that does not means the capture
+    # missed a send, so signalled_pids becomes MISSING. Kernel-generated deliveries (SIGCHLD,
+    # SIGPIPE, faults, timers, parent-death, SIGIO) are not the controller signalling: they are
+    # excluded from signalled_pids and only counted here (owner reading kernel_signals).
+    tree_pids = {p.pid for p in procs.values()}
+    attempt_keys = {
+        (at["sender_pid"], t, at["signal"]) for at in attempts for t in at["target_pids"]
+    }
+    unmatched, kernel_deliveries = [], {}
+    for d in deliveries:
+        if d["si_code"] in USER_SI_CODES and d["si_pid"] is not None:
+            if (
+                d["si_pid"] in tree_pids
+                and (d["si_pid"], d["receiver_pid"], d["signal"]) not in attempt_keys
+            ):
+                unmatched.append(d)
+        else:
+            k = f"{d['signal']}/{d['si_code']}"
+            kernel_deliveries[k] = kernel_deliveries.get(k, 0) + 1
+    notes["deliveries_unmatched_to_attempts"] = unmatched
+    notes["kernel_signal_deliveries"] = kernel_deliveries
+    notes["sigkill_deaths_without_attempt"] = [
+        k
+        for k in kills
+        if k["signal"] == "SIGKILL"
+        and not any(k["pid"] in at["target_pids"] and at["signal"] == "SIGKILL" for at in attempts)
+    ]
+    if unmatched:
+        unresolved_targets.append(
+            {
+                "reason": "user-sent delivery without a recorded attempt",
+                "deliveries": unmatched[:20],
+            }
+        )
 
     # ---- reparenting (creator exits while child alive): nearest live subreaper ancestor, else 1
     for p in procs.values():
@@ -742,7 +941,11 @@ def analyze(outdir, run_dir=None):
                 break
     tracer["root_exit"] = root_exit
     tracer["tracer_exit"] = parse_int(status.get("tracer_exit"))
-    if tracer["status"] != "NOT_RUN" and root_exit is not None and tracer["tracer_exit"] is not None:
+    if (
+        tracer["status"] != "NOT_RUN"
+        and root_exit is not None
+        and tracer["tracer_exit"] is not None
+    ):
         m = re.match(r"exited with (\d+)", root_exit)
         expected = int(m.group(1)) if m else None
         km = re.match(r"killed by (\w+)", root_exit)
@@ -754,16 +957,30 @@ def analyze(outdir, run_dir=None):
         problem("TRACER_EXIT_UNKNOWN", "no tracer exit status recorded")
     if tracer["status"] != "NOT_RUN" and tracer["problems"]:
         codes = {x["code"] for x in tracer["problems"]}
-        for code in ("HARNESS_INCOMPLETE", "NO_TRACE", "TRUNCATED", "TRACER_EXIT_MISMATCH",
-                     "INCONSISTENT", "TRACER_MESSAGES", "TRACER_EXIT_UNKNOWN"):
+        for code in (
+            "TRACER_KILLED",
+            "HARNESS_INCOMPLETE",
+            "NO_TRACE",
+            "TRUNCATED",
+            "TRACER_EXIT_MISMATCH",
+            "INCONSISTENT",
+            "TRACER_MESSAGES",
+            "TRACER_EXIT_UNKNOWN",
+            "ANALYZER_ERROR",
+        ):
             if code in codes:
                 tracer["status"] = code
                 break
     complete = tracer["status"] == "OK"
 
     # ---- contract projection
-    evidence = {"schema": SCHEMA, "symbols": {}, "controller_trace": {}, "filesystem_snapshot": {},
-                "harness_observations": {}}
+    evidence = {
+        "schema": SCHEMA,
+        "symbols": {},
+        "controller_trace": {},
+        "filesystem_snapshot": {},
+        "harness_observations": {},
+    }
     if root_tid is not None:
         evidence["symbols"]["HARNESS_CONTROLLER_PID"] = root_tid
     if run_dir:
@@ -773,7 +990,9 @@ def analyze(outdir, run_dir=None):
             missing[f] = "trace not complete: " + tracer["status"]
     else:
         if io_uring_ok:
-            missing["filesystem_snapshot.created_paths"] = "io_uring_setup succeeded: writes may bypass the trace"
+            missing["filesystem_snapshot.created_paths"] = (
+                "io_uring_setup succeeded: writes may bypass the trace"
+            )
         else:
             evidence["filesystem_snapshot"]["created_paths"] = sorted({r["path"] for r in created})
         signalled = sorted({t for at in attempts for t in at["target_pids"]})
@@ -797,10 +1016,14 @@ def analyze(outdir, run_dir=None):
                     tree[str(hp)] = harness[hp].harness_parent
                     hp = harness[hp].harness_parent
         if ambiguous:
-            missing["process_tree"] = f"pid reuse with different creating parents: {sorted(set(ambiguous))}"
+            missing["process_tree"] = (
+                f"pid reuse with different creating parents: {sorted(set(ambiguous))}"
+            )
         else:
             evidence["process_tree"] = tree
-        evidence["harness_observations"]["max_concurrent_children"] = max_concurrent(procs, root_key)
+        evidence["harness_observations"]["max_concurrent_children"] = max_concurrent(
+            procs, root_key
+        )
         evidence["harness_observations"]["shell_launches"] = shell_launches
     evidence["harness_observations"]["signal_capture_exhaustive"] = bool(
         complete and not unresolved_targets
@@ -809,7 +1032,11 @@ def analyze(outdir, run_dir=None):
     outside = []
     if run_dir and "created_paths" in evidence["filesystem_snapshot"]:
         rd = posixpath.normpath(run_dir)
-        outside = [p for p in evidence["filesystem_snapshot"]["created_paths"] if not (p == rd or p.startswith(rd + "/"))]
+        outside = [
+            p
+            for p in evidence["filesystem_snapshot"]["created_paths"]
+            if not (p == rd or p.startswith(rd + "/"))
+        ]
     notes["created_outside_run_dir"] = outside
     notes["created_then_deleted"] = sorted({r["path"] for r in created if r["deleted_later"]})
     evidence["missing"] = missing
@@ -827,7 +1054,9 @@ def analyze(outdir, run_dir=None):
             }
             for p in procs.values()
         },
-        "harness_processes": {str(h.pid): {"label": h.label, "parent": h.harness_parent} for h in harness.values()},
+        "harness_processes": {
+            str(h.pid): {"label": h.label, "parent": h.harness_parent} for h in harness.values()
+        },
         "signal_attempts": attempts,
         "created": created,
         "trace_files": len(files),
@@ -840,8 +1069,20 @@ def roots_has(roots, tid):
     return tid in roots
 
 
-def record_signal(ev, pkey, procs, harness, pgid, pidfds, alive_incarnation, thread_owner,
-                  attempts, notes, unresolved, root_tid):
+def record_signal(
+    ev,
+    pkey,
+    procs,
+    harness,
+    pgid,
+    pidfds,
+    alive_incarnation,
+    thread_owner,
+    attempts,
+    notes,
+    unresolved,
+    root_tid,
+):
     a, name = ev.args, ev.name
     sender = procs[pkey]
     sig, scope, targets = None, "pid", []
@@ -861,8 +1102,15 @@ def record_signal(ev, pkey, procs, harness, pgid, pidfds, alive_incarnation, thr
             raw = int(m.group(1)) if m else pidfds.get(pkey, {}).get(fd)
     except (IndexError, AttributeError):
         raw = None
-    entry = {"sender_pid": sender.pid, "sender": pkey, "syscall": name, "raw_args": ev.raw_args[:160],
-             "signal": sig, "result": "ok" if ev.ok else (ev.ret + " " + ev.tail).strip(), "ts_ns": ev.ts}
+    entry = {
+        "sender_pid": sender.pid,
+        "sender": pkey,
+        "syscall": name,
+        "raw_args": ev.raw_args[:160],
+        "signal": sig,
+        "result": "ok" if ev.ok else (ev.ret + " " + ev.tail).strip(),
+        "ts_ns": ev.ts,
+    }
     if sig == "0":
         notes["signal_zero_probes"].append(entry)
         return
@@ -946,9 +1194,12 @@ def main(argv):
         "tracer_status": evidence["harness_observations"]["tracer_status"]["status"],
         "HARNESS_CONTROLLER_PID": evidence["symbols"].get("HARNESS_CONTROLLER_PID"),
         "created_paths": len(evidence["filesystem_snapshot"].get("created_paths", []))
-        if "created_paths" in evidence["filesystem_snapshot"] else "MISSING",
+        if "created_paths" in evidence["filesystem_snapshot"]
+        else "MISSING",
         "signalled_pids": evidence["controller_trace"].get("signalled_pids", "MISSING"),
-        "max_concurrent_children": evidence["harness_observations"].get("max_concurrent_children", "MISSING"),
+        "max_concurrent_children": evidence["harness_observations"].get(
+            "max_concurrent_children", "MISSING"
+        ),
         "shell_launches": evidence["harness_observations"].get("shell_launches", "MISSING"),
         "missing": evidence["missing"],
         "created_outside_run_dir": evidence["harness_notes"]["created_outside_run_dir"],

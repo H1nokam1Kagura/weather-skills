@@ -21,6 +21,7 @@ from pathlib import Path
 
 CTL = Path("/opt/ctl")
 SIMKIT = Path("/opt/simkit")
+INPUTS = Path("/opt/inputs.json")
 SEED = 20251001
 
 
@@ -32,7 +33,7 @@ def main(case):
     case = Path(case)
     sys.dont_write_bytecode = True
     sys.path[:0] = [str(CTL), str(SIMKIT)]
-    spec = json.loads(Path("/opt/inputs.json").read_text(encoding="utf-8"))
+    spec = json.loads(INPUTS.read_text(encoding="utf-8"))
     pins = {entry["role"]: entry for entry in spec["files"]}
     generator = Path(pins["fixture_generator"]["path"])
     if sha256(generator) != pins["fixture_generator"]["sha256"]:

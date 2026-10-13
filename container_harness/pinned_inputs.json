@@ -1,0 +1,68 @@
+{
+ "schema": "simkit.harness-pinned-inputs/1",
+ "why": "CI cannot read the SIMKIT repo or the frozen v2.7 package, so the exact bytes the harness needs are vendored under container_harness/pinned/ (stored -text: raw CRLF bytes, no newline normalisation) and every one is verified against the hash its authority recorded: on the host before the image build, at image build, and again at run time inside the container.",
+ "supplement_id": "cached-onset-e2e-v2_7-inputs/1",
+ "authorities": {
+  "supplement": "SIMKIT simkit/casesets/cached-onset-e2e-v2_7-inputs-1/INPUT-SUPPLEMENT.json (files[].sha256, raw on-disk bytes)",
+  "final_pins": "frozen v2.7 package FINAL-PINS.json (sha256 153f207e89c6ac7786d8203413eeef1e1fce219aef7252d63aced1b5b33d0402), files[]"
+ },
+ "files": [
+  {
+   "role": "fixture_generator",
+   "repo_path": "container_harness/pinned/simkit/fixtures/onset_synth.py",
+   "image_path": "/opt/simkit/simkit/fixtures/onset_synth.py",
+   "sha256": "858296c0faeb3982ad31db0c4e0cdd80b99fa30f75f2067a438f924d55768004",
+   "authority": "supplement",
+   "authority_path": "simkit/simkit/fixtures/onset_synth.py"
+  },
+  {
+   "role": "fixtures_package_init",
+   "repo_path": "container_harness/pinned/simkit/fixtures/__init__.py",
+   "image_path": "/opt/simkit/simkit/fixtures/__init__.py",
+   "sha256": "64f3d96dc3345a6609616200a484cc8932eb073315d31af7e521fd34cca915a5",
+   "authority": "supplement",
+   "authority_path": "simkit/simkit/fixtures/__init__.py"
+  },
+  {
+   "role": "profile",
+   "repo_path": "container_harness/pinned/profiles/cached-onset/profile.json",
+   "image_path": "/opt/simkit/profiles/cached-onset/profile.json",
+   "sha256": "e11b6dd98ba07e298ee86bd3f69ac723d05d4ead1a5c169efc2d23e7ff9e4592",
+   "authority": "supplement",
+   "authority_path": "simkit/profiles/cached-onset/profile.json"
+  },
+  {
+   "role": "frozen_simkit_init",
+   "repo_path": "container_harness/pinned/simkit/__init__.py",
+   "image_path": "/opt/simkit/simkit/__init__.py",
+   "sha256": "c5c5dc42982a5e12979b9dc071221ade680d43db2729fd9ecb482dcea1c6cdd1",
+   "authority": "final_pins",
+   "authority_path": "simkit/__init__.py"
+  },
+  {
+   "role": "frozen_core",
+   "repo_path": "container_harness/pinned/simkit/core.py",
+   "image_path": "/opt/simkit/simkit/core.py",
+   "sha256": "57576ef36dd98755d7f30296e2cce7e09e9de1b54d4431ad705d3f75e9e9067d",
+   "authority": "final_pins",
+   "authority_path": "simkit/core.py"
+  },
+  {
+   "role": "frozen_profile_loader",
+   "repo_path": "container_harness/pinned/simkit/profile.py",
+   "image_path": "/opt/simkit/simkit/profile.py",
+   "sha256": "43513e74589e998cea332cbc321acef28fe876ee064c0c8d50c4a20201a099d9",
+   "authority": "final_pins",
+   "authority_path": "simkit/profile.py"
+  },
+  {
+   "role": "frozen_score",
+   "repo_path": "container_harness/pinned/simkit/score.py",
+   "image_path": "/opt/simkit/simkit/score.py",
+   "sha256": "aabe153188db1e28d0e541628d26b89097d834dd08efa2cb932af93a730aec86",
+   "authority": "final_pins",
+   "authority_path": "simkit/score.py",
+   "note": "host-side only use: frozen oracle verdicts (all_descendants_of, all_under) over the harness evidence in report.py"
+  }
+ ]
+}

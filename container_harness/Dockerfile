@@ -1,13 +1,16 @@
 # simkit-harness-ctl:<controller git short sha>
 #
-# Built ONLY by container_harness/run_case_in_container.py, which stages the context:
-#   ctl/                 git archive of the controller repo at the named commit (LF, no CRLF)
-#   simkit/              pinned SIMKIT inputs (supplement cached-onset-e2e-v2_7-inputs/1 generator,
-#                        fixtures/__init__.py, profile.json) plus frozen simkit core/profile/__init__
-#   inputs.json          expected sha256 of every staged input, checked at build AND at run
+# Built ONLY by `container_harness/launch.py build`, which stages the context:
+#   ctl/                 git archive of the controller repo at HEAD
+#   simkit/              container_harness/pinned/ raw bytes: supplement cached-onset-e2e-v2_7-inputs/1
+#                        generator, fixtures/__init__.py, profile.json; frozen v2.7 simkit
+#                        __init__/core/profile/score (FINAL-PINS hashes)
+#   inputs.json          expected sha256 of every pinned input, checked on the host, at build AND
+#                        at run (from container_harness/pinned_inputs.json)
 #   requirements-ctl.txt pinned controller dev dependencies
-# Run conditions (owner ruling container_route_ruling_2026-10-13) are applied by the launcher:
-# default seccomp, never --privileged, --cap-add SYS_PTRACE only, no bind mounts, core dumps off.
+# Run conditions (owner ruling container_route_ruling_2026-10-13) are applied by launch.py run:
+# default seccomp, never --privileged, --cap-add SYS_PTRACE only, no bind mounts, core dumps off,
+# no network, docker-init as PID 1.
 FROM python:3.12-slim
 
 RUN apt-get update \
@@ -28,7 +31,8 @@ RUN useradd -m -u 1000 runner \
 COPY ctl /opt/ctl
 COPY simkit /opt/simkit
 COPY inputs.json /opt/inputs.json
-RUN python -m compileall -q /opt/ctl/tools /opt/ctl/adapter_support /opt/ctl/container_harness /opt/ctl/skills /opt/simkit/simkit >/dev/null \
+RUN (python -m compileall -q /opt/ctl/tools /opt/ctl/adapter_support /opt/ctl/container_harness /opt/ctl/skills /opt/simkit/simkit >/dev/null \
+     || echo "compileall reported errors (those modules run uncompiled)") \
  && chown -R root:root /opt/ctl /opt/simkit /opt/inputs.json \
  && chmod -R a-w /opt/ctl /opt/simkit /opt/inputs.json \
  && python -I /opt/ctl/container_harness/verify_inputs.py /opt/inputs.json
