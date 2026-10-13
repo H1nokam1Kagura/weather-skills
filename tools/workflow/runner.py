@@ -1,5 +1,6 @@
 """Controller for cached-onset/v1. No state can be advanced by an agent-written file."""
 
+import functools
 import inspect
 import json
 import sys
@@ -8,7 +9,7 @@ import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import claim_gates, operator_ledger, policy, review_evidence
+from . import claim_gates, operator_ledger, policy, recovery, review_evidence
 from .admission import identity as admission_identity
 from .admission import record_for
 from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
@@ -278,22 +279,71 @@ class Controller:
         )
 
     @classmethod
-    def resume(cls, root, processes, roles, hooks=None, admission=None):
+    def request_resume(cls, root, processes, roles, request, hooks=None, admission=None):
+        """Resume-request API: requester attribution and requested overrides (D18).
+
+        Every request gets a durable decision record (controller_trace.resume[*]) before
+        this returns the resumed controller or raises the refusal.
+        """
+        return cls.resume(root, processes, roles, hooks=hooks, admission=admission, request=request)
+
+    @classmethod
+    def resume(
+        cls, root, processes, roles, hooks=None, admission=None, request=None, supervisor=None
+    ):
+        """Itemized re-verification within the original limits; one decision per request.
+
+        request None is the legacy unattributed resume (initiated_by null, capped at 2 as
+        before). Automatic resumes need the run loop's supervisor capability and are capped
+        at recovery.MAX_AUTOMATIC_RESUMES; attributed operator-ledger resumes are uncapped
+        (UC-16/R15) but pass the same verification within the original limits.
+        """
         root = safe_path(root)
         with gated("resume_verification"):
-            value = read_checkpoint(root)
+            value = read_checkpoint(root)  # unreadable: no durable place for a decision
+        attribution, override, problems = recovery.parse_request(request, supervisor)
+        book = recovery.ledger(value["context"])
+        interruption = recovery.latest_unanswered(value["context"])
+        decision = recovery.new_decision(request, attribution, override, interruption)
+        verify = "resume_verification"
+        checked, failed, refusals = [], [], []
+
+        def fail(item, refusal):
+            failed.append(item)
+            refusals.append(refusal)
+
+        initiated = attribution["initiated_by"]
+        checked.append("attribution")
+        for problem in problems:
+            fail(problem, Refused("resume request attribution invalid: " + problem, gate=verify))
+        checked.append("pending_operation")
         if value["pending"]:
-            raise Refused(
-                "interrupted operation has uncertain outcome; start a new attempt",
-                gate="pending_operation",
+            fail(
+                "pending_operation:" + str(recovery.pending_name(value["pending"])),
+                Refused(
+                    "interrupted operation has uncertain outcome; start a new attempt",
+                    gate="pending_operation",
+                ),
             )
-        if value["resumes"] >= 2:
-            raise Refused(
-                "resume limit exhausted; start a new attempt",
-                gate="interrupted",
-                reason="repeated_interruption",
-            )
+        checked.append("resume_limit")
+        exhausted = Refused(
+            "resume limit exhausted; start a new attempt",
+            gate="interrupted",
+            reason="repeated_interruption",
+        )
+        if initiated == "automatic":
+            if book["counters"]["automatic_resumes_used"] >= recovery.MAX_AUTOMATIC_RESUMES:
+                fail("automatic_resume_limit", exhausted)
+            if interruption is None or not interruption["transient"]:
+                fail(
+                    "interruption:not_transient",
+                    Refused("automatic resume needs a transient interruption", gate=verify),
+                )
+        # Legacy cap for an unattributed resume, applied below unless the operator channel
+        # binds an accepted user resume record to it (operator resumes are uncapped).
+        legacy_capped = initiated is None and value["resumes"] >= 2
         self = cls.__new__(cls)
+        self.resumes = value["resumes"]
         for key in (
             "state",
             "events",
@@ -317,37 +367,64 @@ class Controller:
         self.repo, self.root, self.source = map(
             safe_path, (value["repo"], value["root"], value["source"])
         )
-        verify = "resume_verification"
+        checked.append("run_directory")
         if self.root != root:
-            raise Refused("checkpoint belongs to another run directory", gate=verify)
-        with gated(verify, override=True):
-            self.goal = request_goal(self.request)
-        self.admission = admission
-        with gated(verify):
-            self.admission_record = record_for(admission, self.source)
-            self.admission_hash = admission_identity(self.admission_record)
-        if (
-            value.get("admission_record") != self.admission_record
-            or value.get("admission_hash") != self.admission_hash
-        ):
-            raise Refused(
-                "resume requires the identical source admission policy and registration",
-                gate=verify,
+            fail(
+                "run_directory",
+                Refused("checkpoint belongs to another run directory", gate=verify),
             )
+        checked.append("goal")
+        try:
+            with gated(verify, override=True):
+                self.goal = request_goal(self.request)
+        except Refused as exc:
+            fail("goal", exc)
+            self.goal = None
+        self.admission = admission
+        checked.append("admission_policy")
+        try:
+            with gated(verify):
+                self.admission_record = record_for(admission, self.source)
+                self.admission_hash = admission_identity(self.admission_record)
+        except Refused as exc:
+            fail("admission_policy", exc)
+            self.admission_record = value.get("admission_record")
+            self.admission_hash = value.get("admission_hash")
+        else:
+            if (
+                value.get("admission_record") != self.admission_record
+                or value.get("admission_hash") != self.admission_hash
+            ):
+                fail(
+                    "admission_policy",
+                    Refused(
+                        "resume requires the identical source admission policy and registration",
+                        gate=verify,
+                    ),
+                )
         self.hooks = hooks
+        checked.append("harness")
         if self.context.get("injection_harness") and hooks is None:
-            raise Refused("injected test run requires its original harness for resume", gate=verify)
-        self.sequence = stages(self.goal["task"])
-        if self.profile != PROFILES[self.goal["task"]]["id"]:
-            raise Refused("checkpoint profile mismatch", gate=verify)
-        expected = list(zip(self.sequence, self.sequence[1:], strict=False))
-        if self.state not in self.sequence or len(self.events) != self.sequence.index(self.state):
-            raise Refused("checkpoint stage history is incomplete", gate=verify)
-        for index, event in enumerate(self.events):
-            if (event["from"], event["to"]) != expected[index] or digest(
-                event["evidence"]
-            ) != event["evidence_hash"]:
-                raise Refused("checkpoint transition evidence is damaged", gate=verify)
+            fail(
+                "harness",
+                Refused("injected test run requires its original harness for resume", gate=verify),
+            )
+        checked.append("history")
+        if self.goal is not None:
+            self.sequence = stages(self.goal["task"])
+            expected = list(zip(self.sequence, self.sequence[1:], strict=False))
+            if self.profile != PROFILES[self.goal["task"]]["id"]:
+                fail("profile", Refused("checkpoint profile mismatch", gate=verify))
+            elif self.state not in self.sequence or len(self.events) != self.sequence.index(
+                self.state
+            ):
+                fail("history", Refused("checkpoint stage history is incomplete", gate=verify))
+            elif any(
+                (event["from"], event["to"]) != expected[index]
+                or digest(event["evidence"]) != event["evidence_hash"]
+                for index, event in enumerate(self.events)
+            ):
+                fail("history", Refused("checkpoint transition evidence is damaged", gate=verify))
         self.outputs = safe_path(root / "artifacts")
         self.paths = {
             "source": self.source,
@@ -362,28 +439,81 @@ class Controller:
         roles.sessions = {r["session_id"] for r in roles.receipts}
         self.elapsed_before, self.started = value["elapsed_s"], time.monotonic()
         remaining = value["total_seconds"] - self.elapsed_before
+        checked.append("budget")
         if remaining <= 0 or roles.spent >= roles.budget:
-            raise Refused(
-                "original run budget exhausted; resume cannot reset limits",
-                gate="budget",
-                reason="resume_refused",
+            fail(
+                "budget",
+                Refused(
+                    "original run budget exhausted; resume cannot reset limits",
+                    gate="budget",
+                    reason="resume_refused",
+                ),
             )
+        if self.goal is not None:
+            # Itemized integrity (never parsed from exception text).
+            verification = recovery.verify(self)
+            checked += verification["checked_items"]
+            for item, refusal in zip(
+                verification["failed_items"], verification["refusals"], strict=True
+            ):
+                fail(item, tag(refusal, verify, "override", override=True))
+        checked.append("process_receipts")
+        if "dispatch_evidence" in self.context and not supports_process_receipts(processes):
+            fail(
+                "process_receipts",
+                Refused(
+                    "dispatch_evidence_mode resume requires a process manager that emits "
+                    "on_event receipts and accepts run(..., tool=...)",
+                    gate="gate_evidence",
+                ),
+            )
+        if not failed and initiated == "operator_ledger":
+            checked.append("operator_record")
+            bound, problem = recovery.check_operator_record(self, attribution["operator_record_id"])
+            if problem:
+                fail(problem, Refused("no accepted operator resume record", gate=verify))
+            else:
+                decision["operator_record_id"] = bound
+        elif not failed and initiated is None and override is None:
+            # An unattributed request becomes an operator_ledger resume only when the operator
+            # channel hands out an accepted user resume record for it (P-01).
+            bound, _ = recovery.operator_authorization(self)
+            if bound is not None:
+                decision["initiated_by"] = initiated = "operator_ledger"
+                decision["operator_record_id"] = bound
+                checked.append("operator_record")
+        elif not failed and initiated == "evidenced_repair":
+            checked.append("repair_binding")
+            problem = recovery.check_repair_binding(self.context, interruption)
+            if problem:
+                fail(problem, Refused("no evidenced mechanical repair to resume", gate=verify))
+        if legacy_capped and initiated is None:
+            fail("resume_limit", exhausted)
+        decision["verification"] = {
+            "verdict": "FAIL" if failed else "PASS",
+            "checked_items": checked,
+            "failed_items": failed,
+        }
+        if override is not None:
+            # UC-15: an override request is refused outright, never partially applied.
+            refusals.insert(
+                0,
+                Refused(
+                    "resume cannot reset counters or change limits: " + ", ".join(sorted(override)),
+                    gate="budget",
+                    reason="resume_refused",
+                ),
+            )
+        if refusals:
+            recovery.record_refused(root, value, decision, refusals[0], request)
+            raise refusals[0]
         processes.total_seconds = value["total_seconds"]
         processes.deadline = min(
             getattr(processes, "deadline", float("inf")), time.monotonic() + remaining
         )
         self.resumes = value["resumes"] + 1
-        with gated(verify, override=True):
-            self.integrity()
-        if "dispatch_evidence" in self.context and not supports_process_receipts(processes):
-            raise Refused(
-                "dispatch_evidence_mode resume requires a process manager that emits on_event "
-                "receipts and accepts run(..., tool=...)",
-                gate="gate_evidence",
-            )
         self.bind_process_events()
-        self.dispatch_event("resume")
-        self.checkpoint()
+        recovery.record_accepted(self, decision, request)  # resume event + checkpoint
         return self
 
     def dispatch_event(self, kind, **details):
@@ -796,7 +926,10 @@ class Controller:
         return operator_ledger.consult(self, boundary, allowed)
 
     def operator_resume_authorization(self):
-        """Before any resume: the accepted user resume record_id to bind, or None."""
+        """Before any resume: the accepted user resume record_id to bind, None if the ledger
+        was consulted and accepted none, or False if no ledger was opened for this run."""
+        if self.context.get("operator_channel") is None:
+            return False
         return operator_ledger.take_accepted_resume(self)
 
     def request_transition(self, request):
@@ -891,68 +1024,14 @@ class Controller:
         self.record_plan_validation(self.plan, role, parser_accepted=True, failed_fields=[])
 
     def integrity(self):
-        # Inputs bound into an approval invalidate it when they change (review_binding);
-        # before any binding exists the same change fails the check that admitted it.
-        bound = bool(self.binding)
-        with gated("source_check"):
-            admission_changed = (
-                record_for(self.admission, self.source) != self.admission_record
-                or admission_identity(self.admission_record) != self.admission_hash
-            )
-        if admission_changed:
-            raise Refused(
-                "source admission policy changed",
-                gate="review_binding" if bound else "source_check",
-                reason="approval_invalidated" if bound else None,
-            )
-        for name, expected in self.evidence.items():
-            with gated("gate_evidence"):
-                observed = tree_hash(self.root / name)
-            if observed != expected:
-                raise Refused(
-                    "controller evidence changed: " + name,
-                    gate="gate_evidence",
-                    reason="artifact_identity_mismatch",
-                )
-        with gated("source_check"):
-            source_changed = tree_hash(self.source) != self.source_hash
-        if source_changed:
-            raise Refused(
-                "source changed since admission",
-                gate="review_binding" if bound else "source_check",
-                reason="approval_invalidated" if bound else None,
-            )
-        with gated("review_binding" if bound else "plan_validation"):
-            build_changed = digest(build_manifest(self.repo)) != self.build_hash
-        if build_changed:
-            raise Refused(
-                "code/documentation changed since admission; review is stale",
-                gate="review_binding" if bound else "plan_validation",
-                reason="approval_invalidated" if bound else None,
-            )
-        with gated("authorization"):
-            request_changed = (
-                digest(self.request) != self.request_hash or request_goal(self.request) != self.goal
-            )
-        if request_changed:
-            raise Refused(
-                "request/authorization changed since admission",
-                gate="review_binding" if bound else "authorization",
-                reason="approval_invalidated" if bound else None,
-            )
-        for name, value in self.artifacts.items():
-            with gated("gate_evidence"):
-                observed = tree_hash(self.paths[name])
-            if observed != value:
-                raise Refused(
-                    f"artifact changed since its producing step: {name}",
-                    gate="gate_evidence",
-                    reason="artifact_identity_mismatch",
-                )
-        if self.binding and self.current_binding() != self.binding:
-            raise Refused(
-                "plan or review binding changed", gate="review_binding", reason="stale_binding"
-            )
+        """Raise the first failed item of the itemized verification (recovery.verify).
+
+        Inputs bound into an approval invalidate it when they change (review_binding);
+        before any binding exists the same change fails the check that admitted it.
+        """
+        refusals = recovery.verify(self, stop_at_first=True)["refusals"]
+        if refusals:
+            raise refusals[0]
 
     def current_binding(self):
         bound = {
@@ -1318,7 +1397,7 @@ class Controller:
 
     def run(self):
         try:
-            result = self._run()
+            result = self._supervised_run()
         except NeedsInfo as stop:
             terminal, mapping = self.terminal_for(stop)
             result = {
@@ -1332,13 +1411,17 @@ class Controller:
             return result
         except Exception as exc:
             terminal, mapping = self.terminal_for(exc)
+            stop = recovery.ledger(self.context)["stop"]
+            if stop is not None:
+                # Notify-and-wait (UC-15): no further state, invocation or process follows.
+                mapping["stop"] = dict(stop)
             result = {
                 "status": "INCOMPLETE",
                 "state": self.state,
                 "error": str(exc),
                 "stop_kind": "gate_or_contract_refusal"
                 if isinstance(exc, Refused)
-                else "runtime_failure",
+                else (stop or {}).get("kind", "runtime_failure"),
                 "role_receipts": self.roles.receipts,
                 "model_cost_usd": self.roles.spent,
             }
@@ -1356,6 +1439,83 @@ class Controller:
             from .reporting import report
 
             report(self.root)
+
+    def _supervised_run(self):
+        """Automatic-resume supervisor (D23): classified interruptions are recorded at failure
+        time; transient ones with a durable null pending are resumed, re-verified, at most
+        recovery.MAX_AUTOMATIC_RESUMES times; repeated interruption or an exhausted budget is
+        diagnosed, mechanically repaired only when evidenced and authority-preserving, else
+        notified, and the run stops and waits."""
+        self.bind_recovery()
+        while True:
+            try:
+                return self._run()
+            except (NeedsInfo, Refused):
+                raise
+            except Exception as exc:
+                resumed = self.recover(exc)
+                if resumed is None:
+                    raise
+                # Continue as the durably re-verified controller, in this same object.
+                self.__dict__.update(resumed.__dict__)
+                self.bind_process_events()
+                self.bind_recovery()
+
+    def bind_recovery(self):
+        recovery.ledger(self.context)
+        try:
+            self.roles.transport_retry_recorder = functools.partial(
+                recovery.record_transport_retry, self
+            )
+        except AttributeError:
+            pass  # a role transport without attributes simply gets no transport retry
+
+    def recover(self, exc):
+        """Record the interruption, then resume / repair / notify. None means stop now."""
+        try:
+            interruption = recovery.record_interruption(self, exc)
+        except Exception as evidence_error:
+            exc.add_note("Interruption record incomplete: " + type(evidence_error).__name__)
+            return None
+        if recovery.automatic_eligible(self, interruption):
+            request = {"initiated_by": "automatic"}
+            try:
+                return type(self).resume(
+                    self.root,
+                    self.processes,
+                    self.roles,
+                    hooks=self.hooks,
+                    admission=self.admission,
+                    request=request,
+                    supervisor=recovery.SUPERVISOR,
+                )
+            except Refused as refusal:
+                # The refusal and its terminal are durable; adopt them before stopping.
+                durable = read_checkpoint(self.root)
+                self.context, self.evidence = durable["context"], durable["evidence"]
+                raise refusal from exc
+        if not recovery.needs_diagnosis(self, interruption):
+            return None
+        diagnosis = recovery.diagnose(self)
+        repair = recovery.execute_repair(self, diagnosis["index"])
+        if repair is not None and repair["result"] == "SUCCESS":
+            try:
+                return type(self).resume(
+                    self.root,
+                    self.processes,
+                    self.roles,
+                    hooks=self.hooks,
+                    admission=self.admission,
+                    request={"initiated_by": "evidenced_repair"},
+                )
+            except Refused:
+                durable = read_checkpoint(self.root)
+                self.context, self.evidence = durable["context"], durable["evidence"]
+        try:
+            recovery.notify(self, diagnosis)
+        except Exception as hook_error:
+            exc.add_note("Operator notification hook failed: " + type(hook_error).__name__)
+        return None
 
     def _run(self):
         self.integrity()

@@ -6,6 +6,7 @@ import uuid
 
 from .catalog import child_environment
 from .contracts import Refused, digest
+from .recovery import transport_call
 from .review_evidence import text_hash
 
 PROMPTS = {
@@ -122,11 +123,18 @@ class Roles:
         if dispatch_context is not None:
             self.dispatch_observer(dict(self.dispatch_observation))
             self.dispatch_observation["process_boundary"] = "ENTERED"
-        result = self.processes.run(
-            command,
-            self.workspace,
-            child_environment(self.workspace.parent / "scratch"),
-            stdin,
+        # CAP-TRANSPORT-RETRY: one retry inside this same attempt/invocation, only on a
+        # classified pre-write transport fault the controller records durably first.
+        result = transport_call(
+            self,
+            role,
+            lambda: self.processes.run(
+                command,
+                self.workspace,
+                child_environment(self.workspace.parent / "scratch"),
+                stdin,
+            ),
+            invocation,
         )
         if dispatch_context is not None:
             self.dispatch_observation.update(
