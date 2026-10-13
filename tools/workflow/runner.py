@@ -940,7 +940,12 @@ class Controller:
             changes.append({"object": "manifest", "to_hash": digest(build_now), "build": build_now})
         with gated("authorization"):
             request_now = digest(self.request)
-            goal_changed = request_goal(self.request) != self.goal
+            try:
+                goal_changed = request_goal(self.request) != self.goal
+            except Refused:
+                if follow and request_now != self.request_hash:
+                    self.record_material_change("request", request_now)
+                raise
         if request_now != self.request_hash or goal_changed:
             if follow:
                 # Recorded either way; a goal change is never re-reviewed (it needs new

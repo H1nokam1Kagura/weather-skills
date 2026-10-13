@@ -766,7 +766,9 @@ class InjectionHooks:
         try:
             current = parsed["definitions"][ref][section][field]
         except (KeyError, TypeError) as exc:
-            raise UnsupportedInjection(f"definition field missing: {ref}.{section}.{field}") from exc
+            raise UnsupportedInjection(
+                f"definition field missing: {ref}.{section}.{field}"
+            ) from exc
         if type(current) not in (int, float) or current != args.get("from"):
             raise UnsupportedInjection("definition field does not hold the declared from value")
         new = args.get("to")
@@ -835,6 +837,8 @@ class InjectionHooks:
             raise UnsupportedInjection("bump value must be a new nonempty build_id")
         record["before_hash"] = tree_hash(path)
         record["build_id_from"] = manifest["build_id"]
-        path.write_text(json.dumps({**manifest, "build_id": value}, indent=2) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps({**manifest, "build_id": value}, indent=2) + "\n", encoding="utf-8"
+        )
         record["after_hash"] = tree_hash(path)
         record["build_id_to"] = value
