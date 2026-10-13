@@ -1,0 +1,43 @@
+{
+  "schema": "kong-live-probe/1",
+  "generated_utc": "2026-10-13T04:16:40.716894+00:00",
+  "transport": "kong-native-anthropic",
+  "role": "verifier",
+  "payload_classification": "synthetic, Not Sensitive",
+  "model_requested": "claude-sonnet-4-6",
+  "settings_requested": {
+    "max_tokens": 128,
+    "temperature": null
+  },
+  "attempts": 1,
+  "outcome": "REFUSED",
+  "reason": "invalid verifier Kong response: Expecting value: line 1 column 1 (char 0)",
+  "wall_ms": 40359,
+  "worker": {
+    "sent": true,
+    "ok": true,
+    "model": "claude-sonnet-4-6",
+    "stop_reason": "end_turn",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 152,
+      "output_tokens": 45,
+      "output_tokens_details": null,
+      "server_tool_use": null,
+      "service_tier": "standard"
+    },
+    "via": "1.1 kong/3.15.0.5-enterprise-edition",
+    "request_id": "b9c53a763bd4bc4db32b4b728559b552",
+    "latency_ms": 2438,
+    "sdk": "anthropic-python 1.13.0",
+    "mock": false,
+    "text_is_json_object": false
+  },
+  "model_cost_usd_spent": 1
+}
