@@ -8,7 +8,8 @@ each with launch.json and, when the in-container post-processing ran, score.json
 
 Per case exactly one status:
   NOT_IMPLEMENTED                  frozen runner: a required capability is missing (named)
-  BLOCKED_LIVE_ROLE_TRANSPORT      admitted, needs live roles; not run by this workflow yet
+  BLOCKED_LIVE_ROLE_TRANSPORT      admitted, needs live AND substituted roles in one run
+                                   (combining hook not built; live-only cases run via the relay)
   BLOCKED_SUBSTITUTED_ROLE_WIRING  admitted, needs substituted roles the adapter cannot build
   ADMITTED_NOT_SELECTED            admitted and runnable, not in this run's selector
   EXECUTED                         the controller actually ran; dimensions from the pinned

@@ -124,13 +124,16 @@ def admission(selector, smoke_ids=None):
         ):
             raise SystemExit(f"admission probe produced an unexpected record: {rec}")
         mode = role_mode(case)
+        has_factory = callable(getattr(real, SUBST_FACTORY, None))
         if not admitted:
             disposition = "NOT_IMPLEMENTED"
-        elif mode == "live":
-            disposition = BLOCKED_LIVE
-        elif mode == "substituted" and not callable(getattr(real, SUBST_FACTORY, None)):
+        elif SUBST in case["adapter_requirements"] and not has_factory:
             disposition = BLOCKED_SUBST
+        elif mode == "live" and SUBST in case["adapter_requirements"]:
+            # Live + substituted roles in one run need a combining adapter hook (not built).
+            disposition = BLOCKED_LIVE
         else:
+            # Live-only cases run with RelayRoles through the host relay (simkit-cases.yml).
             disposition = "RUNNABLE"
         rows.append(
             {
@@ -149,14 +152,20 @@ def admission(selector, smoke_ids=None):
             }
         )
     runnable = sorted(r["case_id"] for r in rows if r["disposition"] == "RUNNABLE")
+    # Live-role cases make paid Kong calls: only an explicit 'live' selector or explicit ids
+    # select them; 'substituted' and the push smoke never do.
+    live = {r["case_id"] for r in rows if r["role_mode"] == "live"}
+    offline = [i for i in runnable if i not in live]
     known = {r["case_id"] for r in rows}
-    if selector == "admission":
+    if selector in ("admission", "relay-smoke"):
         selected, unknown = [], []
     elif selector == "substituted":
-        selected, unknown = runnable, []
+        selected, unknown = offline, []
+    elif selector == "live":
+        selected, unknown = [i for i in runnable if i in live], []
     elif selector == "smoke":
-        wanted = [i for i in (smoke_ids or []) if i in runnable]
-        selected, unknown = (wanted or runnable)[:2], []
+        wanted = [i for i in (smoke_ids or []) if i in offline]
+        selected, unknown = (wanted or offline)[:2], []
     else:
         wanted = [i.strip() for i in selector.split(",") if i.strip()]
         unknown = [i for i in wanted if i not in known]
@@ -264,6 +273,12 @@ def _record_channel():
         return sys.stdout
 
 
+def _relay_roles():
+    from tools.workflow.relay_roles import RelayRoles
+
+    return RelayRoles.from_env()
+
+
 def run(case_id, work):
     work = Path(work)
     out = _record_channel()
@@ -281,9 +296,12 @@ def run(case_id, work):
         document = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
         adapter = WeatherAdapter(enable_run_case=True)
         factory = getattr(adapter, SUBST_FACTORY, None)
-        if role_mode(case) == "live":
-            raise RuntimeError(f"{BLOCKED_LIVE}: live-role cases are not run in this workflow")
-        if not callable(factory):
+        live = role_mode(case) == "live"
+        if live and SUBST in case["adapter_requirements"]:
+            raise RuntimeError(f"{BLOCKED_LIVE}: live + substituted role wiring is not built")
+        if live and not os.environ.get("SIMKIT_RELAY_URL"):
+            raise RuntimeError(f"{BLOCKED_LIVE}: no host relay configured for this container")
+        if not live and not callable(factory):
             raise RuntimeError(
                 f"{BLOCKED_SUBST}: adapter has no {SUBST_FACTORY}(case, goal, run_dir)"
             )
@@ -307,7 +325,13 @@ def run(case_id, work):
             # definition-bound review evidence stays MISSING rather than filled.
             "definition_source": None,
             "repo": CTL,
-            "roles_factory": lambda run_dir: factory(case, goal, run_dir),
+            "roles_factory": (
+                # Key-free client of the host Kong relay (owner ruling: the key never enters
+                # this container; only SIMKIT_RELAY_URL/TOKEN/RUN_ID/MODEL are present).
+                (lambda run_dir: _relay_roles())
+                if live
+                else (lambda run_dir: factory(case, goal, run_dir))
+            ),
             # Real memory reader: UC-07 reading is the container VM's figure (owner ruling).
             "processes_factory": lambda run_dir: Processes(Path(run_dir) / "processes"),
             "input_supplement": {

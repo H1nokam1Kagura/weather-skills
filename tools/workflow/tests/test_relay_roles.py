@@ -339,7 +339,9 @@ def test_kong_refusal_before_send_releases_the_reservation(tmp_path, relay_host)
 
 
 def test_invalid_answer_after_send_is_refused_and_keeps_the_reservation(tmp_path, relay_host):
-    url, _, _ = relay_host(envelope(text="```json\n{}\n```"), prices={})
+    # One ```json fence is a valid answer since agents.parse_role_object (integration branch);
+    # prose around an object is not.
+    url, _, _ = relay_host(envelope(text='Here you go: {"verdict": "PASS"}'), prices={})
     agent = client(url)
     with pytest.raises(Refused, match="invalid verifier Kong response"):
         agent.ask("verifier", PAYLOAD)
@@ -594,3 +596,14 @@ def test_relay_through_real_worker_to_the_kit_mock_gateway(tmp_path):
     (ask,) = [x for x in audit_lines(tmp_path) if x["event"] == "ask"]
     assert ask["sent_to_gateway"] is True and agent.spent == agent.budget
     assert "test-key" not in (tmp_path / "audit.jsonl").read_text()
+
+
+def test_dispatch_block_is_accepted_only_on_a_reviewer_receipt(fake_relay):
+    # KongRoles adds `dispatch` to reviewer receipts that carry review_evidence (kong_roles.py).
+    block = {"stdin_hash": "s", "system_prompt": "p", "system_prompt_hash": "h"}
+    _, reviewer = success_envelope(role="reviewer", dispatch=block)
+    _, verifier = success_envelope(dispatch=block)
+    relay = fake_relay((200, reviewer), (200, verifier))
+    assert client(relay.url).ask("reviewer", PAYLOAD) == ANSWER
+    with pytest.raises(Refused, match="receipt fields differ"):
+        client(relay.url).ask("verifier", PAYLOAD)

@@ -23,11 +23,21 @@ Controls:
 - append-only JSONL audit log with redacted metadata only (status, via, request id, model,
   usage, hashes, sizes). Never the payload, the answer text, the run token or any key.
 
-Run under the Kong kit's interpreter, from anywhere::
+Two clients (``--client``), same KongRoles worker, receipt, redaction and UNKNOWN semantics:
+
+- ``kit`` (default, laptop): run under the Kong kit's interpreter; the kit worker loads the key
+  from the kit's own ``.env`` into the worker only::
 
     <kit>/.venv/Scripts/python.exe -B relay/kong_relay_host.py --ack-not-sensitive \
         --allow-role verifier --audit-log <dir>/relay-audit.jsonl \
         --token-file <dir>/relay.token --ready-file <dir>/relay-ready.json
+
+- ``runner`` (GitHub runner, no kit): the worker imports
+  ``relay/runner_kit/scripts/kong_client.py`` under this interpreter (pinned SDK:
+  ``relay/runner_kit/requirements.txt``) and reads ``KONG_ANTHROPIC_KEY`` from the environment
+  this relay was started with (a workflow secret scoped to the relay's step). This process only
+  checks that the variable is present; it never reads, stores or logs its value. The worker
+  inherits it.
 
 Data policy: only Not Sensitive, synthetic content may be relayed (``--ack-not-sensitive``).
 """
@@ -60,6 +70,9 @@ from tools.workflow.relay_roles import (  # noqa: E402
     HEALTH_PATH,
 )
 
+RUNNER_KIT = ROOT / "relay" / "runner_kit"
+RUNNER_SDK = {"anthropic": "1.13.0"}  # relay/runner_kit/requirements.txt
+KEY_ENV = "KONG_ANTHROPIC_KEY"
 HARD_MAX_BODY = 90_000  # under the kit's KNOWN_GOOD_BODY_BYTES (97,600) with prompt headroom
 SCHEMA = "simkit-kong-relay-audit/1"
 UNKNOWN_EVIDENCE = ("status", "via", "request_id", "error_type", "hint", "reason")
@@ -357,7 +370,31 @@ def write_secret_file(path, text):
         handle.write(text)
 
 
-def build_roles(args):
+def client_paths(client, environ=None, executable=None):
+    """(kit_root, kit_python) for ``--client``; ValueError when this host cannot serve it."""
+    environ = os.environ if environ is None else environ
+    executable = Path(executable or sys.executable)
+    if client == "kit":
+        if executable.resolve() != KIT_PYTHON.resolve():
+            raise ValueError(f"run under the Kong kit interpreter ({KIT_PYTHON}), not {executable}")
+        return None, None  # KongRoles defaults: the kit root and its interpreter
+    if client != "runner":
+        raise ValueError(f"unknown client {client!r}")
+    if not environ.get(KEY_ENV):  # presence only; the value is never kept or logged
+        raise ValueError(f"--client runner needs {KEY_ENV} in the relay's environment")
+    from importlib.metadata import PackageNotFoundError, version
+
+    for package, pinned in RUNNER_SDK.items():
+        try:
+            found = version(package)
+        except PackageNotFoundError:
+            found = None
+        if found != pinned:
+            raise ValueError(f"--client runner needs {package}=={pinned}, found {found}")
+    return RUNNER_KIT, executable
+
+
+def build_roles(args, kit_root=None, kit_python=None):
     from tools.workflow.processes import Processes
 
     scratch = Path(tempfile.mkdtemp(prefix="simkit-relay-"))
@@ -371,6 +408,7 @@ def build_roles(args):
         prices={},  # no cited price table is pinned: cost stays null, reservation kept
         data_policy_ack=True,
         worker_env={"KONG_SDK_MAX_RETRIES": "0"},  # no retries, overriding any .env value
+        **({"kit_root": kit_root, "kit_python": kit_python} if kit_root else {}),
     )
 
 
@@ -390,14 +428,17 @@ def main(argv=None):
     parser.add_argument("--budget", type=float, default=1.0)
     parser.add_argument("--model", default="claude-sonnet-4-6")
     parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--client", choices=("kit", "runner"), default="kit")
     args = parser.parse_args(argv)
-    if Path(sys.executable).resolve() != KIT_PYTHON.resolve():
-        parser.error(f"run under the Kong kit interpreter ({KIT_PYTHON}), not {sys.executable}")
+    try:
+        kit_root, kit_python = client_paths(args.client)
+    except ValueError as exc:
+        parser.error(str(exc))
     run_id = "relay-run-" + uuid.uuid4().hex[:12]
     token = secrets.token_urlsafe(32)
     audit = AuditLog(args.audit_log)
     relay = Relay(
-        build_roles(args),
+        build_roles(args, kit_root, kit_python),
         run_id=run_id,
         token=token,
         allowed_roles=args.allow_role,
@@ -417,6 +458,7 @@ def main(argv=None):
         "model": args.model,
         "max_body_bytes": relay.max_body,
         "max_requests": args.max_requests,
+        "client": args.client,
         "pid": os.getpid(),
     }
     audit.write("relay_start", **ready, python=sys.version.split()[0])

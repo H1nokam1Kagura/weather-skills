@@ -1,0 +1,5 @@
+# Runner-side Kong client (relay/runner_kit/scripts/kong_client.py). Same SDK line as the Kong
+# kit's .venv (anthropic 1.13.0, httpx 0.28.1), so the laptop kit and the runner send the same
+# request shape.
+anthropic==1.13.0
+httpx==0.28.1

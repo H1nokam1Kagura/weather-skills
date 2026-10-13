@@ -6,6 +6,15 @@ usage:
                                        [--no-trace] [--kill-tracer-after S] [--timeout S]
     python container_harness/launch.py admission --image TAG --out ADMISSION.json
                                        [--selector S] [--smoke-ids A,B]
+    python container_harness/launch.py relay-smoke --image TAG --out DIR --relay-dir RDIR
+
+Live roles (owner ruling container_route_ruling_2026-10-13.live_roles): with ``--relay-dir``
+(written by ``relay_ci.sh net-up`` + ``relay-start``) the container joins the docker
+``--internal`` relay network instead of ``--network none`` and receives exactly
+SIMKIT_RELAY_URL / _TOKEN / _RUN_ID / _MODEL (+ SIMKIT_PROBE_TARGETS for the smoke) as
+``-e NAME`` with the values in the docker client's environment, never on its command line.
+The Kong key is never among them. ``relay-smoke`` runs container_harness/relay_smoke.py as the
+container's own command and leaves the exited container for the host key scan.
 
 ``admission`` runs the frozen runner's capability admission (case_driver.py) in one throwaway
 container under the same run conditions (no network, no mounts) and writes its stdout JSON.
@@ -21,6 +30,7 @@ and recorded beside the evidence, so a run that drifted from them is visible in 
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -50,6 +60,51 @@ RUN_ARGS = [
     "none",
 ]
 FORBIDDEN = ("--privileged", "-v", "--volume", "--mount", "seccomp=unconfined", "--pid")
+RELAY_ENV_NAMES = (
+    "SIMKIT_RELAY_URL",
+    "SIMKIT_RELAY_TOKEN",
+    "SIMKIT_RELAY_RUN_ID",
+    "SIMKIT_RELAY_MODEL",
+    "SIMKIT_PROBE_TARGETS",
+)
+FORBIDDEN_ENV_MARKERS = ("KONG", "ANTHROPIC", "OPENAI")
+
+
+def relay_settings(relay_dir, probe_targets=False):
+    """(docker args, client env, net) joining the relay network; values only in the client env."""
+    relay_dir = Path(relay_dir)
+    net = json.loads((relay_dir / "net.json").read_text(encoding="utf-8"))
+    ready = json.loads((relay_dir / "relay-ready.json").read_text(encoding="utf-8"))
+    if net["gateway"] not in ready["binds"] or ready["port"] != net["relay_port"]:
+        raise SystemExit("relay is not bound to the relay network gateway/port")
+    if not net["internal"]:
+        raise SystemExit("relay network is not --internal")
+    values = {
+        "SIMKIT_RELAY_URL": f"http://{net['gateway']}:{ready['port']}",
+        "SIMKIT_RELAY_TOKEN": (relay_dir / "secret" / "relay.token").read_text().strip(),
+        "SIMKIT_RELAY_RUN_ID": ready["run_id"],
+        "SIMKIT_RELAY_MODEL": ready["model"],
+    }
+    if probe_targets:
+        values["SIMKIT_PROBE_TARGETS"] = json.dumps(net["probe_targets"])
+    args = [a for a in RUN_ARGS if a not in ("--network", "none")]
+    args += ["--network", net["network"]]
+    for name in values:
+        args += ["-e", name]  # NAME only: docker reads the value from its own environment
+    # The docker client itself never holds a Kong credential either.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not any(m in k.upper() for m in FORBIDDEN_ENV_MARKERS)
+    }
+    env.update(values)
+    return args, env, net
+
+
+def check_cmd(cmd):
+    assert not any(tok in FORBIDDEN or tok.startswith("--privileged") for tok in cmd), cmd
+    for tok in cmd:
+        assert tok.split("=", 1)[0] not in RELAY_ENV_NAMES or "=" not in tok, "env value on argv"
 
 
 def sha256(path):
@@ -113,7 +168,7 @@ def build(args):
     return 0
 
 
-def conditions_from_inspect(name):
+def conditions_from_inspect(name, relay_net=None):
     raw = sh(["docker", "inspect", name], capture_output=True).stdout
     info = json.loads(raw)[0]
     hc = info.get("HostConfig", {})
@@ -137,11 +192,16 @@ def conditions_from_inspect(name):
         "default_seccomp": not any("seccomp" in s for s in sec),
         "no_bind_mounts_or_volumes": not observed["binds"] and not observed["mounts"],
         "core_dumps_disabled": observed["ulimit_core"] == (0, 0),
-        "no_network": observed["network_mode"] == "none",
         "docker_init_pid1": observed["init"] is True,
         "own_pid_namespace": observed["pid_mode"] in ("", None, "private"),
         "no_docker_exec": True,  # this launcher never calls docker exec; nothing else touches it
     }
+    if relay_net is None:
+        checks["no_network"] = observed["network_mode"] == "none"
+    else:  # live roles: only the --internal relay network (egress proven by relay_smoke probes)
+        checks["relay_only_network"] = (
+            observed["network_mode"] == relay_net["network"] and relay_net["internal"] is True
+        )
     return observed, checks
 
 
@@ -160,9 +220,12 @@ def run(args):
         entry_args.append("--no-trace")
     if args.kill_tracer_after:
         entry_args += ["--kill-tracer-after", str(args.kill_tracer_after)]
-    cmd = ["docker", "create", "--name", name, *RUN_ARGS, args.image, *entry_args]
-    assert not any(tok in FORBIDDEN or tok.startswith("--privileged") for tok in cmd), cmd
-    sh(cmd, capture_output=True)
+    run_args, env, relay_net = list(RUN_ARGS), None, None
+    if args.relay_dir:
+        run_args, env, relay_net = relay_settings(args.relay_dir)
+    cmd = ["docker", "create", "--name", name, *run_args, args.image, *entry_args]
+    check_cmd(cmd)
+    sh(cmd, capture_output=True, env=env)
     record = {
         "schema": "simkit.harness-launch/1",
         "mode": args.mode,
@@ -172,9 +235,10 @@ def run(args):
         "entry_args": entry_args,
     }
     try:
-        observed, checks = conditions_from_inspect(name)
+        observed, checks = conditions_from_inspect(name, relay_net)
         record["run_conditions_observed"] = observed
         record["run_conditions"] = checks
+        record["relay_network"] = relay_net["network"] if relay_net else None
         t0 = time.monotonic()
         try:
             proc = subprocess.run(
@@ -302,6 +366,82 @@ def admission(args):
     return 0
 
 
+def relay_smoke(args):
+    """One synthetic role call container -> relay -> Kong, plus in-container egress probes.
+
+    The exited container is LEFT in place (name in DIR/container.txt) so the host key scan can
+    ``docker export`` it; the workflow removes it afterwards.
+    """
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    name = f"simkit-relay-smoke-{uuid.uuid4().hex[:8]}"
+    run_args, env, net = relay_settings(args.relay_dir, probe_targets=True)
+    cmd = [
+        "docker",
+        "create",
+        "--name",
+        name,
+        *run_args,
+        "--user",
+        "1000:1000",
+        "-w",
+        "/opt/ctl",
+        "-e",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "-e",
+        "HOME=/home/runner",
+        "--entrypoint",
+        "python",
+        args.image,
+        "-B",
+        "/opt/ctl/container_harness/relay_smoke.py",
+    ]
+    check_cmd(cmd)
+    sh(cmd, capture_output=True, env=env)
+    (out / "container.txt").write_text(name + "\n", encoding="utf-8")
+    observed, checks = conditions_from_inspect(name, net)
+    record = {
+        "schema": "simkit.relay-smoke-launch/1",
+        "image": args.image,
+        "container": name,
+        "docker_create": cmd,
+        "env_names_passed": [cmd[i + 1].split("=", 1)[0] for i, t in enumerate(cmd) if t == "-e"],
+        "run_conditions_observed": observed,
+        "run_conditions": checks,
+        "relay_network": net["network"],
+    }
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(
+            ["docker", "start", "-a", name], capture_output=True, text=True, timeout=args.timeout
+        )
+        record["docker_start_rc"] = proc.returncode
+        (out / "container.stderr").write_text(proc.stderr, encoding="utf-8")
+        stdout = proc.stdout
+    except subprocess.TimeoutExpired:
+        record["docker_start_rc"] = "timeout"
+        subprocess.run(["docker", "kill", name], capture_output=True)
+        stdout = ""
+    record["container_wall_seconds"] = round(time.monotonic() - t0, 3)
+    state = json.loads(
+        sh(["docker", "inspect", "-f", "{{json .State}}", name], capture_output=True).stdout
+    )
+    record["container_exit_code"] = state.get("ExitCode")
+    try:
+        smoke = json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        smoke = None
+        (out / "container.stdout.unparsed").write_text(stdout[-4000:], encoding="utf-8")
+    record["smoke_parsed"] = smoke is not None
+    if smoke is not None:
+        (out / "relay-smoke.container.json").write_text(
+            json.dumps(smoke, indent=1) + "\n", encoding="utf-8"
+        )
+    (out / "launch.json").write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps({k: record[k] for k in ("container", "docker_start_rc", "run_conditions")}))
+    return 0
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -317,13 +457,20 @@ def main(argv):
     r.add_argument("--no-trace", action="store_true")
     r.add_argument("--kill-tracer-after", type=float)
     r.add_argument("--timeout", type=int, default=1500)
+    r.add_argument("--relay-dir", help="relay_ci.sh DIR: join the relay-only network")
     a = sub.add_parser("admission")
     a.add_argument("--image", required=True)
     a.add_argument("--out", required=True)
     a.add_argument("--selector", default="admission")
     a.add_argument("--smoke-ids")
+    s = sub.add_parser("relay-smoke")
+    s.add_argument("--image", required=True)
+    s.add_argument("--out", required=True)
+    s.add_argument("--relay-dir", required=True)
+    s.add_argument("--timeout", type=int, default=600)
     args = ap.parse_args(argv[1:])
-    return {"build": build, "run": run, "admission": admission}[args.cmd](args)
+    commands = {"build": build, "run": run, "admission": admission, "relay-smoke": relay_smoke}
+    return commands[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -97,3 +97,33 @@ Role modes: 32 substituted-only, 20 live+substituted, 14 live-only; no case need
    feat/simkit-gh-cases-snowyowl -f selector=<ids>`; expect to fix first-run infra issues in the
    case job (never exercised yet). Never retry a failed case automatically.
 6. Live roles: host-side Kong relay (key never in the container) before BLOCKED_LIVE cases run.
+
+## Relay wiring (Wave 3 follow-on, 2026-10-13)
+
+Task: wire the host-side Kong relay into simkit-cases.yml so live-role cases can run on GitHub.
+Rulings: container_route_ruling_2026-10-13 (run_conditions; live roles via host relay) and
+kong_secret_ruling_2026-10-13 (secret KONG_ANTHROPIC_KEY used ONLY by the relay on the runner;
+only a per-run relay token enters the container; synthetic only; logs status/via/request-id/
+model/usage only).
+
+- [x] R1 merged local branch feat/simkit-w3-relay-snowyowl @ 7c1c734 (not on origin) -> 4ca7ffe.
+      Merge drift fixed: relay client receipt field set now matches the integration KongRoles
+      receipt (+budget_guard, settings_sent, sent_keys, output_normalization, output_form;
+      optional `dispatch` on reviewer receipts); one relay test followed the parse_role_object
+      change (one ```json fence is now valid).
+- [x] R2 runner Kong client: relay/runner_kit/scripts/kong_client.py (+ requirements.txt,
+      anthropic==1.13.0 httpx==0.28.1 = kit venv) and `kong_relay_host.py --client runner`
+      (default `kit` unchanged). Same WORKER_SOURCE -> same receipt/redaction/UNKNOWN.
+- [x] R3 network: container_harness/relay_ci.sh (net-up / relay-start / teardown): docker
+      --internal bridge simkit-relay0 172.30.99.0/24, relay bound to 172.30.99.1:18765 only,
+      iptables DOCKER-USER drop in/out of bridge, INPUT drop except relay port, ip6tables drop.
+      In-container probes: container_harness/relay_smoke.py.
+- [x] R4 workflow: job `relay-smoke` (dispatch selector=relay-smoke); case job starts the relay
+      for role_mode=live cases (`launch.py run case --relay-dir`). Secret only in relay-start and
+      key-scan step env (pinned by container_harness/tests/test_relay_wiring.py). Key-absence:
+      container_harness/kong_key_scan.py (docker export + inspect + artifacts; counts only).
+      Assertions/summary: container_harness/relay_smoke_report.py.
+      case_driver: live-only admitted cases are now RUNNABLE via RelayRoles (env-gated);
+      live+substituted stays BLOCKED_LIVE_ROLE_TRANSPORT; selector `substituted`/push smoke
+      never select live cases, new selector `live` does. UNTESTED end to end (0 admitted).
+- [ ] R5 live relay-smoke on GHA (<=2 attempts total) — see Log.

@@ -58,10 +58,15 @@ KONG_RECEIPT_FIELDS = frozenset(
         "output_hash",
         "cost_usd",
         "cost_basis",
+        "budget_guard",
         "model_requested",
         "model_observed",
         "model_match",
         "settings",
+        "settings_sent",
+        "sent_keys",
+        "output_normalization",
+        "output_form",
         "stdin_hash",
         "usage",
         "stop_reason",
@@ -75,6 +80,8 @@ KONG_RECEIPT_FIELDS = frozenset(
     }
 )
 RECEIPT_FIELDS = KONG_RECEIPT_FIELDS | {"relay_id"}
+# KongRoles adds ``dispatch`` only to a reviewer receipt whose payload carries review_evidence.
+OPTIONAL_RECEIPT_FIELDS = {"reviewer": frozenset({"dispatch"})}
 
 # Copy of runner.ROLE_GATES (a parity test pins equality). The runner is not importable in
 # the container, and the static census requires every Refused raised here to carry a gate.
@@ -269,7 +276,10 @@ class RelayRoles:
             self._unknown(role, invocation, "SUCCESS envelope with non-200 status", {}, relay_id)
         value, receipt = envelope.get("value"), envelope.get("receipt")
         try:
-            if not isinstance(receipt, dict) or set(receipt) != RECEIPT_FIELDS:
+            optional = OPTIONAL_RECEIPT_FIELDS.get(role, frozenset())
+            if not isinstance(receipt, dict) or not (
+                RECEIPT_FIELDS <= set(receipt) <= RECEIPT_FIELDS | optional
+            ):
                 raise ValueError("receipt fields differ from the KongRoles receipt + relay_id")
             cost = receipt["cost_usd"]
             if _finite(cost):

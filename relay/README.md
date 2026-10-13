@@ -85,3 +85,23 @@ Copy only `tools/workflow/{__init__,contracts,profiles,relay_roles}.py` into the
 client is stdlib + `contracts` (a test pins this).
 
 Data policy: synthetic, Not Sensitive payloads only.
+
+## GitHub runner (no Kong kit)
+
+`--client runner` runs the same KongRoles worker under the relay's own interpreter against
+`relay/runner_kit/scripts/kong_client.py`, a minimal stand-in for the kit's `kong_client`
+(pinned SDK: `relay/runner_kit/requirements.txt`). The route is fixed to
+`https://ai-kong-gateway.bmgf.io/v2/anthropic` with the key in `x-kong-key` (placeholder
+`api_key`); only a loopback `http` mock with the kit's test keys may replace it, so a real key
+cannot be sent elsewhere. The key comes only from `KONG_ANTHROPIC_KEY` in the relay's
+environment (the Actions secret, scoped to the relay-start step); the relay checks presence and
+never reads or logs the value; SDK debug logging is disabled in the worker. Receipts,
+redaction and UNKNOWN semantics are KongRoles' own, unchanged. The laptop `--client kit` path is
+unchanged and remains the default.
+
+Network path on the runner (`container_harness/relay_ci.sh`): a docker `--internal` bridge
+`simkit-relay0` (172.30.99.0/24); the relay binds only the bridge gateway 172.30.99.1:18765;
+iptables drops all forwarded traffic in/out of the bridge (DOCKER-USER), drops all INPUT from it
+except TCP to the relay port, and ip6tables drops IPv6 from it. The `relay-smoke` selector of
+`.github/workflows/simkit-cases.yml` proves it from inside the container and proves key absence
+with a host-side scan of `docker export` (counts only).
