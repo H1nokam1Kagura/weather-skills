@@ -44,3 +44,8 @@ laptop's Docker (memory-starved).
 - 2026-10-13 resume: analyzer hardened (benign strace messages, per-event errors -> MISSING,
   receiver-side delivery cross-check, kernel deliveries counted, clone-time pgid/cwd inheritance,
   TRACER_KILLED), launcher + report + workflow written, unit tests 22 passed, ruff clean.
+- 2026-10-13 GHA run 38458699716 (48f48ba): all 30 regression checks PASS; canary traced OK
+  but the controller stopped INCOMPLETE (plot-onset: cartopy tried to download Natural Earth
+  with --network none; same untraced). In-container projection import failed (no PYTHONPATH).
+  One infra fix: Natural Earth shapes fetched at image build into read-only CARTOPY_DATA_DIR;
+  PYTHONPATH=/opt/ctl for the projection step.

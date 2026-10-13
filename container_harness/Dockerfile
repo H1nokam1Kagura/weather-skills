@@ -21,6 +21,14 @@ COPY requirements-ctl.txt /opt/requirements-ctl.txt
 RUN pip install --no-cache-dir -r /opt/requirements-ctl.txt \
  && apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
+# Natural Earth shapes plot-onset draws (coastline 10m, BORDERS = admin_0 boundary lines 110m),
+# fetched at BUILD time into a read-only pre-existing data dir: run containers have no network,
+# and a host with a warm cartopy cache would otherwise behave differently from this image.
+ENV CARTOPY_DATA_DIR=/opt/cartopy-data
+RUN mkdir -p /opt/cartopy-data \
+ && python -c "import cartopy, cartopy.io.shapereader as s; cartopy.config['data_dir'] = '/opt/cartopy-data'; s.natural_earth('10m', 'physical', 'coastline'); s.natural_earth('110m', 'cultural', 'admin_0_boundary_lines_land')" \
+ && chmod -R a-w /opt/cartopy-data
+
 RUN useradd -m -u 1000 runner \
  && mkdir -p /work /harness-out \
  && chown runner:runner /work \

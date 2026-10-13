@@ -135,7 +135,7 @@ python -B -I /opt/ctl/container_harness/analyze_trace.py "$OUT" --run-dir "$RUN_
   --out "$OUT/evidence.json" > "$OUT/analyze.stdout" 2> "$OUT/analyze.stderr"
 echo "in_container_analyze_exit=$?" >> "$OUT/post_status.txt"
 if [ "$MODE" = canary ] && [ -s "$OUT/evidence.json" ]; then
-  python -B /opt/ctl/container_harness/project_in_container.py "$RUN_DIR" "$OUT/evidence.json" \
+  PYTHONPATH=/opt/ctl python -B /opt/ctl/container_harness/project_in_container.py "$RUN_DIR" "$OUT/evidence.json" \
     "$OUT/projection.json" > "$OUT/projection.stdout" 2> "$OUT/projection.stderr"
   echo "in_container_projection_exit=$?" >> "$OUT/post_status.txt"
 fi
