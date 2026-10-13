@@ -25,7 +25,8 @@ Branch `feat/simkit-w3-adapter-snowyowl`, base `0e862c8`.
 
 ## Test status
 - `tests/test_evidence_projection_v27.py tests/test_weather_adapter.py tests/test_weather_adapter_p2.py`:
-  see final commit message / report. Full suite runs in GitHub CI (not run locally by brief).
+  72 passed, exit 0 (2026-10-13; 69 pre-existing + 3 container-input tests). Full suite runs in
+  GitHub CI (not run locally, per the resume instruction).
 - ruff check + format --check clean on changed files.
 
 ## Coordinator notes
