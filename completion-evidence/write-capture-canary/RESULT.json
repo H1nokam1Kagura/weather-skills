@@ -1,0 +1,1755 @@
+{
+  "schema": "simkit.write-capture-canary/1",
+  "started_unix": 1791867769.1936486,
+  "python": "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+  "repo": "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl",
+  "work": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1",
+  "host": {
+    "token": {
+      "elevated": false,
+      "elevation_type": "default",
+      "integrity_sid": "S-1-16-8192",
+      "is_restricted": false,
+      "restricting_sids": [],
+      "admin_group_present": false,
+      "perf_log_users_present": false
+    },
+    "logon_sid": "S-1-5-5-0-15021588",
+    "etw_session_enumeration": {
+      "argv": [
+        "logman",
+        "query",
+        "-ets"
+      ],
+      "rc": 0,
+      "stdout": "\nData Collector Set                      Type                          Status\n-------------------------------------------------------------------------------\n\nThe command completed successfully.\n",
+      "stderr": "",
+      "session_rows": 0
+    },
+    "etw_kernel_file_start": {
+      "argv": [
+        "logman",
+        "start",
+        "simkit-wcc-kfile-f2f4d2da",
+        "-p",
+        "Microsoft-Windows-Kernel-File",
+        "0x10",
+        "-rt",
+        "-ets"
+      ],
+      "rc": 2147942405,
+      "stdout": "\nError:\nAccess is denied.\nTry running this command as an administrator.\n",
+      "stderr": ""
+    },
+    "etw_kernel_file_stop": {
+      "argv": [
+        "logman",
+        "stop",
+        "simkit-wcc-kfile-f2f4d2da",
+        "-ets"
+      ],
+      "rc": 2150629378,
+      "stdout": "\nError:\nData Collector Set was not found.\n",
+      "stderr": ""
+    },
+    "procmon": {
+      "on_path": {
+        "procmon": null,
+        "procmon64": null,
+        "Procmon64a": null
+      },
+      "known_dirs": {
+        "C:\\Program Files\\Sysinternals": false,
+        "C:\\SysinternalsSuite": false,
+        "C:\\Tools\\Sysinternals": false
+      },
+      "driver_service": {
+        "argv": [
+          "sc",
+          "query",
+          "PROCMON24"
+        ],
+        "rc": 1060,
+        "stdout": "[SC] EnumQueryServicesStatus:OpenService FAILED 1060:\n\nThe specified service does not exist as an installed service.\n\n",
+        "stderr": ""
+      },
+      "note": "Process Monitor loads a kernel minifilter driver; loading it requires administrator."
+    },
+    "fsutil_8dot3_query": {
+      "argv": [
+        "fsutil",
+        "8dot3name",
+        "query",
+        "C:"
+      ],
+      "rc": 1,
+      "stdout": "Failed to open the volume.\nError 5: Access is denied.\n",
+      "stderr": ""
+    },
+    "short_names_enabled_on_work_volume": true,
+    "locallow_security": "D:AI(A;OICIID;0x1301bf;;;S-1-5-21-3482528091-3039987928-3854520356-1003)(A;OICIID;0x1301bf;;;S-1-5-21-4163614778-2184239834-3226990274-3966881525)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;S-1-12-1-2109310579-1209190319-624254087-510109971)S:AI(ML;OICI;NW;;;LW)",
+    "appcontainer_assessment": {
+      "prototyped": false,
+      "base_python": "C:\\Users\\neilha\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\python.exe",
+      "base_python_dir_security": "D:AI(A;OICIID;0x1301bf;;;S-1-5-21-3482528091-3039987928-3854520356-1003)(A;OICIID;0x1301bf;;;S-1-5-21-4170661775-604588577-3062908295-3605114881)(A;OICIID;0x1301bf;;;S-1-5-21-4163614778-2184239834-3226990274-3966881525)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;S-1-12-1-2109310579-1209190319-624254087-510109971)",
+      "reason": "AppContainer/LPAC tokens can read only objects whose DACL grants ALL APPLICATION PACKAGES or the package SID. The interpreter, venv, repository and claude CLI all live under the user profile and carry no such ACE (see base_python_dir_security). Running the controller there would mean persistent ACL grants on user directories plus a registered profile. The confined mode (Low IL + write-restricted) gets comparable write confinement with no persistent state outside the run dir."
+    }
+  },
+  "system_audit": {
+    "roots": [
+      "C:\\Users\\Public",
+      "C:\\ProgramData",
+      "C:\\WINDOWS\\Temp",
+      "C:\\WINDOWS\\Tasks",
+      "C:\\WINDOWS\\tracing",
+      "C:\\WINDOWS\\System32\\spool",
+      "C:\\WINDOWS\\System32\\Tasks"
+    ],
+    "missing_roots": [],
+    "allowed": [],
+    "dirs_scanned": 2379,
+    "creatable_outside_allowed": [
+      "C:\\ProgramData\\Microsoft\\DeviceSync",
+      "C:\\Users\\Public\\Documents\\AdobeGCInfo"
+    ],
+    "unreadable": [
+      "C:\\WINDOWS\\System32\\Tasks",
+      "C:\\WINDOWS\\System32\\spool\\SERVERS",
+      "C:\\WINDOWS\\System32\\spool\\PRINTERS",
+      "C:\\WINDOWS\\Temp",
+      "C:\\ProgramData\\WindowsHolographicDevices",
+      "C:\\ProgramData\\Packages",
+      "C:\\ProgramData\\Microsoft\\Windows NT\\MSFax",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\Temp\\PSScriptOutputs",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\Task",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\SenseNDR",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\SenseCM",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\Platform\\Versions",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\ImageCache",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\Downloads",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\DLP",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\DataScan\\Classification",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\DataCollection",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\Cyber",
+      "C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\Cache",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Support",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Scans",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Quarantine",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Payloads\\None",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Payloads\\IntuneMdm",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Payloads\\IntuneMde",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Payloads\\Immune",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Offline Scanner",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Network Inspection System",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Models",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\LocalCopy",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Features",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Definition Updates\\Default",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Definition Updates\\Backup",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Clean Store",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\Certificates",
+      "C:\\ProgramData\\Microsoft\\Windows\\WSAIFabric",
+      "C:\\ProgramData\\Microsoft\\Windows\\WindowsApps",
+      "C:\\ProgramData\\Microsoft\\Windows\\wfp",
+      "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\NonCritical_Update;_ef4bfbae1a6561d84c47122bbc5b2d1662d867_00000000_a753f761-f4c7-4b34-aa92-de4ca116aa8a",
+      "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\NonCritical_Update;_edf4cb2a15d5a56729e37a0cb21d0cbdf9ceba_00000000_c63cf7e0-99d2-4a18-8fde-7637c51ba160"
+    ],
+    "truncated": false,
+    "seconds": 1.06,
+    "complete": false,
+    "clean": false,
+    "unreadable_count": 489
+  },
+  "scenarios": {
+    "confined_scenario": {
+      "mechanism": "confined",
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run",
+      "argv": [
+        "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+        "-c",
+        "\nimport _winapi, ctypes, json, os, subprocess, sys\nres = {}\nopen(\"inside.txt\", \"w\").write(\"x\")\nopen(\"gone.txt\", \"w\").write(\"x\"); os.remove(\"gone.txt\")\nopen(\"state.json.tmp\", \"w\").write(\"{}\"); os.replace(\"state.json.tmp\", \"state.json\")\nos.mkdir(\"sub\"); open(os.path.join(\"sub\", \"b.txt\"), \"w\").write(\"x\")\nprobe, targets, harness_pid, outside_dir = sys.argv[1], json.loads(sys.argv[2]), int(sys.argv[3]), sys.argv[4]\nr = subprocess.run([sys.executable, \"-c\", \"open('grand.txt','w').write('g')\\n\" + probe, *targets],\n                   capture_output=True, text=True)\nres[\"grandchild_rc\"] = r.returncode\nres[\"grandchild_outside\"] = json.loads(r.stdout.strip().splitlines()[-1]) if r.stdout.strip() else r.stderr[-300:]\ntry:\n    _winapi.CreateJunction(outside_dir, \"j\")\n    try:\n        open(os.path.join(\"j\", \"through.txt\"), \"w\").write(\"x\"); res[\"junction_write_through\"] = \"WROTE\"\n    except OSError as e:\n        res[\"junction_write_through\"] = type(e).__name__\nexcept OSError as e:\n    res[\"junction_write_through\"] = \"junction_not_created:\" + type(e).__name__\nk = ctypes.WinDLL(\"kernel32\", use_last_error=True)\nk.OpenProcess.restype = ctypes.c_void_p\nres[\"open_harness_vm_write_dup_handle\"] = bool(k.OpenProcess(0x0020 | 0x0040 | 0x0002, False, harness_pid))\nprint(json.dumps(res))\n",
+        "\nimport json, os, sys\nout = {}\nfor t in sys.argv[1:]:\n    p = os.path.join(t, \"wcc-probe-%s.txt\" % os.getpid())\n    try:\n        with open(p, \"w\") as f:\n            f.write(\"x\")\n        out[t] = \"WROTE\"\n        os.remove(p)\n    except OSError as e:\n        out[t] = type(e).__name__\nprint(json.dumps(out))\n",
+        "[\"C:\\\\Users\\\\neilha\\\\AppData\\\\Local\\\\Temp\", \"C:\\\\Users\\\\neilha\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\LocalLow\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\Roaming\", \"C:\\\\Users\\\\Public\", \"C:\\\\ProgramData\", \"C:\\\\WINDOWS\\\\Temp\", \"C:\\\\WINDOWS\\\\Tasks\", \"C:\\\\WINDOWS\\\\tracing\", \"C:\\\\WINDOWS\\\\System32\\\\spool\\\\drivers\\\\color\", \"C:\\\\ProgramData\\\\Microsoft\\\\Crypto\\\\RSA\\\\MachineKeys\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\\\\tools\\\\workflow\"]",
+        "26832",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\outside-target"
+      ],
+      "confinement": {
+        "mode": "confined",
+        "expected": {
+          "integrity_sid": "S-1-16-4096",
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ]
+        },
+        "run_dir_security": "D:AI(A;OICI;FA;;;S-1-5-5-0-15021588)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;OW)S:AI(ML;OICI;NW;;;LW)",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        },
+        "token_matches_expected": true
+      },
+      "handle_inheritance": "explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST: stdin/stdout/stderr",
+      "exit_code": 0,
+      "timed_out": false,
+      "tree_pids": [
+        3272,
+        29440,
+        32464,
+        33556,
+        41496
+      ],
+      "tree_drained": true,
+      "watcher": {
+        "armed_before_launch": true,
+        "extended_info": true,
+        "buffer_bytes": 65536,
+        "overflow": false,
+        "error": null,
+        "events": 9
+      },
+      "precondition_audit": {
+        "roots": [
+          "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1"
+        ],
+        "dirs_scanned": 5,
+        "complete": true,
+        "clean": true,
+        "seconds": 0.0,
+        "uncovered_creatable": []
+      },
+      "created_paths": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\inside.txt",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\gone.txt",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json.tmp",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\sub\\b.txt",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\grand.txt"
+      ],
+      "created_dirs": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\sub"
+      ],
+      "created_then_deleted": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\gone.txt",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json.tmp"
+      ],
+      "ambiguous_short_names": [],
+      "shared_roots": [],
+      "attribution_exact": true,
+      "exhaustive": true,
+      "not_exhaustive_because": [],
+      "error": null,
+      "events": [
+        {
+          "seq": 1,
+          "t_ns": 194794109000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\inside.txt",
+          "is_dir": false,
+          "file_id": 562949957092994
+        },
+        {
+          "seq": 2,
+          "t_ns": 194794109000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\gone.txt",
+          "is_dir": false,
+          "file_id": 562949957092995
+        },
+        {
+          "seq": 3,
+          "t_ns": 194794109000000,
+          "action": "removed",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\gone.txt",
+          "is_dir": false,
+          "file_id": 562949957092995
+        },
+        {
+          "seq": 4,
+          "t_ns": 194794109000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json.tmp",
+          "is_dir": false,
+          "file_id": 844424933803651
+        },
+        {
+          "seq": 5,
+          "t_ns": 194794109000000,
+          "action": "renamed_old",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json.tmp",
+          "is_dir": false,
+          "file_id": 844424933803651
+        },
+        {
+          "seq": 6,
+          "t_ns": 194794109000000,
+          "action": "renamed_new",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json",
+          "is_dir": false,
+          "file_id": 844424933803651
+        },
+        {
+          "seq": 7,
+          "t_ns": 194794109000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\sub",
+          "is_dir": true,
+          "file_id": 562949957092996
+        },
+        {
+          "seq": 8,
+          "t_ns": 194794109000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\sub\\b.txt",
+          "is_dir": false,
+          "file_id": 562949957092997
+        },
+        {
+          "seq": 9,
+          "t_ns": 194794390000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\grand.txt",
+          "is_dir": false,
+          "file_id": 1125899910514310
+        }
+      ],
+      "stdout": "{\"grandchild_rc\": 0, \"grandchild_outside\": {\"C:\\\\Users\\\\neilha\\\\AppData\\\\Local\\\\Temp\": \"PermissionError\", \"C:\\\\Users\\\\neilha\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\LocalLow\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\Roaming\": \"PermissionError\", \"C:\\\\Users\\\\Public\": \"PermissionError\", \"C:\\\\ProgramData\": \"PermissionError\", \"C:\\\\WINDOWS\\\\Temp\": \"PermissionError\", \"C:\\\\WINDOWS\\\\Tasks\": \"PermissionError\", \"C:\\\\WINDOWS\\\\tracing\": \"PermissionError\", \"C:\\\\WINDOWS\\\\System32\\\\spool\\\\drivers\\\\color\": \"PermissionError\", \"C:\\\\ProgramData\\\\Microsoft\\\\Crypto\\\\RSA\\\\MachineKeys\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\\\\tools\\\\workflow\": \"PermissionError\"}, \"junction_write_through\": \"junction_not_created:PermissionError\", \"open_harness_vm_write_dup_handle\": false}\n",
+      "stderr": "",
+      "outside_targets_verdicts": {
+        "grandchild_rc": 0,
+        "grandchild_outside": {
+          "C:\\Users\\neilha\\AppData\\Local\\Temp": "PermissionError",
+          "C:\\Users\\neilha": "PermissionError",
+          "C:\\Users\\neilha\\AppData\\LocalLow": "PermissionError",
+          "C:\\Users\\neilha\\AppData\\Roaming": "PermissionError",
+          "C:\\Users\\Public": "PermissionError",
+          "C:\\ProgramData": "PermissionError",
+          "C:\\WINDOWS\\Temp": "PermissionError",
+          "C:\\WINDOWS\\Tasks": "PermissionError",
+          "C:\\WINDOWS\\tracing": "PermissionError",
+          "C:\\WINDOWS\\System32\\spool\\drivers\\color": "PermissionError",
+          "C:\\ProgramData\\Microsoft\\Crypto\\RSA\\MachineKeys": "PermissionError",
+          "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl": "PermissionError",
+          "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl\\tools\\workflow": "PermissionError"
+        },
+        "junction_write_through": "junction_not_created:PermissionError",
+        "open_harness_vm_write_dup_handle": false
+      },
+      "outside_dir_untouched": true,
+      "scoped_audit": {
+        "roots": [
+          "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1"
+        ],
+        "missing_roots": [],
+        "allowed": [
+          "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run"
+        ],
+        "dirs_scanned": 5,
+        "creatable_outside_allowed": [],
+        "unreadable": [],
+        "truncated": false,
+        "seconds": 0.0,
+        "complete": true,
+        "clean": true
+      }
+    },
+    "confined_outside_writes": {
+      "mechanism": "confined",
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-outside\\run",
+      "argv": [
+        "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+        "-c",
+        "\nimport json, os, sys\nout = {}\nfor t in sys.argv[1:]:\n    p = os.path.join(t, \"wcc-probe-%s.txt\" % os.getpid())\n    try:\n        with open(p, \"w\") as f:\n            f.write(\"x\")\n        out[t] = \"WROTE\"\n        os.remove(p)\n    except OSError as e:\n        out[t] = type(e).__name__\nprint(json.dumps(out))\n",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp",
+        "C:\\Users\\neilha",
+        "C:\\Users\\neilha\\AppData\\LocalLow",
+        "C:\\Users\\neilha\\AppData\\Roaming",
+        "C:\\Users\\Public",
+        "C:\\ProgramData",
+        "C:\\WINDOWS\\Temp",
+        "C:\\WINDOWS\\Tasks",
+        "C:\\WINDOWS\\tracing",
+        "C:\\WINDOWS\\System32\\spool\\drivers\\color",
+        "C:\\ProgramData\\Microsoft\\Crypto\\RSA\\MachineKeys",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl\\tools\\workflow"
+      ],
+      "confinement": {
+        "mode": "confined",
+        "expected": {
+          "integrity_sid": "S-1-16-4096",
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ]
+        },
+        "run_dir_security": "D:AI(A;OICI;FA;;;S-1-5-5-0-15021588)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;OW)S:AI(ML;OICI;NW;;;LW)",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        },
+        "token_matches_expected": true
+      },
+      "handle_inheritance": "explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST: stdin/stdout/stderr",
+      "exit_code": 0,
+      "timed_out": false,
+      "tree_pids": [
+        10944,
+        14192,
+        23384
+      ],
+      "tree_drained": true,
+      "watcher": {
+        "armed_before_launch": true,
+        "extended_info": true,
+        "buffer_bytes": 65536,
+        "overflow": false,
+        "error": null,
+        "events": 0
+      },
+      "precondition_audit": null,
+      "created_paths": [],
+      "created_dirs": [],
+      "created_then_deleted": [],
+      "ambiguous_short_names": [],
+      "shared_roots": [],
+      "attribution_exact": true,
+      "exhaustive": false,
+      "not_exhaustive_because": [
+        "no precondition audit: other creatable directories not ruled out"
+      ],
+      "error": null,
+      "events": [],
+      "stdout": "{\"C:\\\\Users\\\\neilha\\\\AppData\\\\Local\\\\Temp\": \"PermissionError\", \"C:\\\\Users\\\\neilha\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\LocalLow\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\Roaming\": \"PermissionError\", \"C:\\\\Users\\\\Public\": \"PermissionError\", \"C:\\\\ProgramData\": \"PermissionError\", \"C:\\\\WINDOWS\\\\Temp\": \"PermissionError\", \"C:\\\\WINDOWS\\\\Tasks\": \"PermissionError\", \"C:\\\\WINDOWS\\\\tracing\": \"PermissionError\", \"C:\\\\WINDOWS\\\\System32\\\\spool\\\\drivers\\\\color\": \"PermissionError\", \"C:\\\\ProgramData\\\\Microsoft\\\\Crypto\\\\RSA\\\\MachineKeys\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\\\\tools\\\\workflow\": \"PermissionError\"}\n",
+      "stderr": "",
+      "verdicts": {
+        "C:\\Users\\neilha\\AppData\\Local\\Temp": "PermissionError",
+        "C:\\Users\\neilha": "PermissionError",
+        "C:\\Users\\neilha\\AppData\\LocalLow": "PermissionError",
+        "C:\\Users\\neilha\\AppData\\Roaming": "PermissionError",
+        "C:\\Users\\Public": "PermissionError",
+        "C:\\ProgramData": "PermissionError",
+        "C:\\WINDOWS\\Temp": "PermissionError",
+        "C:\\WINDOWS\\Tasks": "PermissionError",
+        "C:\\WINDOWS\\tracing": "PermissionError",
+        "C:\\WINDOWS\\System32\\spool\\drivers\\color": "PermissionError",
+        "C:\\ProgramData\\Microsoft\\Crypto\\RSA\\MachineKeys": "PermissionError",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl": "PermissionError",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl\\tools\\workflow": "PermissionError"
+      }
+    },
+    "confined_env_redirect": {
+      "mechanism": "confined",
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run",
+      "argv": [
+        "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import os, tempfile\nfd, p = tempfile.mkstemp(); os.write(fd, b'x'); os.close(fd)\nopen(os.path.join(os.path.expanduser('~'), 'home.txt'), 'w').write('x')\nopen(os.path.join(os.environ['APPDATA'], 'roaming.txt'), 'w').write('x')\n"
+      ],
+      "confinement": {
+        "mode": "confined",
+        "expected": {
+          "integrity_sid": "S-1-16-4096",
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ]
+        },
+        "run_dir_security": "D:AI(A;OICI;FA;;;S-1-5-5-0-15021588)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;OW)S:AI(ML;OICI;NW;;;LW)",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        },
+        "token_matches_expected": true
+      },
+      "handle_inheritance": "explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST: stdin/stdout/stderr",
+      "exit_code": 0,
+      "timed_out": false,
+      "tree_pids": [
+        592,
+        36360,
+        41636
+      ],
+      "tree_drained": true,
+      "watcher": {
+        "armed_before_launch": true,
+        "extended_info": true,
+        "buffer_bytes": 65536,
+        "overflow": false,
+        "error": null,
+        "events": 5
+      },
+      "precondition_audit": null,
+      "created_paths": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\tmp\\tq8eiuag",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\tmp\\tmp1qe75n64",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\profile\\home.txt",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\profile\\AppData\\Roaming\\roaming.txt"
+      ],
+      "created_dirs": [],
+      "created_then_deleted": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\tmp\\tq8eiuag"
+      ],
+      "ambiguous_short_names": [],
+      "shared_roots": [],
+      "attribution_exact": true,
+      "exhaustive": false,
+      "not_exhaustive_because": [
+        "no precondition audit: other creatable directories not ruled out"
+      ],
+      "error": null,
+      "events": [
+        {
+          "seq": 1,
+          "t_ns": 194796375000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\tmp\\tq8eiuag",
+          "is_dir": false,
+          "file_id": 562949957093024
+        },
+        {
+          "seq": 2,
+          "t_ns": 194796375000000,
+          "action": "removed",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\tmp\\tq8eiuag",
+          "is_dir": false,
+          "file_id": 562949957093024
+        },
+        {
+          "seq": 3,
+          "t_ns": 194796375000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\tmp\\tmp1qe75n64",
+          "is_dir": false,
+          "file_id": 844424933803680
+        },
+        {
+          "seq": 4,
+          "t_ns": 194796375000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\profile\\home.txt",
+          "is_dir": false,
+          "file_id": 562949957093026
+        },
+        {
+          "seq": 5,
+          "t_ns": 194796375000000,
+          "action": "added",
+          "path": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run\\profile\\AppData\\Roaming\\roaming.txt",
+          "is_dir": false,
+          "file_id": 562949957093027
+        }
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    "confined_overflow": {
+      "mechanism": "confined",
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-overflow\\run",
+      "argv": [
+        "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import time\ntime.sleep(0.3)\nfor i in range(4000):\n    open('f%05d-with-a-long-name-to-fill-the-buffer.txt' % i, 'w').close()\n"
+      ],
+      "confinement": {
+        "mode": "confined",
+        "expected": {
+          "integrity_sid": "S-1-16-4096",
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ]
+        },
+        "run_dir_security": "D:AI(A;OICI;FA;;;S-1-5-5-0-15021588)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;OW)S:AI(ML;OICI;NW;;;LW)",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        },
+        "token_matches_expected": true
+      },
+      "handle_inheritance": "explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST: stdin/stdout/stderr",
+      "exit_code": 0,
+      "timed_out": false,
+      "tree_pids": [
+        14900,
+        27200,
+        38576
+      ],
+      "tree_drained": true,
+      "watcher": {
+        "armed_before_launch": true,
+        "extended_info": true,
+        "buffer_bytes": 4096,
+        "overflow": true,
+        "error": null,
+        "events": 1
+      },
+      "precondition_audit": {
+        "roots": [
+          "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-overflow"
+        ],
+        "dirs_scanned": 3,
+        "complete": true,
+        "clean": true,
+        "seconds": 0.0,
+        "uncovered_creatable": []
+      },
+      "created_paths": "<1 paths elided>",
+      "created_dirs": [],
+      "created_then_deleted": [],
+      "ambiguous_short_names": [],
+      "shared_roots": [],
+      "attribution_exact": true,
+      "exhaustive": false,
+      "not_exhaustive_because": [
+        "watcher buffer overflow: OS discarded notifications"
+      ],
+      "error": null,
+      "stdout": "",
+      "stderr": "",
+      "created_count": 1
+    },
+    "observer_failure": {
+      "created_paths": null,
+      "exhaustive": false,
+      "exit_code": null,
+      "not_exhaustive_because": [
+        "launch or confinement error",
+        "watcher failure: ReadDirectoryChanges failed: WinError 0",
+        "controller tree not observed drained before watcher stop",
+        "no precondition audit: other creatable directories not ruled out"
+      ],
+      "error": "OSError: watcher failed to arm: ReadDirectoryChanges failed: WinError 0",
+      "child_file_exists": false
+    },
+    "unconfined_control": {
+      "mechanism": "none",
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\none-control\\run",
+      "argv": [
+        "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+        "-c",
+        "open(r'C:\\Users\\neilha\\AppData\\Local\\Temp\\wcc-control-a6d9ac27342d4cd5beb996ad4a45e418.txt','w').write('x')"
+      ],
+      "confinement": {
+        "mode": "none",
+        "expected": {
+          "integrity_sid": "S-1-16-8192",
+          "restricting_sids": []
+        },
+        "run_dir_security": "D:(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;OW)",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-8192",
+          "is_restricted": false,
+          "restricting_sids": [],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        },
+        "token_matches_expected": true
+      },
+      "handle_inheritance": "explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST: stdin/stdout/stderr",
+      "exit_code": 0,
+      "timed_out": false,
+      "tree_pids": [
+        7944,
+        14016,
+        14028
+      ],
+      "tree_drained": true,
+      "watcher": {
+        "armed_before_launch": true,
+        "extended_info": true,
+        "buffer_bytes": 65536,
+        "overflow": false,
+        "error": null,
+        "events": 0
+      },
+      "precondition_audit": null,
+      "created_paths": [],
+      "created_dirs": [],
+      "created_then_deleted": [],
+      "ambiguous_short_names": [],
+      "shared_roots": [],
+      "attribution_exact": true,
+      "exhaustive": false,
+      "not_exhaustive_because": [
+        "mode none is not the confinement prototype",
+        "no precondition audit: other creatable directories not ruled out"
+      ],
+      "error": null,
+      "events": [],
+      "stdout": "",
+      "stderr": "",
+      "outside_file_written": true,
+      "outside_file_recorded": false
+    },
+    "low_integrity_alone": {
+      "mechanism": "low_integrity",
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\low-integrity\\run",
+      "argv": [
+        "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+        "-c",
+        "\nimport json, os, sys\nout = {}\nfor t in sys.argv[1:]:\n    p = os.path.join(t, \"wcc-probe-%s.txt\" % os.getpid())\n    try:\n        with open(p, \"w\") as f:\n            f.write(\"x\")\n        out[t] = \"WROTE\"\n        os.remove(p)\n    except OSError as e:\n        out[t] = type(e).__name__\nprint(json.dumps(out))\n",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp",
+        "C:\\Users\\neilha",
+        "C:\\Users\\neilha\\AppData\\LocalLow",
+        "C:\\Users\\neilha\\AppData\\Roaming",
+        "C:\\Users\\Public",
+        "C:\\ProgramData",
+        "C:\\WINDOWS\\Temp",
+        "C:\\WINDOWS\\Tasks",
+        "C:\\WINDOWS\\tracing",
+        "C:\\WINDOWS\\System32\\spool\\drivers\\color",
+        "C:\\ProgramData\\Microsoft\\Crypto\\RSA\\MachineKeys",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl\\tools\\workflow"
+      ],
+      "confinement": {
+        "mode": "low_integrity",
+        "expected": {
+          "integrity_sid": "S-1-16-4096",
+          "restricting_sids": []
+        },
+        "run_dir_security": "D:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)S:AI(ML;OICI;NW;;;LW)",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": false,
+          "restricting_sids": [],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        },
+        "token_matches_expected": true
+      },
+      "handle_inheritance": "explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST: stdin/stdout/stderr",
+      "exit_code": 0,
+      "timed_out": false,
+      "tree_pids": [
+        20112,
+        29404,
+        36696
+      ],
+      "tree_drained": true,
+      "watcher": {
+        "armed_before_launch": true,
+        "extended_info": true,
+        "buffer_bytes": 65536,
+        "overflow": false,
+        "error": null,
+        "events": 0
+      },
+      "precondition_audit": null,
+      "created_paths": [],
+      "created_dirs": [],
+      "created_then_deleted": [],
+      "ambiguous_short_names": [],
+      "shared_roots": [],
+      "attribution_exact": true,
+      "exhaustive": false,
+      "not_exhaustive_because": [
+        "mode low_integrity is not the confinement prototype",
+        "no precondition audit: other creatable directories not ruled out"
+      ],
+      "error": null,
+      "events": [],
+      "stdout": "{\"C:\\\\Users\\\\neilha\\\\AppData\\\\Local\\\\Temp\": \"PermissionError\", \"C:\\\\Users\\\\neilha\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\LocalLow\": \"WROTE\", \"C:\\\\Users\\\\neilha\\\\AppData\\\\Roaming\": \"PermissionError\", \"C:\\\\Users\\\\Public\": \"PermissionError\", \"C:\\\\ProgramData\": \"PermissionError\", \"C:\\\\WINDOWS\\\\Temp\": \"PermissionError\", \"C:\\\\WINDOWS\\\\Tasks\": \"PermissionError\", \"C:\\\\WINDOWS\\\\tracing\": \"PermissionError\", \"C:\\\\WINDOWS\\\\System32\\\\spool\\\\drivers\\\\color\": \"PermissionError\", \"C:\\\\ProgramData\\\\Microsoft\\\\Crypto\\\\RSA\\\\MachineKeys\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\": \"PermissionError\", \"C:\\\\Users\\\\neilha\\\\.agentbus\\\\simkit-writes-snowyowl\\\\tools\\\\workflow\": \"PermissionError\"}\n",
+      "stderr": "",
+      "verdicts": {
+        "C:\\Users\\neilha\\AppData\\Local\\Temp": "PermissionError",
+        "C:\\Users\\neilha": "PermissionError",
+        "C:\\Users\\neilha\\AppData\\LocalLow": "WROTE",
+        "C:\\Users\\neilha\\AppData\\Roaming": "PermissionError",
+        "C:\\Users\\Public": "PermissionError",
+        "C:\\ProgramData": "PermissionError",
+        "C:\\WINDOWS\\Temp": "PermissionError",
+        "C:\\WINDOWS\\Tasks": "PermissionError",
+        "C:\\WINDOWS\\tracing": "PermissionError",
+        "C:\\WINDOWS\\System32\\spool\\drivers\\color": "PermissionError",
+        "C:\\ProgramData\\Microsoft\\Crypto\\RSA\\MachineKeys": "PermissionError",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl": "PermissionError",
+        "C:\\Users\\neilha\\.agentbus\\simkit-writes-snowyowl\\tools\\workflow": "PermissionError"
+      }
+    },
+    "fresh_sid_write_restricted": {
+      "cmd": {
+        "exit_code": 3221225794,
+        "created_paths": [],
+        "stdout": "",
+        "stderr": "",
+        "error": null,
+        "exit_code_hex": "0xc0000142",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-8192",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-21-1644365920-3874254489-234720637-30829"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        }
+      },
+      "python": {
+        "exit_code": 3221225794,
+        "created_paths": [],
+        "stdout": "",
+        "stderr": "",
+        "error": null,
+        "exit_code_hex": "0xc0000142",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-8192",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-21-4106865220-526961396-2392729073-852672"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        }
+      }
+    },
+    "confined_logon_only": {
+      "cmd": {
+        "exit_code": 0,
+        "created_paths": [
+          "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined_logon_only-cmd\\run\\a.txt"
+        ],
+        "stdout": "",
+        "stderr": "",
+        "error": null,
+        "exit_code_hex": "0x0",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-5-0-15021588"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        }
+      },
+      "python": {
+        "exit_code": 3221225794,
+        "created_paths": [],
+        "stdout": "",
+        "stderr": "",
+        "error": null,
+        "exit_code_hex": "0xc0000142",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-5-0-15021588"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        }
+      }
+    },
+    "untrusted_integrity": {
+      "cmd": {
+        "exit_code": 3221225794,
+        "created_paths": [],
+        "stdout": "",
+        "stderr": "",
+        "error": null,
+        "exit_code_hex": "0xc0000142",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-0",
+          "is_restricted": false,
+          "restricting_sids": [],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        }
+      },
+      "python": {
+        "exit_code": 3221225794,
+        "created_paths": [],
+        "stdout": "",
+        "stderr": "",
+        "error": null,
+        "exit_code_hex": "0xc0000142",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-0",
+          "is_restricted": false,
+          "restricting_sids": [],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        }
+      }
+    },
+    "confined_shared_roots": {
+      "mechanism": "confined",
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-shared-roots\\run",
+      "argv": [
+        "C:\\Users\\neilha\\weather-skills-demo\\.venv\\Scripts\\python.exe",
+        "-c",
+        "\nimport json, os, sys\nout = {}\nfor t in sys.argv[1:]:\n    p = os.path.join(t, \"wcc-probe-%s.txt\" % os.getpid())\n    try:\n        with open(p, \"w\") as f:\n            f.write(\"x\")\n        out[t] = \"WROTE\"\n        os.remove(p)\n    except OSError as e:\n        out[t] = type(e).__name__\nprint(json.dumps(out))\n",
+        "C:\\ProgramData\\Microsoft\\DeviceSync",
+        "C:\\Users\\Public\\Documents\\AdobeGCInfo"
+      ],
+      "confinement": {
+        "mode": "confined",
+        "expected": {
+          "integrity_sid": "S-1-16-4096",
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ]
+        },
+        "run_dir_security": "D:AI(A;OICI;FA;;;S-1-5-5-0-15021588)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;OW)S:AI(ML;OICI;NW;;;LW)",
+        "token": {
+          "elevated": false,
+          "elevation_type": "default",
+          "integrity_sid": "S-1-16-4096",
+          "is_restricted": true,
+          "restricting_sids": [
+            "S-1-5-5-0-15021588",
+            "S-1-1-0"
+          ],
+          "admin_group_present": false,
+          "perf_log_users_present": false
+        },
+        "token_matches_expected": true
+      },
+      "handle_inheritance": "explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST: stdin/stdout/stderr",
+      "exit_code": 0,
+      "timed_out": false,
+      "tree_pids": [
+        28284,
+        39616,
+        40872
+      ],
+      "tree_drained": true,
+      "watcher": {
+        "armed_before_launch": true,
+        "extended_info": true,
+        "buffer_bytes": 65536,
+        "overflow": false,
+        "error": null,
+        "events": 0
+      },
+      "precondition_audit": {
+        "roots": [
+          "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1",
+          "C:\\Users\\Public",
+          "C:\\ProgramData",
+          "C:\\WINDOWS\\Temp",
+          "C:\\WINDOWS\\Tasks",
+          "C:\\WINDOWS\\tracing",
+          "C:\\WINDOWS\\System32\\spool",
+          "C:\\WINDOWS\\System32\\Tasks"
+        ],
+        "dirs_scanned": 2431,
+        "complete": false,
+        "clean": false,
+        "seconds": 0.81,
+        "uncovered_creatable": []
+      },
+      "created_paths": [
+        "C:\\ProgramData\\Microsoft\\DeviceSync\\wcc-probe-28284.txt",
+        "C:\\Users\\Public\\Documents\\AdobeGCInfo\\wcc-probe-28284.txt"
+      ],
+      "created_dirs": [],
+      "created_then_deleted": [],
+      "ambiguous_short_names": [],
+      "shared_roots": [
+        {
+          "root": "C:\\ProgramData\\Microsoft\\DeviceSync",
+          "armed_before_launch": true,
+          "overflow": false,
+          "error": null,
+          "created_paths": [
+            "C:\\ProgramData\\Microsoft\\DeviceSync\\wcc-probe-28284.txt"
+          ],
+          "created_dirs": []
+        },
+        {
+          "root": "C:\\Users\\Public\\Documents\\AdobeGCInfo",
+          "armed_before_launch": true,
+          "overflow": false,
+          "error": null,
+          "created_paths": [
+            "C:\\Users\\Public\\Documents\\AdobeGCInfo\\wcc-probe-28284.txt"
+          ],
+          "created_dirs": []
+        }
+      ],
+      "attribution_exact": false,
+      "exhaustive": false,
+      "not_exhaustive_because": [
+        "precondition audit incomplete (unreadable dirs or truncated)"
+      ],
+      "error": null,
+      "events": [],
+      "stdout": "{\"C:\\\\ProgramData\\\\Microsoft\\\\DeviceSync\": \"WROTE\", \"C:\\\\Users\\\\Public\\\\Documents\\\\AdobeGCInfo\": \"WROTE\"}\n",
+      "stderr": "",
+      "verdicts": {
+        "C:\\ProgramData\\Microsoft\\DeviceSync": "WROTE",
+        "C:\\Users\\Public\\Documents\\AdobeGCInfo": "WROTE"
+      },
+      "scoped_audit_creatable": [
+        "C:\\ProgramData\\Microsoft\\DeviceSync",
+        "C:\\Users\\Public\\Documents\\AdobeGCInfo"
+      ],
+      "scoped_audit_unreadable_count": 489
+    }
+  },
+  "breakage": {
+    "python_import_controller": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "claude_version": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "2.1.296 (Claude Code)\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "claude_help": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "prints and `claude agents`\n                                        lists. Part of the session name works\n                                        too\n  auth                                  Manage authentication\n  auto-mode                             Inspect or reset auto mode classifier\n                                        configuration\n  doctor                                Check the health ",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "git_version": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "git version 2.53.0.windows.3\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "git_status": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "?? completion-evidence/write-capture-canary/\n?? completion-evidence/write_capture_canary.py\n?? tools/workflow/tests/test_write_confinement.py\n?? tools/workflow/write_confinement.py\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "node": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "powershell": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "cmd": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "python_import_controller+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "claude_version+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "2.1.296 (Claude Code)\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "claude_help+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "prints and `claude agents`\n                                        lists. Part of the session name works\n                                        too\n  auth                                  Manage authentication\n  auto-mode                             Inspect or reset auto mode classifier\n                                        configuration\n  doctor                                Check the health ",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "git_version+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "git version 2.53.0.windows.3\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "git_status+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "?? completion-evidence/write-capture-canary/\n?? completion-evidence/write_capture_canary.py\n?? tools/workflow/tests/test_write_confinement.py\n?? tools/workflow/write_confinement.py\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "node+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "powershell+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-powershell-env_redirect\\run\\tmp\\__PSScriptPolicyTest_krc3fiti.axi.ps1",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-powershell-env_redirect\\run\\tmp\\__PSScriptPolicyTest_xo2c4mk1.qtp.psm1",
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-powershell-env_redirect\\run\\profile\\AppData\\Local\\Microsoft\\Windows\\PowerShell\\StartupProfileData-NonInteractive"
+      ],
+      "created_count": 3,
+      "repo_pycache_changed": false,
+      "error": null
+    },
+    "cmd+env_redirect": {
+      "exit_code": 0,
+      "exit_code_hex": "0x0",
+      "stdout": "ok\n",
+      "stderr": "",
+      "created_paths": [],
+      "created_count": 0,
+      "repo_pycache_changed": false,
+      "error": null
+    }
+  },
+  "profile_audit": {
+    "roots": [
+      "C:\\Users\\neilha"
+    ],
+    "missing_roots": [],
+    "allowed": [],
+    "dirs_scanned": 544746,
+    "creatable_outside_allowed": [],
+    "unreadable": [
+      "C:\\Users\\neilha\\wt\\yawning-panda\\docs\\ate-mvp\\eval\\runs\\helper-smoke-t2rbd0w2",
+      "C:\\Users\\neilha\\wt\\connector-audit\\scripts\\out\\connector-compliance-logging\\.pytest_cache",
+      "C:\\Users\\neilha\\wt\\connector-audit\\scripts\\out\\connector-compliance-guard\\.pytest_cache",
+      "C:\\Users\\neilha\\wt\\connector-audit\\.pytest_cache",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\simkit-preparation-20261005\\process-support\\pytest-02",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\remediation-pytest",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\intake-label-remediation\\.pytest_cache",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\d66-pr-tests",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\controller-v2-tests",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\controller-v2-recovery-tests",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\controller-tests-final",
+      "C:\\Users\\neilha\\weather-skills-demo\\demo_output\\controller-tests",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\ZxcvbnData\\3",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\WidevineCdm\\4.10.2891.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\TrustTokenKeyCommitments\\2026.2.25.1",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\Subresource Filter\\Unindexed Rules\\9.65.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\SSLErrorAssistant\\7",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\SafetyTips\\3091",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\PrivacySandboxAttestationsPreloaded\\2025.6.16.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\PKIMetadata\\1590",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\OptimizationHints\\633",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\OnDeviceHeadSuggestModel\\20251024.824731831.14",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\MEIPreload\\1.1.0.3",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\hyphen-data\\120.0.6050.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\FirstPartySetsPreloaded\\2025.7.24.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\Crowd Deny\\2026.2.26.121",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\CertificateRevocation\\10374",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTWin\\AutofillStates\\2025.6.13.84507",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\ZxcvbnData\\3",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\TrustTokenKeyCommitments\\2026.3.23.1",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\Subresource Filter\\Unindexed Rules\\9.66.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\SSLErrorAssistant\\7",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\SafetyTips\\3091",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\PrivacySandboxAttestationsPreloaded\\2025.6.16.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\PKIMetadata\\1634",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\OptimizationHints\\654",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\OnDeviceHeadSuggestModel\\20251024.824731831.14",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\MEIPreload\\1.1.0.3",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\hyphen-data\\120.0.6050.0",
+      "C:\\Users\\neilha\\AppData\\Roaming\\Intuit\\TurboTax\\TY25\\Browser\\TTBiz\\FirstPartySetsPreloaded\\2025.7.24.0"
+    ],
+    "truncated": false,
+    "seconds": 252.72,
+    "complete": false,
+    "clean": true,
+    "unreadable_count": 405
+  },
+  "released": [
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 2,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-outside\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-outside\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-env-redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.02,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-overflow\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-overflow\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.03,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\observer-failure\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\observer-failure\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\low-integrity\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\low-integrity\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\fresh_sid_write_restricted-cmd\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\fresh_sid_write_restricted-cmd\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\fresh_sid_write_restricted-python\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\fresh_sid_write_restricted-python\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.01,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined_logon_only-cmd\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined_logon_only-cmd\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined_logon_only-python\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined_logon_only-python\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\untrusted_integrity-cmd\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\untrusted_integrity-cmd\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\untrusted_integrity-python\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\untrusted_integrity-python\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-shared-roots\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-shared-roots\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-python_import_controller\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-python_import_controller\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_version\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_version\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_help\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_help\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_version\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_version\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_status\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_status\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-node\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-node\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-powershell\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-powershell\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-cmd\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-cmd\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 1,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-python_import_controller-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-python_import_controller-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_version-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_version-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_help-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-claude_help-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_version-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_version-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_status-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-git_status-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-node-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-node-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-powershell-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-powershell-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 11,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    },
+    {
+      "run_dir": "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-cmd-env_redirect\\run",
+      "roots": [
+        "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\break-cmd-env_redirect\\run"
+      ],
+      "missing_roots": [],
+      "allowed": [],
+      "dirs_scanned": 8,
+      "creatable_outside_allowed": [],
+      "unreadable": [],
+      "truncated": false,
+      "seconds": 0.0,
+      "complete": true,
+      "clean": true
+    }
+  ],
+  "seconds": 292.5,
+  "summary": {
+    "elevated": false,
+    "etw_kernel_file_non_admin": "denied",
+    "procmon_present": false,
+    "confined_outside_targets_all_denied": true,
+    "confined_scenario_created_paths": [
+      "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\inside.txt",
+      "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\gone.txt",
+      "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json.tmp",
+      "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\state.json",
+      "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\sub\\b.txt",
+      "C:\\Users\\neilha\\AppData\\Local\\Temp\\claude\\wcc-canary\\run-8j7fn7q1\\confined-scenario\\run\\grand.txt"
+    ],
+    "confined_scenario_exhaustive_in_scoped_audit": true,
+    "overflow_forces_non_exhaustive": true,
+    "observer_failure_is_missing": true,
+    "unconfined_outside_write_unrecorded": true,
+    "low_integrity_locallow_writable": true,
+    "profile_audit": {
+      "dirs_scanned": 544746,
+      "seconds": 252.72,
+      "complete": false,
+      "clean": true
+    },
+    "system_audit": {
+      "dirs_scanned": 2379,
+      "seconds": 1.06,
+      "complete": false,
+      "clean": false,
+      "unreadable_count": 489
+    },
+    "system_audit_creatable": [
+      "C:\\ProgramData\\Microsoft\\DeviceSync",
+      "C:\\Users\\Public\\Documents\\AdobeGCInfo"
+    ],
+    "profile_audit_creatable": [],
+    "shared_root_escape": {
+      "verdicts": {
+        "C:\\ProgramData\\Microsoft\\DeviceSync": "WROTE",
+        "C:\\Users\\Public\\Documents\\AdobeGCInfo": "WROTE"
+      },
+      "recorded": [
+        "C:\\ProgramData\\Microsoft\\DeviceSync\\wcc-probe-28284.txt",
+        "C:\\Users\\Public\\Documents\\AdobeGCInfo\\wcc-probe-28284.txt"
+      ],
+      "attribution_exact": false,
+      "exhaustive": false,
+      "not_exhaustive_because": [
+        "precondition audit incomplete (unreadable dirs or truncated)"
+      ]
+    },
+    "releases_clean": true
+  }
+}
