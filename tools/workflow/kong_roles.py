@@ -29,6 +29,7 @@ from pathlib import Path
 from .agents import PROMPTS
 from .catalog import child_environment
 from .contracts import Refused, digest
+from .recovery import transport_call
 from .review_evidence import text_hash
 
 KIT_ROOT = Path(
@@ -213,8 +214,15 @@ class KongRoles:
             self.dispatch_observer(dict(self.dispatch_observation))
             self.dispatch_observation["process_boundary"] = "ENTERED"
         try:
-            result = self.processes.run(
-                command, self.kit_root, self._environment(), json.dumps(request)
+            # CAP-TRANSPORT-RETRY: a classified pre-write fault (nothing launched, so nothing
+            # sent) is retried once inside this attempt; anything else stays UNKNOWN.
+            result = transport_call(
+                self,
+                role,
+                lambda: self.processes.run(
+                    command, self.kit_root, self._environment(), json.dumps(request)
+                ),
+                invocation,
             )
         except Exception as exc:
             self._unknown(role, invocation, f"worker process failed: {type(exc).__name__}", {})

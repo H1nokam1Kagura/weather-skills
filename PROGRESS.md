@@ -3,10 +3,10 @@
 ## Done so far
 - Read WAVE3-BRIEF, OWNER-RULINGS, DECISIONS (CR-03, CP-E10/E11, CP-E01/E02/E05, CP-E03/E06/E12/E13, CR-07/CP-E08), P0-P6 / P0-P4-P5 entries, EVIDENCE_CONTRACT v2_4.resume / v2_4.interruptions / v2_5.resume_verification, score.py resume/repair/interruption checks.
 - Read runner.py, e2e_injections.py, agents.py, kong_roles.py, persistence.py, existing tests.
-- No code changes yet.
+- recovery.py written; runner.resume()/request_resume(), integrity() (delegates to recovery.verify), run() supervisor loop (_supervised_run/recover/bind_recovery); agents.py + kong_roles.py transport_call; e2e_injections drop-fault delivery, CR-03 durable observation, after_role->after_role_committed deferral, notification hook (opt-in), FX-TRANSPORT-RETRY arming.
 
 ## Files touched
-- PROGRESS.md only.
+- tools/workflow/{recovery.py(new),runner.py,agents.py,kong_roles.py,e2e_injections.py}, PROGRESS.md
 
 ## Design decided (next steps)
 1. NEW tools/workflow/recovery.py: failure classification by exception type (ConnectionResetError->connection_reset, TimeoutError->timeout, PermissionError->write_denied, else unclassified); interruption ledger; itemized verification (request, source, build_runtime, artifacts, evidence, admission, binding, pending_operation); resume decision records; split counters (automatic_resumes_used cap 2, operator_resumes_used uncapped); diagnosis builder; mechanical-repair framework with EMPTY closed action vocabulary (kernel-only lock, D31); notification outbox lifecycle recorded->emitted; transport-retry recorder.
@@ -16,7 +16,7 @@
 5. NEW tests/test_recovery_v27.py with P0 negative tests.
 
 ## Test status
-- Not run yet (base assumed green).
+- Existing suite run in progress after runner changes; test_recovery_v27.py not yet written.
 
 ## Open questions
 - test_schedule_dispatch_v27.py asserts after_operator_notification is unproduced; flipping the default needs that file updated by main session.

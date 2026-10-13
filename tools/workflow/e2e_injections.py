@@ -5,6 +5,7 @@ The caller owns oracle evaluation and live/fixture role selection.
 """
 
 import copy
+import errno
 import json
 import re
 from collections import Counter
@@ -12,7 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .catalog import tree_hash
-from .contracts import digest
+from .contracts import Refused, digest
+from .persistence import read_checkpoint
 
 
 class UnsupportedInjection(RuntimeError):
@@ -21,6 +23,24 @@ class UnsupportedInjection(RuntimeError):
 
 class InjectedInterruption(RuntimeError):
     """A known, quiescent durable-checkpoint interruption; not a process crash."""
+
+
+class InjectedConnectionDrop(ConnectionResetError):
+    """harness_drop_model_connection, failure_class connection_reset, at a durable boundary.
+
+    A real ConnectionResetError: the controller classifies it by type, never by origin.
+    """
+
+
+class InjectedTimeout(TimeoutError):
+    """harness_drop_model_connection, failure_class timeout, at a durable boundary."""
+
+
+DROP_FAULTS = {"connection_reset": InjectedConnectionDrop, "timeout": InjectedTimeout}
+# CP-E06: the controller's native notify-and-wait boundary (recovery.notify). Opt-in for the
+# dependent dispatcher until test_schedule_dispatch_v27 (which documents it as unproduced) is
+# updated; see InjectionHooks(notification_boundary=...).
+NOTIFICATION_HOOK = "after_operator_notification"
 
 
 class InvalidSchedule(ValueError):
@@ -80,8 +100,14 @@ def unsupported_requirements(case):
             reason = "transition or budget-override request channel unavailable"
         elif op == "replace_role_output" and hook == "after_transition":
             reason = "stage event is not a shadow-policy output channel"
-        elif op == "interrupt" and (
-            hook != "after_transition" or payload.get("pending_operation") != "none"
+        elif op == "interrupt" and not (
+            (hook == "after_transition" and payload.get("pending_operation") == "none")
+            or (
+                hook in {"after_transition", "after_role"}
+                and "pending_operation" in payload
+                and payload["pending_operation"] is None
+                and payload.get("mode") == "harness_drop_model_connection"
+            )
         ):
             reason = "midprocess crash adapter unavailable"
         elif op == "mutate_fixture" and payload["fixture_operation"] not in {
@@ -89,6 +115,7 @@ def unsupported_requirements(case):
             "FX-SRC-META-ATTR",
             "FX-SRC-CELL-INCREMENT",
             "FX-ONSET-CELL-SHIFT",
+            "FX-TRANSPORT-RETRY",
         }:
             reason = "fixture operation adapter unavailable: " + payload["fixture_operation"]
         elif op not in {
@@ -159,7 +186,7 @@ def replace_in_place(target, value):
 
 
 class InjectionHooks:
-    def __init__(self, case, symbols=None, disposable_root=None):
+    def __init__(self, case, symbols=None, disposable_root=None, notification_boundary=False):
         self.case = copy.deepcopy(case)
         self.schedule = self.case.get("injection_schedule", [])
         self.symbols = dict(symbols or {})
@@ -177,10 +204,15 @@ class InjectionHooks:
         self.initial_binding = None
         self.stopped = False
         self.harness_error = None
+        self.fault = None  # a classified drop fault raised after the boundary scan
+        self.transport_fault = None  # an armed FX-TRANSPORT-RETRY delivery record
+        self.notifications = 0
+        self.seen_notifications = set()
+        known = KNOWN_HOOKS | ({NOTIFICATION_HOOK} if notification_boundary else set())
         if self.dependent:
             validate_dependencies(self.schedule)
             for index, spec in enumerate(self.schedule):
-                if spec["hook"] not in KNOWN_HOOKS:
+                if spec["hook"] not in known:
                     self.dispositions[index] = {
                         "disposition": "NOT_IMPLEMENTED",
                         "reason": "controller emits no boundary for hook " + spec["hook"],
@@ -260,15 +292,18 @@ class InjectionHooks:
             return
         self._dispatch(point, event, controller)
 
-    def _matches(self, selector, point, event, controller):
+    def _matches(self, selector, point, event, controller, count_point=None):
         name = selector["role_or_tool_or_stage"]
         if point == "before_run":
             return name in {"operator_ledger", "source_metadata", "harness"}
         if point in {"before_role", "after_role"}:
             role = event.get("role")
             if name.startswith("compiler_"):
-                return role == "compiler" and self.counts[(point, "compiler")] == int(name[-1])
+                counted = self.counts[(count_point or point, "compiler")]
+                return role == "compiler" and counted == int(name[-1])
             return name == role
+        if point == NOTIFICATION_HOOK:
+            return name == event.get("target")
         if point == "after_transition":
             return name == event.get("state")
         if point == "after_review_approval":
@@ -346,10 +381,58 @@ class InjectionHooks:
                 raise
         self._count_artifact_selectors(point, event, controller)
         if interrupted:
-            raise InjectedInterruption(
-                "injected quiescent checkpoint interruption; resume requested="
-                + str(self.resume_requested)
-            )
+            self._raise_interruption()
+
+    def _raise_interruption(self):
+        fault, self.fault = self.fault, None
+        if fault is not None:
+            raise fault
+        raise InjectedInterruption(
+            "injected quiescent checkpoint interruption; resume requested="
+            + str(self.resume_requested)
+        )
+
+    @staticmethod
+    def _durable(controller):
+        """The controller's durable checkpoint, or None when none can be observed."""
+        root = getattr(controller, "root", None)
+        if root is None or not (Path(root) / "checkpoint.json").is_file():
+            return None
+        try:
+            return read_checkpoint(root)
+        except (Refused, OSError, ValueError):
+            return None
+
+    def _observation(self, event, controller):
+        """CR-03: the interrupt precondition is observed on the durable checkpoint."""
+        if "checkpoint_durable" in event:
+            return event
+        durable = self._durable(controller)
+        if durable is None:
+            return event
+        return {
+            **event,
+            "checkpoint_durable": True,
+            "checkpoint_state": durable["state"],
+            "pending_operation": durable["pending"],
+        }
+
+    @staticmethod
+    def _commits_role_boundary(controller):
+        """This controller follows after_role with a post-commit after_role_committed."""
+        from .runner import Controller
+
+        return isinstance(controller, Controller)
+
+    def _disarm_transport_fault(self, point):
+        armed = self.transport_fault
+        if armed is None or armed["delivered"] or point == "before_role":
+            return
+        processes = armed["processes"]
+        if vars(processes).get("run") is armed["wrapper"]:
+            del processes.run
+        armed["record"]["delivery"] = "UNDELIVERED"
+        self.transport_fault = None
 
     def _decide(self, index, disposition, **details):
         self.dispositions[index] = {"disposition": disposition, **details}
@@ -399,8 +482,31 @@ class InjectionHooks:
         """Scan each exact boundary once in listed order; decide each entry once, never replay."""
         if self.stopped:
             return
+        self._disarm_transport_fault(point)
+        notification = None
+        if point == NOTIFICATION_HOOK:
+            # 1-based over native notifications that are recorded AND emitted; a repeated
+            # emission of the same native record is counted once.
+            native = event.get("notification", {}).get("index")
+            if event.get("recorded") is not True or event.get("emitted") is not True:
+                return
+            if native is not None and native in self.seen_notifications:
+                return
+            self.seen_notifications.add(native)
+            self.notifications += 1
+            notification = self.notifications
+            if event.get("occurrence", notification) != notification:
+                self.stopped = True
+                self.harness_error = "notification occurrence disagrees with controller"
+                raise HarnessDispatchError(self.harness_error)
         identity = event.get("role", event.get("skill", event.get("state", "before_run")))
+        if point == NOTIFICATION_HOOK:
+            identity = "operator_notification"
         self.counts[(point, identity)] += 1
+        # CR-03: an after_role interrupt is decided at the post-commit role boundary.
+        committed = point == "after_role_committed"
+        hook_point = "after_role" if committed else point
+        defer_role_interrupts = point == "after_role" and self._commits_role_boundary(controller)
         approval = None
         if point == "after_review_approval":
             if event.get("verdict") != "APPROVE" or not all(
@@ -417,12 +523,15 @@ class InjectionHooks:
                 self.initial_binding = event.get("binding_hash")
         interrupted = False
         for index, spec in enumerate(self.schedule):
-            if index in self.dispositions or spec["hook"] != point:
+            if index in self.dispositions or spec["hook"] != hook_point:
+                continue
+            is_interrupt = spec["operation"] == "interrupt"
+            if (committed and not is_interrupt) or (defer_role_interrupts and is_interrupt):
                 continue
             selector = spec["selector"]
-            if not self._matches(selector, point, event, controller):
+            if not self._matches(selector, hook_point, event, controller, count_point=point):
                 continue
-            occurrence = approval or self._occurrence(selector, point, identity)
+            occurrence = approval or notification or self._occurrence(selector, point, identity)
             if occurrence != selector.get("occurrence", 1):
                 continue
             if not self._in_plan_scope(selector, event):
@@ -437,7 +546,9 @@ class InjectionHooks:
                     occurrence=occurrence,
                 )
                 continue
-            if spec["operation"] == "interrupt" and not self._interrupt_observed(spec, event):
+            if is_interrupt and not self._interrupt_observed(
+                spec, self._observation(event, controller)
+            ):
                 reason = "interrupt_precondition_unobserved"
                 self._decide(index, "INACTIVE", reason=reason, occurrence=occurrence)
                 continue
@@ -476,10 +587,7 @@ class InjectionHooks:
                 raise
         self._count_artifact_selectors(point, event, controller)
         if interrupted:
-            raise InjectedInterruption(
-                "injected quiescent checkpoint interruption; resume requested="
-                + str(self.resume_requested)
-            )
+            self._raise_interruption()
 
     def _apply(self, operation, payload, point, event, controller, record):
         if operation in {"json_patch", "replace_role_output"}:
@@ -524,16 +632,7 @@ class InjectionHooks:
                 replace_in_place(target, replacement)
             return False
         if operation == "interrupt":
-            if (
-                point != "after_transition"
-                or payload.get("pending_operation") != "none"
-                or getattr(controller, "pending", None)
-            ):
-                raise UnsupportedInjection(
-                    "midprocess hard-crash injection needs a process-start adapter"
-                )
-            record["effect"] = "known quiescent interruption after durable transition"
-            return True
+            return self._interrupt(payload, point, event, controller, record)
         if operation == "request_transition":
             if payload.get("action") == "resume":
                 if "budget_override" in payload:
@@ -549,9 +648,90 @@ class InjectionHooks:
                 raise UnsupportedInjection("unsupported denial boundary")
             raise PermissionError(args.get("errno", 13), args["message"])
         if operation == "mutate_fixture":
+            if isinstance(payload, dict) and payload.get("fixture_operation") == (
+                "FX-TRANSPORT-RETRY"
+            ):
+                self._arm_transport_fault(payload["args"], point, event, controller, record)
+                return False
             self._fixture(payload, event, controller, record)
             return False
         raise UnsupportedInjection(f"operation not implemented: {operation}")
+
+    def _interrupt(self, payload, point, event, controller, record):
+        """Deliver an interrupt only at a durable, nothing-pending boundary (CR-03).
+
+        The legacy E10/E11 literal 'none' and the schedule contract's null both mean the same
+        observed condition; null additionally requires reading the durable checkpoint.
+        """
+        if point not in {"after_transition", "after_role_committed"}:
+            raise UnsupportedInjection("midprocess hard-crash injection needs a process-start adapter")
+        durable = self._durable(controller)
+        wanted = payload.get("checkpoint_state", event.get("state"))
+        if payload.get("pending_operation") == "none":
+            if durable is not None:
+                if durable["pending"] is not None or durable["state"] != event.get("state"):
+                    raise UnsupportedInjection("durable checkpoint still records pending work")
+            elif getattr(controller, "pending", None):
+                raise UnsupportedInjection(
+                    "midprocess hard-crash injection needs a process-start adapter"
+                )
+        elif "pending_operation" in payload and payload["pending_operation"] is None:
+            if durable is None or durable["pending"] is not None or durable["state"] != wanted:
+                raise UnsupportedInjection(
+                    "null pending_operation needs an observed durable checkpoint with nothing "
+                    "pending at the scheduled state"
+                )
+        else:
+            raise UnsupportedInjection(
+                "midprocess hard-crash injection needs a process-start adapter"
+            )
+        if durable is not None:
+            record["observed_checkpoint"] = {"state": durable["state"], "pending": None}
+        if payload.get("mode") == "harness_drop_model_connection":
+            fault = DROP_FAULTS.get(payload.get("failure_class"))
+            if fault is None:
+                raise UnsupportedInjection("unsupported model-connection failure class")
+            record["effect"] = "model connection dropped at a durable nothing-pending boundary"
+            record["failure_class"] = payload["failure_class"]
+            code = errno.ECONNRESET if fault is InjectedConnectionDrop else errno.ETIMEDOUT
+            self.fault = fault(code, "harness dropped the model connection")
+            return True
+        record["effect"] = "known quiescent interruption after durable transition"
+        return True
+
+    def _arm_transport_fault(self, args, point, event, controller, record):
+        """FX-TRANSPORT-RETRY (CP-E13): the next transport call of this role raises one
+        ConnectionResetError BEFORE launch. Never synthesizes an envelope or a retry."""
+        if (
+            point != "before_role"
+            or args.get("role") != event.get("role")
+            or args.get("failures") != 1
+            or args.get("max_retries") != 1
+            or args.get("before_write") is not True
+            or args.get("failure_class") != "connection_reset"
+        ):
+            raise UnsupportedInjection("transport retry fault only before a role, pre-write, once")
+        processes = getattr(getattr(controller, "roles", None), "processes", None)
+        if processes is None or "run" in vars(processes) or self.transport_fault is not None:
+            raise UnsupportedInjection("role transport unavailable or already wrapped")
+        armed = {"processes": processes, "record": record, "delivered": False}
+
+        def wrapper(*_args, **_kwargs):
+            del processes.run  # exactly once: restore the real transport before raising
+            armed["delivered"] = True
+            record["delivery"] = "DELIVERED"
+            self.transport_fault = None
+            raise ConnectionResetError(errno.ECONNRESET, "harness pre-write transport reset")
+
+        armed["wrapper"] = wrapper
+        processes.run = wrapper
+        self.transport_fault = armed
+        record.update(
+            effect="pre-write transport fault armed for the next role transport call",
+            failure_class="connection_reset",
+            before_write=True,
+            delivery="ARMED",
+        )
 
     def _owned(self, path):
         path = Path(path)
