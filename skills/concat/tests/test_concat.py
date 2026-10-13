@@ -74,6 +74,7 @@ def test_concat_converts_compatible_units(tmp_path, concat):
 
     ds = xr.open_zarr(out, consolidated=True)
     assert float(ds["precip"].isel(number=1).mean()) == pytest.approx(24.0)
+    assert ds["precip"].attrs["units"] == "mm day-1"
 
 
 def test_concat_rejects_incompatible_units(tmp_path, concat):
