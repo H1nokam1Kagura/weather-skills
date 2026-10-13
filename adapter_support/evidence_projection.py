@@ -12,9 +12,13 @@ Rules (WAVE3-BRIEF rule 1, owner ruling D4):
 * A list is emitted as ``[]`` only when its native producer exists and recorded nothing. A
   producer that does not exist yet yields MISSING, never ``[]``.
 * An empty signal list is never exhaustive evidence (D4).
-* Write evidence is not projected: CAP-EXHAUSTIVE-WRITES is ruled a confinement candidate
-  (OWNER-RULINGS write_capture_ruling_2026-10-13), so ``filesystem_snapshot.created_paths``
-  stays MISSING in frozen evidence.
+* Write and whole-tree signal evidence come only from the container harness (OWNER-RULINGS
+  container_route_ruling_2026-10-13): its trace analyzer writes a harness-observations file
+  (``simkit.container-harness-evidence/1``) carrying ``filesystem_snapshot.created_paths``,
+  ``process_tree``, ``controller_trace.signalled_pids`` and ``symbols.HARNESS_CONTROLLER_PID``.
+  It is merged when supplied (``harness["observations_path"]``) and checked against the native
+  records; without it those fields stay MISSING. Carrying the values does not declare
+  CAP-EXHAUSTIVE-WRITES or CAP-SIGNAL-CAPTURE: that needs a reviewed D4 record.
 
 Tampered or inconsistent native evidence refuses the whole projection (EvidenceMappingError);
 it is never partially projected.
@@ -24,7 +28,7 @@ import copy
 import hashlib
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from tools.workflow import catalog, review_evidence
 from tools.workflow.contracts import (
@@ -69,6 +73,18 @@ PENDING_TRACE_LISTS = {
     "material_changes": ("CAP-REREVIEW", "index"),
     "source_rechecks": ("CAP-REREVIEW", "index"),
 }
+# Container-route harness observations (container_harness/analyze_trace.py SCHEMA). Each
+# accepted field, keyed by its frozen evidence path, with the capability that owns it.
+HARNESS_OBSERVATIONS_SCHEMA = "simkit.container-harness-evidence/1"
+HARNESS_OBSERVED_FIELDS = {
+    "filesystem_snapshot.created_paths": "CAP-EXHAUSTIVE-WRITES",
+    "process_tree": "CAP-SIGNAL-CAPTURE",
+    "controller_trace.signalled_pids": "CAP-SIGNAL-CAPTURE",
+    "harness_observations.signal_capture_exhaustive": "CAP-SIGNAL-CAPTURE",
+    "symbols.HARNESS_CONTROLLER_PID": "CAP-SYMBOLS",
+    "harness_observations.max_concurrent_children": "CAP-HARNESS-OBS",
+    "harness_observations.shell_launches": "CAP-HARNESS-OBS",
+}
 DISPATCH_EVENT = re.compile(r"dispatch-event-(\d{6})\.json")
 ROLE_FILE = re.compile(r"role-(\d{3})-([a-z_]+)\.json")
 
@@ -90,6 +106,93 @@ def _read_json(path):
 
 def file_sha256(path):
     return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+_ABSENT = object()
+
+
+def _absolute(path):
+    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
+
+
+def _is_count(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _observed_value(record, path):
+    section, _, key = path.partition(".")
+    if not key:
+        return record.get(section, _ABSENT)
+    container = record.get(section)
+    return container.get(key, _ABSENT) if isinstance(container, dict) else _ABSENT
+
+
+def load_harness_observations(path):
+    """Read and shape-check the container harness observations file.
+
+    Returns ``{"fields": {evidence path: value}, "missing": {path: reason}, "tracer_status",
+    "harness_notes", "sha256"}``. Every accepted field is either present with a valid frozen
+    shape or listed in the file's own ``missing``; a field claimed both ways, a malformed
+    value or an unknown schema refuses the projection (never partially merged).
+    """
+    record = _read_json(path)
+    if not isinstance(record, dict) or record.get("schema") != HARNESS_OBSERVATIONS_SCHEMA:
+        raise EvidenceMappingError("harness observations have an unknown schema")
+    missing = record.get("missing")
+    if not isinstance(missing, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in missing.items()
+    ):
+        raise EvidenceMappingError("harness observations 'missing' must map paths to reasons")
+    fields = {}
+    for field in HARNESS_OBSERVED_FIELDS:
+        value = _observed_value(record, field)
+        if value is _ABSENT:
+            continue
+        if field in missing:
+            raise EvidenceMappingError(f"harness observation both present and missing: {field}")
+        fields[field] = value
+    created = fields.get("filesystem_snapshot.created_paths")
+    if created is not None and not (
+        isinstance(created, list)
+        and all(isinstance(p, str) and _absolute(p) for p in created)
+        and len(set(created)) == len(created)
+    ):
+        # Compared by exact string with artifacts.<id>.path (frozen score.py): the projection
+        # must run in the trace's path namespace (inside the container on that route).
+        raise EvidenceMappingError("created_paths must be unique absolute paths")
+    tree = fields.get("process_tree")
+    if tree is not None and not (
+        isinstance(tree, dict) and all(k.isdigit() and _is_count(v) for k, v in tree.items())
+    ):
+        raise EvidenceMappingError("process_tree must map pid strings to parent pids")
+    pids = fields.get("controller_trace.signalled_pids")
+    if pids is not None and not (
+        isinstance(pids, list) and all(_is_count(p) for p in pids) and len(set(pids)) == len(pids)
+    ):
+        raise EvidenceMappingError("signalled_pids must be unique pids")
+    if pids is not None and tree is not None and any(str(p) not in tree for p in pids):
+        raise EvidenceMappingError("a signalled pid is absent from the harness process tree")
+    exhaustive = fields.get("harness_observations.signal_capture_exhaustive")
+    if exhaustive is not None and not isinstance(exhaustive, bool):
+        raise EvidenceMappingError("signal_capture_exhaustive must be a JSON boolean")
+    if exhaustive is True and pids is None:
+        # D4: exhaustiveness is never claimed over a signal list that was not observed.
+        raise EvidenceMappingError("signal capture claimed exhaustive without signalled_pids")
+    for field in (
+        "symbols.HARNESS_CONTROLLER_PID",
+        "harness_observations.max_concurrent_children",
+        "harness_observations.shell_launches",
+    ):
+        if field in fields and not _is_count(fields[field]):
+            raise EvidenceMappingError(f"{field} must be a non-negative integer")
+    observations = record.get("harness_observations") or {}
+    return {
+        "fields": fields,
+        "missing": dict(missing),
+        "tracer_status": observations.get("tracer_status"),
+        "harness_notes": record.get("harness_notes"),
+        "sha256": file_sha256(path),
+    }
 
 
 def plan_steps(plan):
@@ -147,7 +250,9 @@ class NativeRun:
             if not match or int(match.group(1)) != index:
                 raise EvidenceMappingError("dispatch-event sequence has a gap or duplicate")
             if path.name not in self.checkpoint["evidence"]:
-                raise EvidenceMappingError(f"dispatch event not recorded by the controller: {path.name}")
+                raise EvidenceMappingError(
+                    f"dispatch event not recorded by the controller: {path.name}"
+                )
             record = _read_json(path)
             if (
                 record.get("sequence") != index
@@ -206,9 +311,10 @@ class NativeRun:
 
 
 class Projection:
-    def __init__(self, native, harness):
+    def __init__(self, native, harness, observations=None):
         self.n = native
         self.h = harness or {}
+        self.obs = observations
         self.missing = []
         self.notes = []
         self.seq = {}
@@ -216,6 +322,20 @@ class Projection:
 
     def gap(self, path, capability, reason):
         self.missing.append({"path": path, "capability": capability, "reason": reason})
+
+    def observed(self, path, fallback_reason):
+        """A container-harness field, or _ABSENT after recording the gap (the harness's own
+        reason when it reported the field missing; ``fallback_reason`` when no file)."""
+        if self.obs is not None and path in self.obs["fields"]:
+            return self.obs["fields"][path]
+        if self.obs is not None and path in self.obs["missing"]:
+            reason = "container harness: " + self.obs["missing"][path]
+        elif self.obs is not None:
+            reason = "container harness observations do not carry this field"
+        else:
+            reason = fallback_reason
+        self.gap(path, HARNESS_OBSERVED_FIELDS[path], reason)
+        return _ABSENT
 
     # ---- invocation receipts (EC:invocation_receipts, v2_4.evidence_checker)
     def transport_windows(self):
@@ -270,7 +390,9 @@ class Projection:
             if verdict is not None:
                 record["verdict"] = verdict
             out.append(record)
-            self.seq[f"invocation_receipts[role={role}][occurrence={occurrence}]"] = event["sequence"]
+            self.seq[f"invocation_receipts[role={role}][occurrence={occurrence}]"] = event[
+                "sequence"
+            ]
         return out
 
     def receipt_verdict(self, role, ordinal, receipt, index):
@@ -432,7 +554,9 @@ class Projection:
             return None
         capture = accepted[-1]["record"]
         committed = capture["committed_transition"]
-        transitions = [t for t in self.n.kinds("transition") if t["transition"] == committed["event"]]
+        transitions = [
+            t for t in self.n.kinds("transition") if t["transition"] == committed["event"]
+        ]
         if not transitions or committed["event"]["to"] != "REVIEW_APPROVED":
             raise EvidenceMappingError("accepted review lacks its durable transition event")
         reviewer = self.match_receipt(receipts, capture["receipt"])
@@ -558,7 +682,13 @@ class Projection:
                 "reviewer_occurrence": projected["occurrence"],
                 **{
                     k: envelope[k]
-                    for k in ("request_hash", "goal_hash", "plan_hash", "manifest_hash", "source_hash")
+                    for k in (
+                        "request_hash",
+                        "goal_hash",
+                        "plan_hash",
+                        "manifest_hash",
+                        "source_hash",
+                    )
                 },
                 "plan_claims": envelope["plan_claims"],
                 "sources": envelope["sources"],
@@ -604,7 +734,9 @@ class Projection:
         counts = {}
         for launch in self.n.kinds("process_launch"):
             if self.in_transport(launch["sequence"]):
-                transport.append({"serial": launch["serial"], "tool": launch["tool"], "pid": launch["pid"]})
+                transport.append(
+                    {"serial": launch["serial"], "tool": launch["tool"], "pid": launch["pid"]}
+                )
                 continue
             self.check_start_receipt(launch)
             tool, command = launch["tool"], launch["argv"]
@@ -666,7 +798,10 @@ class Projection:
         return receipts, transport
 
     def launch_binding(self, record, approval, launches, tool, ordinal):
-        if approval is not None and self.seq.get("controller_trace.active_approval", 1e18) < record["start"]:
+        if (
+            approval is not None
+            and self.seq.get("controller_trace.active_approval", 1e18) < record["start"]
+        ):
             record["approval_id"] = approval["approval_id"]
             record["approval_verdict"] = approval["verdict"]
             for k in ("request_hash", "goal_hash", "plan_hash", "manifest_hash", "source_hash"):
@@ -691,7 +826,9 @@ class Projection:
             return
         path = self.n.processes_root / f"process-{launch['serial']:03}.start.json"
         if not path.exists():
-            raise EvidenceMappingError(f"start receipt missing for process serial {launch['serial']}")
+            raise EvidenceMappingError(
+                f"start receipt missing for process serial {launch['serial']}"
+            )
         start = _read_json(path)
         expected = {k: launch[k] for k in start if k in launch}
         if start != expected or set(start) - set(launch):
@@ -750,11 +887,17 @@ class Projection:
             if key in hashes:
                 value["artifact_content_hash"] = hashes[key]
             else:
-                self.gap(f"gate_reports.{key}.artifact_content_hash", "CAP-RECEIPTS", "no harness gate-time hash")
+                self.gap(
+                    f"gate_reports.{key}.artifact_content_hash",
+                    "CAP-RECEIPTS",
+                    "no harness gate-time hash",
+                )
             ended = [
                 r
                 for r in receipts
-                if r["tool"] == tool and r["artifact"] == artifact and r["end"] is not None
+                if r["tool"] == tool
+                and r["artifact"] == artifact
+                and r["end"] is not None
                 and r["exit_code"] == report.get("exit_code")
             ]
             if ended:
@@ -823,7 +966,9 @@ class Projection:
             if isinstance(self.n.context.get(key), int):
                 final[key] = self.n.context[key]
             else:
-                self.gap(f"budget_ledger.final.{key}", capability, "no native automatic/operator split")
+                self.gap(
+                    f"budget_ledger.final.{key}", capability, "no native automatic/operator split"
+                )
         limit = self.n.context.get("max_resume_attempts")
         if isinstance(limit, int):
             final["limits"]["max_resume_attempts"] = limit
@@ -843,10 +988,15 @@ class Projection:
     # ---- signals and harness (CAP-SIGNAL-CAPTURE, CAP-HARNESS-OBS)
     def signal_capture(self, receipts, trace, harness):
         records = [e["record"] for e in self.n.kinds("signal_stop")]
+        if self.obs is not None:
+            return self.observed_signal_capture(receipts, records, trace, harness)
         tree = {str(r["pid"]): r["parent_pid"] for r in receipts}
         projected = project_signal_records(records)
         if projected is None:
-            for path in ("controller_trace.signalled_pids", "harness_observations.signal_capture_exhaustive"):
+            for path in (
+                "controller_trace.signalled_pids",
+                "harness_observations.signal_capture_exhaustive",
+            ):
                 self.gap(
                     path,
                     "CAP-SIGNAL-CAPTURE",
@@ -861,14 +1011,72 @@ class Projection:
         controller = parents.pop() if len(parents) == 1 else None
         return tree, controller
 
+    def observed_signal_capture(self, receipts, records, trace, harness):
+        """Container route: signals and the process tree come from the harness trace, checked
+        against what the controller itself recorded. The native signal_stop projection is kept
+        in notes (owner reading parent_at_signal: creating parent in process_tree, both kept).
+        Returns (tree or None, controller pid or None)."""
+        parents = {r["parent_pid"] for r in receipts}
+        native_controller = parents.pop() if len(parents) == 1 else None
+        controller = self.observed("symbols.HARNESS_CONTROLLER_PID", None)
+        if controller is _ABSENT:
+            controller = native_controller
+        elif native_controller is not None and controller != native_controller:
+            raise EvidenceMappingError(
+                "harness controller pid differs from the native launch parent"
+            )
+        native = project_signal_records(records)
+        if native is not None:
+            self.notes.append({"native_signal_stop": native})
+        tree = self.observed("process_tree", None)
+        if tree is not _ABSENT:
+            tree = dict(tree)
+            for r in receipts:
+                observed_parent = tree.get(str(r["pid"]))
+                if observed_parent is None:
+                    raise EvidenceMappingError(
+                        f"launched pid {r['pid']} is absent from the harness process tree"
+                    )
+                if observed_parent != r["parent_pid"]:
+                    raise EvidenceMappingError(
+                        f"launched pid {r['pid']} has a different creating parent"
+                    )
+            if native is not None:
+                differing = {
+                    pid: {"at_signal": parent, "creating": tree[pid]}
+                    for pid, parent in native["process_tree"].items()
+                    if pid in tree and tree[pid] != parent
+                }
+                if differing:
+                    self.notes.append({"parent_at_signal_differs": differing})
+        else:
+            tree = None
+        pids = self.observed("controller_trace.signalled_pids", None)
+        if pids is not _ABSENT:
+            if native is not None and any(p not in pids for p in native["signalled_pids"]):
+                raise EvidenceMappingError(
+                    "the controller recorded a signal the harness did not observe"
+                )
+            trace["signalled_pids"] = list(pids)
+        exhaustive = self.observed("harness_observations.signal_capture_exhaustive", None)
+        if exhaustive is not _ABSENT:
+            harness["signal_capture_exhaustive"] = exhaustive
+        return tree, controller
+
     def harness_observations(self):
         harness = {}
-        for path in ("max_concurrent_children", "shell_launches", "data_fetch_attempts"):
-            self.gap(
-                f"harness_observations.{path}",
-                "CAP-HARNESS-OBS",
-                "no whole-tree observer (concurrency, shell launches, fetches) exists",
+        for key in ("max_concurrent_children", "shell_launches"):
+            value = self.observed(
+                f"harness_observations.{key}",
+                "no whole-tree observer (concurrency, shell launches) exists",
             )
+            if value is not _ABSENT:
+                harness[key] = value
+        self.gap(
+            "harness_observations.data_fetch_attempts",
+            "CAP-HARNESS-OBS",
+            "no whole-tree fetch observer exists",
+        )
         self.gap(
             "harness_observations.min_free_ram_while_running_gib",
             "CAP-HARNESS-OBS",
@@ -913,7 +1121,9 @@ class Projection:
                 out[f"HARNESS_PID:{tool}"] = pids[0]
         definition = (self.n.context.get("review_evidence") or {}).get("definition_source")
         if isinstance(definition, dict):
-            out["HARNESS_SOURCE_HASH:" + review_evidence.DEFINITION_SOURCE_ID] = definition["source_hash"]
+            out["HARNESS_SOURCE_HASH:" + review_evidence.DEFINITION_SOURCE_ID] = definition[
+                "source_hash"
+            ]
         return out
 
     # ---- assemble
@@ -960,12 +1170,32 @@ class Projection:
         try:
             filesystem["source_cache_hash_after"] = catalog.tree_hash(self.n.checkpoint["source"])
         except Exception:
-            self.gap("filesystem_snapshot.source_cache_hash_after", "CAP-DISPOSABLE-FIXTURE", "source unreadable")
-        self.gap(
+            self.gap(
+                "filesystem_snapshot.source_cache_hash_after",
+                "CAP-DISPOSABLE-FIXTURE",
+                "source unreadable",
+            )
+        created = self.observed(
             "filesystem_snapshot.created_paths",
-            "CAP-EXHAUSTIVE-WRITES",
-            "not declared: confinement-candidate ruling (2026-10-13); never projected as frozen",
+            "no container harness observations supplied (container_route_ruling_2026-10-13)",
         )
+        if created is not _ABSENT:
+            filesystem["created_paths"] = list(created)
+        if self.obs is not None:
+            self.notes.append(
+                {
+                    "harness_observations_input": {
+                        "schema": HARNESS_OBSERVATIONS_SCHEMA,
+                        "sha256": self.obs["sha256"],
+                        "merged": sorted(self.obs["fields"]),
+                        "harness_missing": self.obs["missing"],
+                        "tracer_status": self.obs["tracer_status"],
+                        "harness_notes": self.obs["harness_notes"],
+                        "declaration": "carried, not declared: CAP-EXHAUSTIVE-WRITES and "
+                        "CAP-SIGNAL-CAPTURE need a reviewed D4 record",
+                    }
+                }
+            )
         evidence = {
             "controller_trace": trace,
             "invocation_receipts": receipts,
@@ -979,7 +1209,8 @@ class Projection:
         artifacts = self.artifacts()
         if artifacts is not None:
             evidence["artifacts"] = artifacts
-        evidence["process_tree"] = tree
+        if tree is not None:
+            evidence["process_tree"] = tree
         evidence["symbols"] = self.symbols(processes, controller_pid)
         if self.n.finished():
             absent = self.proven_absent(trace["states"], processes)
@@ -1006,7 +1237,10 @@ class Projection:
         launched = {r["tool"] for r in processes}
         for tool in CATALOG_TOOLS:
             if tool not in launched:
-                absent += [f"process_receipts[tool={tool}].start", f"process_receipts[tool={tool}].end"]
+                absent += [
+                    f"process_receipts[tool={tool}].start",
+                    f"process_receipts[tool={tool}].end",
+                ]
         return absent
 
 
@@ -1023,7 +1257,9 @@ def map_terminal(terminal, notes=None):
     out = {"outcome": terminal["outcome"], "reason": terminal["reason"]}
     gate = terminal.get("failed_gate")
     if terminal["outcome"] not in TERMINAL_OUTCOMES:
-        raise EvidenceMappingError(f"terminal outcome outside the vocabulary: {terminal['outcome']!r}")
+        raise EvidenceMappingError(
+            f"terminal outcome outside the vocabulary: {terminal['outcome']!r}"
+        )
     if gate is None or gate in FAILED_GATES:
         out["failed_gate"] = gate
     elif notes is not None:
@@ -1061,10 +1297,13 @@ def project_signal_records(records):
 def project_run(run_dir, harness=None):
     """Project one finished run directory. ``harness`` holds only harness-side records:
     launch_observations (HarnessLaunchObserver.records), processes_root, source_pre,
-    source_expected_after, authorized_goal, run_provenance."""
+    source_expected_after, authorized_goal, run_provenance, and observations_path (the
+    container harness observations file, container_route_ruling_2026-10-13)."""
     harness = harness or {}
     native = NativeRun(run_dir, harness.get("processes_root"))
-    return Projection(native, harness).run()
+    path = harness.get("observations_path")
+    observations = load_harness_observations(path) if path is not None else None
+    return Projection(native, harness, observations).run()
 
 
 class HarnessLaunchObserver:
@@ -1119,9 +1358,13 @@ def tag_outputs(run_dir, harness_dir, artifact_paths):
     tagged = []
     for path in outputs:
         if path.is_file():
-            tagged.append({"path": str(path), "content_hash": file_sha256(path), "tag": "synthetic"})
+            tagged.append(
+                {"path": str(path), "content_hash": file_sha256(path), "tag": "synthetic"}
+            )
         elif path.is_dir():
-            tagged.append({"path": str(path), "content_hash": catalog.tree_hash(path), "tag": "synthetic"})
+            tagged.append(
+                {"path": str(path), "content_hash": catalog.tree_hash(path), "tag": "synthetic"}
+            )
     record = {"schema": "weather-adapter.output-tags/1", "outputs": tagged}
     target = Path(harness_dir) / "output-tags.json"
     with target.open("x", encoding="utf-8") as stream:
@@ -1153,7 +1396,9 @@ def run_provenance(run_dir, harness_dir, markers):
     contexts = []
     for record in native.role_files:
         texts.append(json.dumps(record["input"]))
-        context = record["input"].get("execution_context") if isinstance(record["input"], dict) else None
+        context = (
+            record["input"].get("execution_context") if isinstance(record["input"], dict) else None
+        )
         if context is not None:
             contexts.append(context)
     source = Path(native.checkpoint["source"])
@@ -1164,7 +1409,9 @@ def run_provenance(run_dir, harness_dir, markers):
         | {m for m in [*markers, "synthetic"] if any(m in t for t in source_texts)}
     )
     non_production = [
-        c for c in contexts if c.get("source_origin") != "chirps" or c.get("classification") != "production"
+        c
+        for c in contexts
+        if c.get("source_origin") != "chirps" or c.get("classification") != "production"
     ]
     return {
         "tag": "synthetic",

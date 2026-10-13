@@ -47,7 +47,10 @@ SYMBOL_TABLE = (
     "HARNESS_RESOLVED_ARTIFACT_PATH:map",
     "HARNESS_SOURCE_HASH:" + review_evidence.DEFINITION_SOURCE_ID,
 )
-SYMBOL_PATTERNS = (re.compile(r"HARNESS_PLAN_HASH:v[1-9][0-9]*"), re.compile(r"HARNESS_PID:[a-z-]+"))
+SYMBOL_PATTERNS = (
+    re.compile(r"HARNESS_PLAN_HASH:v[1-9][0-9]*"),
+    re.compile(r"HARNESS_PID:[a-z-]+"),
+)
 
 
 EvidenceMappingError = evidence_projection.EvidenceMappingError
@@ -153,18 +156,31 @@ class WeatherAdapter(Adapter):
         }
 
     def capture_signal_targets(self, run_dir, harness=None):
-        """CAP-SIGNAL-CAPTURE (partial): signal_stop records projected; none is never []."""
+        """CAP-SIGNAL-CAPTURE (partial): signal_stop records, or the container harness trace
+        when ``harness["observations_path"]`` is supplied; absence is never []."""
         projection = self.capture_evidence(run_dir, harness)
         evidence = projection["evidence"]
         if "signalled_pids" not in evidence["controller_trace"]:
-            return {"status": "MISSING", "reason": "no signal_stop record (D4)"}
-        return {
-            "signalled_pids": evidence["controller_trace"]["signalled_pids"],
-            "signal_capture_exhaustive": evidence["harness_observations"][
-                "signal_capture_exhaustive"
-            ],
-            "process_tree": evidence["process_tree"],
-        }
+            reasons = [
+                m["reason"]
+                for m in projection["missing"]
+                if m["path"] == "controller_trace.signalled_pids"
+            ]
+            return {
+                "status": "MISSING",
+                "reason": "; ".join(reasons) or "no signal_stop record (D4)",
+            }
+        out = {"signalled_pids": evidence["controller_trace"]["signalled_pids"]}
+        for key, value in (
+            (
+                "signal_capture_exhaustive",
+                evidence["harness_observations"].get("signal_capture_exhaustive"),
+            ),
+            ("process_tree", evidence.get("process_tree")),
+        ):
+            if value is not None:
+                out[key] = value
+        return out
 
     def tag_run_provenance(self, run_dir, harness_dir, markers):
         """CAP-RUN-PROVENANCE (D3): harness tags plus a scan of what the system read."""
@@ -191,7 +207,9 @@ class WeatherAdapter(Adapter):
         ledger = copy.deepcopy(source_ledger)
         for op in case.get("request_delta") or []:
             if op.get("op") != "replace" or op.get("path") != "/scenario_text":
-                raise AdapterRefusal("only a replace of /scenario_text is a supported request delta")
+                raise AdapterRefusal(
+                    "only a replace of /scenario_text is a supported request delta"
+                )
             ledger["scenario_text"] = op["value"]
         if ledger.get("authorization_speaker") != "user":
             raise AdapterRefusal("only a user-speaker authorization can be seeded")

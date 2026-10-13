@@ -65,7 +65,7 @@ MAP_GOAL = {
 }
 DATA_GOAL = {**MAP_GOAL, "task": "onset_data", "title": None}
 TEST_FREE_RAM_GIB = 16.0
-TOOL_SCRIPT = '''
+TOOL_SCRIPT = """
 import json, pathlib, sys
 argv = sys.argv[1:]
 name = pathlib.Path(sys.argv[0]).stem
@@ -82,7 +82,7 @@ else:
     schema = "check-artifact.gate/1" if name == "check_artifact" else "verify-run.gate/1"
     print(json.dumps({"schema": schema, "artifact": value("--input"), "verdict": "PASS",
                       "exit_code": 0, "checks": checks}))
-'''
+"""
 
 
 @pytest.fixture(scope="module")
@@ -162,7 +162,11 @@ class RoleCli:
         elif role == "reviewer":
             value = (self.reviewer or self.default_reviewer)(payload)
         elif role == "verifier":
-            value = {"verdict": "PASS", "binding_hash": payload["binding_hash"], "scope": "data-replay"}
+            value = {
+                "verdict": "PASS",
+                "binding_hash": payload["binding_hash"],
+                "scope": "data-replay",
+            }
         else:
             raise AssertionError("unexpected role " + role)
         envelope = {
@@ -679,6 +683,185 @@ def test_run_without_dispatch_evidence_is_refused(tmp_path):
         ep.project_run(run)
 
 
+# --------------------------------------------------------------------------- container harness input
+
+
+def harness_observations(projection, **overrides):
+    """A container-harness analyzer record (analyze_trace.SCHEMA) consistent with the native
+    launches of ``projection``: the harness input the container route supplies."""
+    ev = projection["evidence"]
+    controller = ev["symbols"]["HARNESS_CONTROLLER_PID"]
+    tree = {str(p["pid"]): controller for p in ev["process_receipts"]}
+    tree[str(controller)] = 1
+    record = {
+        "schema": ep.HARNESS_OBSERVATIONS_SCHEMA,
+        "symbols": {"HARNESS_CONTROLLER_PID": controller, "HARNESS_RUN_DIR": "/work/case/run"},
+        "controller_trace": {"signalled_pids": []},
+        "filesystem_snapshot": {
+            "created_paths": sorted(
+                [str(Path(ev["symbols"]["HARNESS_RUN_DIR"]) / "result.json")]
+                + [a["path"] for a in ev["artifacts"].values() if a["present"]]
+            )
+        },
+        "process_tree": tree,
+        "harness_observations": {
+            "max_concurrent_children": 1,
+            "shell_launches": 0,
+            "signal_capture_exhaustive": True,
+            "tracer_status": {"status": "OK", "problems": []},
+        },
+        "missing": {},
+        "harness_notes": {"created_outside_run_dir": []},
+    }
+    for path, value in overrides.items():
+        section, _, key = path.partition(".")
+        target = record if not key else record[section]
+        name = section if not key else key
+        if value is ep._ABSENT:
+            target.pop(name, None)
+        else:
+            target[name] = value
+    return record
+
+
+def write_observations(tmp_path, record, name="harness-evidence.json"):
+    path = tmp_path / name
+    path.write_text(json.dumps(record), encoding="utf-8")
+    return path
+
+
+def test_container_harness_observations_merge_without_declaring(released, frozen, tmp_path):
+    adapter = WeatherAdapter()
+    base = adapter.capture_evidence(released.run)
+    record = harness_observations(base)
+    merged = adapter.capture_evidence(
+        released.run, {"observations_path": write_observations(tmp_path, record)}
+    )
+    ev = merged["evidence"]
+    assert (
+        ev["filesystem_snapshot"]["created_paths"] == record["filesystem_snapshot"]["created_paths"]
+    )
+    assert ev["controller_trace"]["signalled_pids"] == []
+    assert ev["harness_observations"]["signal_capture_exhaustive"] is True
+    assert ev["harness_observations"]["max_concurrent_children"] == 1
+    assert ev["harness_observations"]["shell_launches"] == 0
+    assert ev["process_tree"] == record["process_tree"]
+    # The host run directory stays the native symbol; the container path is not substituted.
+    assert ev["symbols"]["HARNESS_RUN_DIR"] == str(released.run.resolve())
+    merged_paths = set(ep.HARNESS_OBSERVED_FIELDS)
+    before = {m["path"] for m in base["missing"]}
+    after = {m["path"] for m in merged["missing"]}
+    assert after == before - merged_paths
+    assert "harness_observations.data_fetch_attempts" in after
+    note = next(
+        n["harness_observations_input"]
+        for n in merged["notes"]
+        if "harness_observations_input" in n
+    )
+    assert note["sha256"] == ep.file_sha256(tmp_path / "harness-evidence.json")
+    assert note["merged"] == sorted(merged_paths)
+    # Frozen validators: V25 unchanged; the three harness-owned V24 MISSING findings clear.
+    unmerged_result = findings(frozen, "DEV-E2E-V2_7-E02-P1-INJ", base["evidence"])
+    result = findings(frozen, "DEV-E2E-V2_7-E02-P1-INJ", ev)
+    assert result["V25-EVIDENCE"] == unmerged_result["V25-EVIDENCE"]
+    assert fails(result["V24-EVIDENCE"]) == []
+    cleared = {m for _, m in unmerged_result["V24-EVIDENCE"]} - {
+        m for _, m in result["V24-EVIDENCE"]
+    }
+    assert cleared == {
+        "count field harness_observations.max_concurrent_children missing",
+        "count field harness_observations.shell_launches missing",
+        "list stream filesystem_snapshot.created_paths missing",
+    }
+    # Carrying the values declares nothing (ruling: not declared yet).
+    declared = adapter.implemented_capabilities()
+    assert not {"CAP-EXHAUSTIVE-WRITES", "CAP-SIGNAL-CAPTURE"} & declared
+    signals = adapter.capture_signal_targets(
+        released.run, {"observations_path": tmp_path / "harness-evidence.json"}
+    )
+    assert signals["signalled_pids"] == [] and signals["signal_capture_exhaustive"] is True
+
+
+def test_incomplete_trace_keeps_harness_fields_missing_never_empty(released, tmp_path):
+    adapter = WeatherAdapter()
+    base = adapter.capture_evidence(released.run)
+    reason = "trace not complete: TRUNCATED"
+    record = harness_observations(
+        base,
+        **{
+            "filesystem_snapshot.created_paths": ep._ABSENT,
+            "controller_trace.signalled_pids": ep._ABSENT,
+            "process_tree": ep._ABSENT,
+            "harness_observations.max_concurrent_children": ep._ABSENT,
+            "harness_observations.shell_launches": ep._ABSENT,
+            "harness_observations.signal_capture_exhaustive": False,
+        },
+    )
+    record["missing"] = {
+        f: reason
+        for f in (
+            "filesystem_snapshot.created_paths",
+            "process_tree",
+            "controller_trace.signalled_pids",
+            "harness_observations.max_concurrent_children",
+            "harness_observations.shell_launches",
+        )
+    }
+    projection = adapter.capture_evidence(
+        released.run, {"observations_path": write_observations(tmp_path, record)}
+    )
+    ev = projection["evidence"]
+    assert "created_paths" not in ev["filesystem_snapshot"]
+    assert "signalled_pids" not in ev["controller_trace"]
+    assert "process_tree" not in ev
+    assert ev["harness_observations"]["signal_capture_exhaustive"] is False
+    gaps = {m["path"]: m for m in projection["missing"]}
+    assert gaps["filesystem_snapshot.created_paths"] == {
+        "path": "filesystem_snapshot.created_paths",
+        "capability": "CAP-EXHAUSTIVE-WRITES",
+        "reason": "container harness: " + reason,
+    }
+    assert gaps["process_tree"]["capability"] == "CAP-SIGNAL-CAPTURE"
+    signals = adapter.capture_signal_targets(
+        released.run, {"observations_path": tmp_path / "harness-evidence.json"}
+    )
+    assert signals == {"status": "MISSING", "reason": "container harness: " + reason}
+    # A field neither carried nor reported missing is still a gap, never [].
+    silent = harness_observations(base, **{"filesystem_snapshot.created_paths": ep._ABSENT})
+    projection = adapter.capture_evidence(
+        released.run, {"observations_path": write_observations(tmp_path, silent, "silent.json")}
+    )
+    assert "created_paths" not in projection["evidence"]["filesystem_snapshot"]
+    assert any(m["path"] == "filesystem_snapshot.created_paths" for m in projection["missing"])
+
+
+def test_inconsistent_harness_observations_refuse_the_projection(released, tmp_path):
+    adapter = WeatherAdapter()
+    base = adapter.capture_evidence(released.run)
+    controller = base["evidence"]["symbols"]["HARNESS_CONTROLLER_PID"]
+    first = base["evidence"]["process_receipts"][0]["pid"]
+    good = harness_observations(base)
+    unknown_pid_tree = {k: v for k, v in good["process_tree"].items() if k != str(first)}
+    wrong_parent_tree = {**good["process_tree"], str(first): controller + 1}
+    cases = [
+        ({"schema": "other/1"}, "unknown schema"),
+        ({"symbols.HARNESS_CONTROLLER_PID": controller + 1}, "controller pid differs"),
+        ({"process_tree": unknown_pid_tree}, "absent from the harness process tree"),
+        ({"process_tree": wrong_parent_tree}, "different creating parent"),
+        ({"controller_trace.signalled_pids": ep._ABSENT}, "exhaustive without signalled_pids"),
+        ({"controller_trace.signalled_pids": [999999]}, "signalled pid is absent"),
+        ({"filesystem_snapshot.created_paths": ["relative/path"]}, "unique absolute paths"),
+        ({"harness_observations.signal_capture_exhaustive": "yes"}, "JSON boolean"),
+        ({"harness_observations.max_concurrent_children": -1}, "non-negative integer"),
+        ({"missing": {"process_tree": "claimed missing"}}, "both present and missing"),
+    ]
+    for index, (overrides, message) in enumerate(cases):
+        record = harness_observations(base, **overrides)
+        path = write_observations(tmp_path, record, f"bad-{index}.json")
+        with pytest.raises(ep.EvidenceMappingError, match=message):
+            adapter.capture_evidence(released.run, {"observations_path": path})
+
+
 # --------------------------------------------------------------------------- run_case and D4
 
 
@@ -753,9 +936,13 @@ def test_symbol_resolver_is_a_closed_native_table(released):
 
 def test_terminal_mapping_never_guesses_an_unmapped_gate():
     adapter = WeatherAdapter()
-    mapped = adapter.map_terminal_reason({"outcome": "BLOCKED", "reason": "x", "failed_gate": "review"})
+    mapped = adapter.map_terminal_reason(
+        {"outcome": "BLOCKED", "reason": "x", "failed_gate": "review"}
+    )
     assert mapped["terminal"]["failed_gate"] == "review"
-    unmapped = adapter.map_terminal_reason({"outcome": "BLOCKED", "reason": "x", "failed_gate": "lint"})
+    unmapped = adapter.map_terminal_reason(
+        {"outcome": "BLOCKED", "reason": "x", "failed_gate": "lint"}
+    )
     assert "failed_gate" not in unmapped["terminal"]
     assert unmapped["notes"] == [{"unmapped_failed_gate": "lint"}]
     released = adapter.map_terminal_reason(

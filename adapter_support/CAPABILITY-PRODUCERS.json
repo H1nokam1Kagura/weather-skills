@@ -1,6 +1,7 @@
 {
   "schema": "weather-adapter.capability-producers/1",
   "authority": "Owner ruling D4 (CR-09): every declared capability requires a reviewed capability-to-producer record; an empty signal list is never emitted as exhaustive evidence. Source: simkit/handoffs/completion-20261012/decisions/OWNER-RULINGS.json.",
+  "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids and symbols.HARNESS_CONTROLLER_PID as a harness-observations input file. The projection accepts and merges it; CAP-EXHAUSTIVE-WRITES and CAP-SIGNAL-CAPTURE are NOT declared by carrying those values (statuses unchanged until the traced harness is reviewed).",
   "base": "controller 0e862c8 (feat/simkit-completion-snowyowl); line numbers refer to that base",
   "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED and reviewer is a non-empty string. reviewer/reviewed_at are left null for the coordinator. PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
   "frozen_shapes": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json structures (frozen v2.7, read-only)",
@@ -63,6 +64,7 @@
         {"file": "tools/workflow/runner.py", "line": 239, "symbol": "Controller.checkpoint", "emits": "request_hash, build_hash, plan, root, source"},
         {"file": "tools/workflow/runner.py", "line": 780, "symbol": "Controller.record_plan_version", "emits": "plan_versions[k].plan_hash (HARNESS_PLAN_HASH:vN)"},
         {"file": "tools/workflow/processes.py", "line": 342, "symbol": "Processes.run launch record", "emits": "pid, parent_pid (HARNESS_PID:<tool>, HARNESS_CONTROLLER_PID)"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"},
         {"file": "tools/workflow/claim_gates.py", "line": 35, "symbol": "bind_definition_source", "emits": "definition source hash (HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling, D1)"},
         {"file": "adapter_support/weather_adapter.py", "line": null, "symbol": "WeatherAdapter.prepare_fixture", "emits": "source_pre (harness tree_hash before the run)"}
       ],
@@ -174,16 +176,17 @@
       "method": "observe_harness",
       "status": "PARTIAL",
       "producers": [
-        {"file": "tools/workflow/processes.py", "line": 285, "symbol": "Processes.run launch_check", "emits": "free_ram_gib, budget_ok, launched, reading_source per launch decision"}
+        {"file": "tools/workflow/processes.py", "line": 285, "symbol": "Processes.run launch_check", "emits": "free_ram_gib, budget_ok, launched, reading_source per launch decision"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
       ],
-      "evidence_fields": ["budget_ledger.launch_checks"],
+      "evidence_fields": ["budget_ledger.launch_checks", "harness_observations.max_concurrent_children, harness_observations.shell_launches (container harness input only)"],
       "missing_fields": [
-        {"field": "harness_observations.max_concurrent_children", "owner": "P4 whole-tree observer"},
-        {"field": "harness_observations.shell_launches", "owner": "P4 whole-tree observer"},
+        {"field": "harness_observations.max_concurrent_children", "owner": "container harness (MISSING without the observations input)"},
+        {"field": "harness_observations.shell_launches", "owner": "container harness (MISSING without the observations input)"},
         {"field": "harness_observations.data_fetch_attempts", "owner": "no design (network observation)"},
         {"field": "harness_observations.min_free_ram_while_running_gib", "owner": "processes.py (min_free_gib falls back to a post-exit read when no sample was taken; not distinguishable)"}
       ],
-      "tests": ["test_released_projection_maps_native_records_without_filling"],
+      "tests": ["test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
       "reviewer": null,
       "reviewed_at": null
     },
@@ -193,11 +196,13 @@
       "status": "PARTIAL",
       "producers": [
         {"file": "tools/workflow/signal_stop.py", "line": 645, "symbol": "stop_tree", "emits": "signal-stop/1 {signalled_pids, process_tree, exhaustive, exhaustive_reasons}"},
-        {"file": "tools/workflow/processes.py", "line": 423, "symbol": "Processes.run signal_stop event", "emits": "signal_stop dispatch event on the controller clock"}
+        {"file": "tools/workflow/processes.py", "line": 423, "symbol": "Processes.run signal_stop event", "emits": "signal_stop dispatch event on the controller clock"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
       ],
-      "evidence_fields": ["controller_trace.signalled_pids", "harness_observations.signal_capture_exhaustive (true only when every record is exhaustive)", "process_tree (launch pid->parent plus signal_stop trees)"],
-      "missing_fields": [{"field": "all fields when no signal_stop record exists", "owner": "D4: absence of a stop record is never an empty exhaustive list"}],
-      "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling"],
+      "evidence_fields": ["controller_trace.signalled_pids", "harness_observations.signal_capture_exhaustive (true only when every record is exhaustive)", "process_tree (launch pid->parent plus signal_stop trees)", "container route: signalled_pids, signal_capture_exhaustive and process_tree (creating parent) from the harness trace; every native launch must appear with the same parent and every native signal_stop pid must be observed, else the projection is refused; the native signal_stop projection and any differing parent-at-signal are kept in notes"],
+      "missing_fields": [{"field": "all fields when no signal_stop record exists and no harness observations input is supplied", "owner": "D4: absence of a stop record is never an empty exhaustive list"}, {"field": "fields the container harness reports missing (tracer death, truncation, unresolved targets)", "owner": "container harness (reason carried verbatim)"}],
+      "notes": "Not declared: status stays PARTIAL until the traced container harness is reviewed (container_route_ruling_2026-10-13).",
+      "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
       "reviewer": null,
       "reviewed_at": null
     },
@@ -205,11 +210,13 @@
       "d4_gated": true,
       "method": "assert_exhaustive_write_capture",
       "status": "NOT_DECLARED",
-      "producers": [],
-      "evidence_fields": ["filesystem_snapshot.created_paths (left MISSING in frozen evidence)"],
-      "missing_fields": [{"field": "filesystem_snapshot.created_paths", "owner": "separately versioned confinement-candidate package"}],
-      "notes": "OWNER-RULINGS write_capture_ruling_2026-10-13: CONFINEMENT_CANDIDATE_ONLY; results under it are never frozen v2.7. No method is implemented here.",
-      "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records"],
+      "producers": [
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
+      ],
+      "evidence_fields": ["filesystem_snapshot.created_paths (container harness input only; compared by exact string with artifacts.<id>.path, so the projection must run in the trace's path namespace)"],
+      "missing_fields": [{"field": "filesystem_snapshot.created_paths", "owner": "container harness (MISSING without the observations input, or when the harness reports it missing, e.g. tracer death or io_uring)"}],
+      "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). The value is carried when supplied, but the capability is not declared: no method is implemented and status stays NOT_DECLARED until the traced harness is reviewed.",
+      "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
       "reviewer": null,
       "reviewed_at": null
     },
