@@ -139,17 +139,15 @@ def main():
             (root / name).mkdir()
         budget, duration, elapsed = args.budget_usd, args.timeout, 0
         transport = kong_transport(parser, args)
-    else:
-        saved = read_checkpoint(root)
-        budget, duration, elapsed = saved["budget"], saved["total_seconds"], saved["elapsed_s"]
-        transport = recorded_transport(root)
-        if elapsed >= duration or saved["spent"] >= budget:
-            raise Refused(
-                "original run budget exhausted; resume cannot reset limits",
-                gate="budget",
-                reason="resume_refused",
-            )
     with run_lock(root):
+        if args.command == "resume":
+            # Read under the lock (W2 review __main__.py:127): limits come from the checkpoint
+            # this resume owns. An exhausted budget is refused by Controller.resume, which
+            # records the REFUSED decision, the terminal and result.json (gate budget,
+            # reason resume_refused) instead of escaping here with no terminal.
+            saved = read_checkpoint(root)
+            budget, duration, elapsed = saved["budget"], saved["total_seconds"], saved["elapsed_s"]
+            transport = recorded_transport(root)
         processes = Processes(root / "processes", total_seconds=duration)
         processes.deadline -= elapsed
         roles = (
@@ -158,7 +156,7 @@ def main():
             else kong_roles(transport, processes, root / "role-context", budget)
         )
         controller = (
-            Controller.resume(root, processes, roles)
+            resume_or_exit(root, processes, roles)
             if args.command == "resume"
             else Controller(
                 repo,
@@ -193,6 +191,36 @@ def main():
         print(json.dumps(result, indent=2))
         if result["terminal"]["outcome"] == "NEEDS_INFO":
             raise SystemExit(2)  # an explicit stop awaiting a human answer, not a release
+
+
+def resume_or_exit(root, processes, roles):
+    """Controller.resume; a refusal prints a status line and exits 1 instead of escaping.
+
+    The terminal printed is the one THIS refusal recorded in result.json (Controller.resume
+    writes it for every verified refusal); an older result.json is never reported as it.
+    """
+    path = root / "result.json"
+    before = path.stat().st_mtime_ns if path.exists() else None
+    try:
+        return Controller.resume(root, processes, roles)
+    except Refused as exc:
+        after = path.stat().st_mtime_ns if path.exists() else None
+        terminal = (
+            json.loads(path.read_text(encoding="utf-8")).get("terminal")
+            if after not in (None, before)
+            else None
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "INCOMPLETE",
+                    "error": str(exc),
+                    "run_dir": str(root),
+                    "terminal": terminal,
+                }
+            )
+        )
+        raise SystemExit(1) from exc
 
 
 TRANSPORT_RECORD = "role-transport.json"

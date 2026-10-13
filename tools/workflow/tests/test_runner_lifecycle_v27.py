@@ -23,7 +23,7 @@ from tools.workflow.contracts import (
     request_goal,
     validate_goal,
 )
-from tools.workflow.persistence import read_checkpoint
+from tools.workflow.persistence import read_checkpoint, run_lock, write_checkpoint
 from tools.workflow.tests.test_workflow import GOAL, FakeProcesses, FakeRoles, controller, request
 
 WORKFLOW = Path(runner.__file__).resolve().parent
@@ -708,6 +708,51 @@ def test_cli_exposes_evidence_modes(tmp_path, monkeypatch, capsys, flags):
     cli.main()
     assert captured["dispatch_evidence_mode"] is ("--dispatch-evidence" in flags)
     assert captured["review_evidence_mode"] is ("--review-evidence" in flags)
+
+
+def exhausted_checkpoint(tmp_path, monkeypatch):
+    c = controller(tmp_path, monkeypatch)
+    value = read_checkpoint(c.root)
+    value["elapsed_s"] = value["total_seconds"] + 1
+    write_checkpoint(c.root, value)
+    monkeypatch.setattr(sys, "argv", ["wf", "resume", "--run-dir", str(c.root)])
+    return c
+
+
+def test_cli_resume_budget_refusal_records_a_terminal(tmp_path, monkeypatch, capsys):
+    """W2 review __main__.py:130: the refusal reaches result.json and the status line."""
+    c = exhausted_checkpoint(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 1
+    assert isinstance(stopped.value.__cause__, Refused)
+    assert stopped.value.__cause__.gate == "budget"
+    terminal = result_json(c)["terminal"]
+    assert terminal["failed_gate"] == "budget" and terminal["reason"] == "resume_refused"
+    assert terminal["outcome"] in {"BLOCKED", "INCOMPLETE"}
+    assert read_checkpoint(c.root)["context"]["terminal"]["failed_gate"] == "budget"
+    status = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert status["status"] == "INCOMPLETE" and status["terminal"] == terminal
+
+
+def test_cli_resume_reads_the_checkpoint_under_the_run_lock(tmp_path, monkeypatch, capsys):
+    """W2 review __main__.py:127: limits are read from the checkpoint the resume owns."""
+    c = exhausted_checkpoint(tmp_path, monkeypatch)
+    held, real = [], cli.read_checkpoint
+
+    def spy(root):
+        try:
+            with run_lock(root):
+                held.append(False)  # nobody held the lock: read outside it
+        except Refused:
+            held.append(True)
+        return real(root)
+
+    monkeypatch.setattr(cli, "read_checkpoint", spy)
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert held == [True]
+    assert c.root.joinpath("result.json").exists()
 
 
 # ------------------------------------------------------------------ item 4: process receipts
