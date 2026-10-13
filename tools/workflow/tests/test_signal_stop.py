@@ -300,11 +300,15 @@ def test_denied_signal_is_recorded_and_not_exhaustive():
     j = make(b)
     b.add(2001, 2000, deny=True)
     rec = ss.stop_tree(j, job=job(b), timeout_s=0.05, settle_ms=0)
-    # Intentional change (W2 review signal_stop.py:713): a denied TerminateProcess is an
-    # attempt, not a signal. It was asserted IN signalled_pids here before; it now lives in
-    # signal_attempts and signal_denied only, once per PID across stop rounds.
-    assert 2001 not in rec["signalled_pids"]
-    assert 2001 not in {e["pid"] for e in rec["signalled"]}
+    # Intentional change (wave-3 correction of the W2 signal_stop.py:713 fix): frozen
+    # CAP-SIGNAL-CAPTURE says "Record every PID the controller signals (terminated or not)"
+    # and V26 checks every signalled PID is a controller descendant, so a TerminateProcess
+    # denied on a LIVE process is a signal attempt and must be listed in signalled_pids
+    # (once, result "denied"); hiding it would let an attempt on a decoy pass V26. It is
+    # also kept in signal_denied and still makes the stop non-exhaustive.
+    assert rec["signalled_pids"].count(2001) == 1
+    assert {e["pid"]: e["result"] for e in rec["signalled"]}[2001] == "denied"
+    assert rec["signalled_pids"] == [e["pid"] for e in rec["signalled"]]
     assert [e["pid"] for e in rec["signal_denied"]] == [2001]
     assert rec["signal_denied"][0]["result"] == "denied"
     assert len(rec["signalled_pids"]) == len(set(rec["signalled_pids"]))
@@ -312,6 +316,26 @@ def test_denied_signal_is_recorded_and_not_exhaustive():
     assert rec["exhaustive"] is False
     assert any("deadline" in r for r in rec["exhaustive_reasons"])
     assert any("denied" in r for r in rec["exhaustive_reasons"])
+
+
+def test_denied_then_successful_signal_is_listed_once_as_ok():
+    b = FakeBackend()
+    j = make(b)
+    target = b.add(2001, 2000, deny=True)
+
+    def allow_second_attempt(backend, handle):
+        if handle.pid == 2001 and backend.log.count(("terminate", 2001)) >= 2:
+            handle.deny = False  # first round refused, a later round succeeds
+
+    b.on_terminate.append(allow_second_attempt)
+    rec = ss.stop_tree(j, job=job(b), timeout_s=2, settle_ms=0)
+    results = [a["result"] for a in rec["signal_attempts"] if a["pid"] == 2001]
+    assert results[:2] == ["denied", "ok"] and not target.alive
+    assert rec["signalled_pids"].count(2001) == 1
+    assert rec["signalled_pids"] == [e["pid"] for e in rec["signalled"]]
+    assert {e["pid"]: e["result"] for e in rec["signalled"]}[2001] == "ok"
+    assert rec["signal_denied"] == []
+    assert not any("denied" in r for r in rec["exhaustive_reasons"])
 
 
 def test_pid_signalled_in_two_rounds_is_listed_once():

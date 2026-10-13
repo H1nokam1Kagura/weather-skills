@@ -31,18 +31,22 @@ residual race window is one poll gap plus the snapshot latency. A process that s
 a child and exits inside that window leaves an unprovable orphan. The census detects
 it, but the run cannot be exhaustive.
 
-Signalled means "a running process the controller signalled". A target found exited
-right before its signal (handle already signalled: the WaitForSingleObject form of
-GetExitCodeProcess != STILL_ACTIVE, immune to a real exit code of 259) is recorded as
-``already_exited``. A target whose TerminateProcess call fails while its handle then
-reports exited (Windows fails TerminateProcess on an exited process with
-ERROR_ACCESS_DENIED) exited on its own between that check and the call, and is recorded
-as ``exited_before_signal``. Neither is in ``signalled_pids``/``signalled``; both stay
-in ``signal_attempts`` and ``exited_before_signal``. A TerminateProcess refused on a
-process that is still running is an attempt, not a signal: it is recorded in
-``signal_attempts`` and ``signal_denied`` (once per PID; dropped if a later round signals
-it) and adds an exhaustive reason. ``signalled_pids`` lists each PID once across stop
-rounds, in first-signal order. Residual race, not closable from
+Signalled means "a running process the controller signalled, terminated or not" (the
+frozen text above). A target found exited right before its signal (handle already
+signalled: the WaitForSingleObject form of GetExitCodeProcess != STILL_ACTIVE, immune to
+a real exit code of 259) is recorded as ``already_exited``. A target whose
+TerminateProcess call fails while its handle then reports exited (Windows fails
+TerminateProcess on an exited process with ERROR_ACCESS_DENIED) exited on its own between
+that check and the call, and is recorded as ``exited_before_signal``. Neither is in
+``signalled_pids``/``signalled`` (no signal reached a live process); both stay in
+``signal_attempts`` and ``exited_before_signal``. A TerminateProcess refused on a process
+that is still running IS a signal attempt on a live process ("terminated or not"): it is
+in ``signalled_pids``/``signalled`` with result ``denied``, so a refused attempt on a
+non-owned process (a decoy) stays visible to the all-descendants check. It is also listed
+in ``signal_denied`` (once per PID; dropped if a later round's signal succeeds) and adds an
+exhaustive reason. ``signalled_pids`` lists each PID once across stop rounds, in
+first-signal order; its ``signalled`` entry carries the first successful result if any,
+else ``denied``. Residual race, not closable from
 user mode: a process already inside ExitProcess when TerminateProcess succeeds is
 listed as signalled although it was ending, so its own end time may precede the
 signal by a few microseconds. An empty signal list is never exhaustive evidence (D4).
@@ -666,8 +670,13 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
     journal.halt()
     reasons = []
     attempts = [] if attempts is None else attempts
-    signalled = {}  # pid -> first successful entry: each PID listed once across rounds
-    denied = {}  # pid -> first denied entry, dropped if a later round signals it
+    # pid -> entry, each PID once across rounds in first-signal order: the first successful
+    # entry, else the first denied one. Frozen CAP-SIGNAL-CAPTURE (agentic-e2e-injections.
+    # ADAPTER-REQUIREMENTS.json): "Record every PID the controller signals (terminated or
+    # not)", and V26 checks every signalled PID is a controller descendant, so a denied
+    # signal on a live process is listed, never hidden.
+    signalled = {}
+    denied = {}  # pid -> first denied entry, dropped if a later round's signal succeeds
     exited_before = []
     unproven_found = []
     rounds = 0
@@ -723,14 +732,18 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
                     continue
                 if ok:
                     entry["result"] = "ok"
-                    signalled.setdefault(member.pid, entry)
+                    prior = signalled.get(member.pid)
+                    if prior is None or prior["result"] == "denied":
+                        signalled[member.pid] = entry  # keeps first-signal position
                     denied.pop(member.pid, None)
                 else:
-                    # A refused TerminateProcess on a live process is an attempt, not a
-                    # signal (W2 review signal_stop.py:713): never in signalled_pids.
+                    # A refused TerminateProcess on a live process is still a signal the
+                    # controller issued ("terminated or not"): listed in signalled_pids
+                    # with result "denied", and in signal_denied unless later successful.
                     entry["result"] = "denied"
                     if member.pid not in signalled:
-                        denied.setdefault(member.pid, entry)
+                        signalled[member.pid] = entry
+                        denied[member.pid] = entry
             for member in live:
                 if member.handle is not None:
                     backend.wait(member.handle, settle_ms)
