@@ -1,17 +1,30 @@
 """Observed review projection, deliberately not an admitted full-case adapter."""
 
 import json
+import re
+from pathlib import Path
 
 from simkit.adapter import Adapter
 
+from adapter_support.fixture_staging import stage_fixture
 from tools.workflow import review_evidence
+from tools.workflow.catalog import safe_path, tree_hash
 from tools.workflow.contracts import digest, request_goal
+from tools.workflow.e2e_injections import InjectionHooks
 from tools.workflow.persistence import read_checkpoint
 from tools.workflow.runner import Controller
+
+SOURCE_HASH_ALGORITHM = "tools.workflow.catalog.tree_hash"
+REPORT_HASH_ALGORITHM = "tools.workflow.review_evidence.text_hash"
+SUPPORTED_REPAIR_LIMITS = (0, 1)
 
 
 class EvidenceMappingError(ValueError):
     pass
+
+
+class AdapterRefusal(ValueError):
+    """A case input this adapter cannot faithfully apply; never guessed or filled."""
 
 
 class WeatherAdapter(Adapter):
@@ -45,6 +58,118 @@ class WeatherAdapter(Adapter):
                 "status": "NOT_IMPLEMENTED",
                 "reasons": ["review projection is not exhaustive harness observation"],
             },
+        }
+
+    def controller_goal_hash(self, goal):
+        """CAP-CONTROLLER-HASH: the controller's own authorization goal digest.
+
+        The caller passes the reference goal it authorizes; this never reads a
+        controller's compiled goal (that is HARNESS_GOAL_HASH:current). NaN and
+        other non-JSON values are refused by the controller routine itself.
+        """
+        if not isinstance(goal, dict):
+            raise AdapterRefusal("an explicit goal object is required")
+        return digest(goal)
+
+    def configure_repair(self, case):
+        """CAP-REPAIR-CONFIG: the Controller(max_repairs=...) value for one case.
+
+        Only the frozen budget field is read. Anything outside the supported
+        0/1 limits, including bool, is refused rather than coerced.
+        """
+        try:
+            value = case["budget"]["max_repair_attempts"]
+        except (KeyError, TypeError) as exc:
+            raise AdapterRefusal("case budget.max_repair_attempts is required") from exc
+        if type(value) is not int or value not in SUPPORTED_REPAIR_LIMITS:
+            raise AdapterRefusal("max_repair_attempts must be the integer 0 or 1")
+        return value
+
+    def prepare_fixture(
+        self, case, case_root, *, source, generator_provenance, presented_fetch_version
+    ):
+        """CAP-DISPOSABLE-FIXTURE: stage one pre-generated synthetic source per case.
+
+        The generator is not imported here: the caller supplies its output and a
+        pinned identity (generator, generator_sha256), recorded as caller-stated.
+        Layout under a new case_root: source/source.zarr (staged; its parent holds
+        nothing else, since verify-run searches source.parent), harness/ (manifest)
+        and run/ (fresh, empty). source_pre uses the controller's own tree hash.
+        Run provenance and synthetic invisibility are NOT declared here.
+        """
+        if not isinstance(case, dict) or not isinstance(case.get("id"), str) or not case["id"]:
+            raise AdapterRefusal("a case with an explicit id is required")
+        provenance = dict(generator_provenance)
+        if not re.fullmatch(r"[0-9a-f]{64}", str(provenance.get("generator_sha256", ""))):
+            raise AdapterRefusal("a pinned generator_sha256 is required")
+        raw = Path(case_root)
+        if not raw.is_absolute() or ".." in raw.parts:
+            raise AdapterRefusal("case_root must be absolute with no '..' segments")
+        root = safe_path(raw)
+        if root.exists():
+            raise FileExistsError("case_root must be new; reuse is refused")
+        for ancestor in root.parents:
+            if (ancestor / "harness" / "manifest.json").exists():
+                raise AdapterRefusal("case_root lies inside another prepared case root")
+        root.mkdir(exist_ok=False)
+        source_directory, harness, run = root / "source", root / "harness", root / "run"
+        source_directory.mkdir(exist_ok=False)
+        staged = source_directory / "source.zarr"
+        manifest = stage_fixture(
+            source,
+            staged,
+            harness,
+            generator_provenance=provenance,
+            presented_fetch_version=presented_fetch_version,
+        )
+        run.mkdir(exist_ok=False)
+        return {
+            "schema": "weather-adapter.disposable-fixture/1",
+            "case_id": case["id"],
+            "case_root": str(root),
+            "source": str(staged),
+            "source_directory": str(source_directory),
+            "harness": str(harness),
+            "run": str(run),
+            "source_pre": {"algorithm": SOURCE_HASH_ALGORITHM, "value": tree_hash(staged)},
+            "generator_identity": {
+                "generator": manifest["generator_provenance"]["generator"],
+                "generator_sha256": manifest["generator_provenance"]["generator_sha256"],
+                "stated_by": "caller",
+            },
+            "manifest": manifest,
+            "not_declared": ["CAP-RUN-PROVENANCE"],
+        }
+
+    def patch_gate_report(self, hooks, event, controller):
+        """CAP-GATE-REPORT-PATCH: deliver after_tool json_patch via InjectionHooks.
+
+        event["process"] is the dict the controller's read_gate later parses, so
+        the patched stdout is the delivered report. The raw report stays in the
+        process manager's own record; both hashes are returned so evidence can
+        name which is which. A schedule whose after_tool entries are anything
+        but JSON Patch arrays is refused: delegating would apply them too.
+        """
+        if not isinstance(hooks, InjectionHooks):
+            raise AdapterRefusal("the existing InjectionHooks delivery path is required")
+        for spec in hooks.schedule:
+            if spec["hook"] == "after_tool" and (
+                spec["operation"] != "json_patch" or not isinstance(spec.get("payload"), list)
+            ):
+                raise AdapterRefusal("after_tool entry is not a gate-report JSON Patch")
+        process = event.get("process") if isinstance(event, dict) else None
+        if not isinstance(process, dict) or not isinstance(process.get("stdout"), str):
+            raise AdapterRefusal("an observed after_tool process with stdout is required")
+        raw = review_evidence.text_hash(process["stdout"])
+        first = len(hooks.records)
+        hooks("after_tool", event, controller)
+        return {
+            "hash_algorithm": REPORT_HASH_ALGORITHM,
+            "raw_report_hash": raw,
+            "delivered_report_hash": review_evidence.text_hash(process["stdout"]),
+            "raw_report_record": "process manager process record (unpatched stdout)",
+            "delivered_report_record": "after_tool process consumed by read_gate",
+            "records": json.loads(json.dumps(hooks.records[first:])),
         }
 
     def resolve_review_diagnostic_symbol(self, controller, symbol, reviewer_occurrence):
