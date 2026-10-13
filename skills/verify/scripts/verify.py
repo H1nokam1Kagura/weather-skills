@@ -16,11 +16,7 @@ import xarray as xr
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.cf import auto_variable
 from weather_skills_core.standard_utils import latitude_weights
-from weather_skills_core.units import (
-    format_units_for_display,
-    units_equal,
-    variable_units,
-)
+from weather_skills_core.units import units_equal, variable_units
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -171,7 +167,7 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
         )
     else:
         lat = next((n for n in ("latitude", "lat") if n in field.dims), None)
-        u = format_units_for_display(u_fc or u_obs) if (u_fc or u_obs) else ""
+        u = u_fc or u_obs or ""
         u_suffix = f" {u}" if u else ""
         value = None
         if lat is None:
