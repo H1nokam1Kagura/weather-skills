@@ -37,8 +37,8 @@ a scalar (0-d) `time` coord holding the forecast init date. Spatial dims
 `datetime64` or, for a non-standard model calendar (`noleap`, `360_day`), an
 object-dtype `cftime` datetime. An input that already has a `time` dim is
 already on a wall-clock axis and is rejected; an input that has BOTH a `time`
-dim and a `step` dim (a multi-init/hindcast cube) is rejected with a message to
-select a single init first.
+dim and a `step` dim (a multi-init/hindcast cube) is rejected; `select` a
+single init first.
 
 ## Usage
 
@@ -66,13 +66,11 @@ init coord and the `step` coord are dropped, as is any pre-existing
 axis); the init date is written to the dataset attr `weather_skills_forecast_init`
 (ISO 8601, the `cftime` ISO string for a non-standard-calendar init).
 
-If the input lacks a `step` dim, the `step` dim is empty, the `step` values are
-not `timedelta64`, the input already has a `time` dim (or both a `time` and a
-`step` dim), there is no scalar `time` init coord, the init is neither
-`datetime64` nor `cftime`, the init is missing/NaT, or the realized valid times
-are not strictly increasing, the skill exits with code 2 and a clear message. A
-path that exists but is not a readable Zarr store also exits 2 with a clear
-message.
+The skill exits 2 with a message when the input has no `step` dim or no
+scalar `time` init coord (core's input check reports this as a missing
+`init_time`), already has a `time` dim — including a multi-init cube with
+both `time` and `step`, which needs `select` on one init first — has a
+missing (NaT) init, or has `step` values that are not strictly increasing.
 
 ### Provenance
 
