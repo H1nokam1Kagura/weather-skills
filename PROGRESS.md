@@ -39,9 +39,16 @@
 - Run pytest (tools/workflow/tests + tests/test_weather_adapter*.py) and ruff.
 - Live smoke (one call per changed role shape, synthetic) -> completion-evidence/kong-live-probe/WIRING-RESULT.json.
 
-## Test status
-- Kong/agents/lifecycle tests: 126 passed (test_kong_wiring, test_kong_roles, test_agents,
-  test_runner_lifecycle_v27). Full suite run pending.
+## Test status (final)
+- Full suite stopped on coordinator instruction (coordinator runs it at merge).
+- Touched files (test_kong_roles, test_kong_wiring, test_agents, test_runner_lifecycle_v27):
+  124 passed, 4 failed in 1222s. The 4 are the kit-subprocess real_worker tests; no traceback
+  was captured (output was tailed). Rerun: 1 alone passed (25.6s), then all 4 together passed
+  (4 passed in 100s). Reading: load or timing sensitive (each test starts the kit Python,
+  18-33s), not a code regression. Unconfirmed.
+- ruff check + format --check on the 7 changed .py files: clean.
+
+## Status: COMPLETE (pending coordinator merge)
 
 ## Live Kong smoke (DONE 2026-10-13T14:41Z; do NOT rerun)
 - 3 calls, one each, no retry -> completion-evidence/kong-live-probe/WIRING-RESULT.json.
@@ -55,4 +62,6 @@
   construction-time roster check).
 
 ## Open questions
-- Approval for the one-line out-of-set update to tools/workflow/tests/test_agents.py.
+- 310ab9b (test_agents.py / test_kong_roles.py) is outside the declared set; kept because it
+  only follows the intentional changes. Coordinator to accept or drop.
+- Shape C (planner/repairer review_evidence_request suffix) not proven live.
