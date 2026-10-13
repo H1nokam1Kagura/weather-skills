@@ -25,7 +25,7 @@
    test_operator_channel_v27.py; 5. pytest full tools/workflow/tests + tests/test_weather_adapter*.py; ruff.
 
 ## Test status
-- test_operator_channel_v27.py: 37 passed. Ruff check+format clean. Full suite: pending.
+- test_operator_channel_v27.py: 37 passed. Ruff check+format clean. Full suite tools/workflow/tests + tests/test_weather_adapter*.py: 424 passed, 1 skipped (626s). DONE.
 
 ## Open questions
 - Notify-and-wait stop and before-resume call sites belong to other agents (resume()/notify not in my
