@@ -1,11 +1,15 @@
 #!/bin/sh
 # Container entrypoint (runs as root, PID != 1: the launcher passes --init, so docker-init is PID 1).
 #
-#   entry.sh MODE [--no-trace] [--kill-tracer-after SECONDS]
+#   entry.sh MODE [CASE_ID] [--no-trace] [--kill-tracer-after SECONDS]
 #     canary       stage the synthetic fixture (pinned generator), then run the real controller
 #                  (fixture roles) as uid 1000 under a root strace -ff
 #     tree         the probe's synthetic owned tree (regression scenarios) + untraced decoy
 #     kill-tracer  a tree that tries to SIGKILL its tracer (must be EPERM) and keeps writing
+#     case ID      one frozen v2.7 case: pinned-generator fixture staged untraced, then the frozen
+#                  runner -> WeatherAdapter.run_case (real controller) traced; the runner record
+#                  comes out on fd 3 (opened here onto $OUT, never a traced path); post-trace the
+#                  analyzer, the adapter projection and the pinned frozen scorer run in-container
 #   --no-trace                same run without the tracer (overhead baseline; evidence MISSING)
 #   --kill-tracer-after S     the HARNESS kills strace after S seconds (tracer-death regression:
 #                             every trace-derived field must come out MISSING, never [])
@@ -16,6 +20,14 @@
 set -u
 MODE="${1:-}"
 [ $# -gt 0 ] && shift
+CASE_ID=""
+if [ "$MODE" = case ]; then
+  CASE_ID="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$CASE_ID" in
+    ""|*[!A-Za-z0-9_.-]*) echo "case mode needs a plain case id" >&2; exit 2 ;;
+  esac
+fi
 TRACE=1
 KILL_AFTER=""
 while [ $# -gt 0 ]; do
@@ -29,7 +41,7 @@ done
 OUT=/harness-out
 mkdir -p "$OUT/trace"
 ulimit -c 0
-echo "{\"mode\": \"$MODE\", \"trace\": $TRACE, \"kill_tracer_after\": \"$KILL_AFTER\", \"core_rlimit\": \"$(ulimit -c)\"}" > "$OUT/entry.json"
+echo "{\"mode\": \"$MODE\", \"case_id\": \"$CASE_ID\", \"trace\": $TRACE, \"kill_tracer_after\": \"$KILL_AFTER\", \"core_rlimit\": \"$(ulimit -c)\"}" > "$OUT/entry.json"
 
 status() {  # status KEY VALUE -> harness_status.txt (KEY=VALUE lines, parsed by the analyzer)
   echo "$1=$2" >> "$OUT/harness_status.txt"
@@ -68,6 +80,17 @@ case "$MODE" in
       --request /work/case/request.json --source /work/case/source/source.zarr \
       --run-dir /work/case/run --dispatch-evidence
     ;;
+  case)
+    status case_id "$CASE_ID"
+    if ! (cd /opt/ctl && $AS_RUNNER python -m container_harness.case_driver stage "$CASE_ID" /work \
+          > "$OUT/stage.stdout" 2> "$OUT/stage.stderr"); then
+      status abort staging_failed
+      exit 4
+    fi
+    ROOT_CWD=/opt/ctl
+    status run_dir /work/case/run
+    set -- python -m container_harness.case_driver run "$CASE_ID" /work
+    ;;
   tree)
     mkdir -p /srv/outside /work/run && chown runner:runner /srv/outside /work/run
     $AS_RUNNER python /opt/ctl/container_harness/scenarios/decoy.py > "$OUT/decoy.stdout" 2>&1 &
@@ -105,7 +128,7 @@ cd "$ROOT_CWD"
 if [ "$TRACE" = 1 ]; then
   strace -q -ff -A -o "$OUT/trace/t" --timestamps=unix,ns -y -s 4096 -u runner \
     -e trace=%file,%process,%signal,setsid,setpgid,bind,fcntl,prctl,pidfd_open,pidfd_send_signal,io_uring_setup,io_uring_enter,io_uring_register,chdir,fchdir,memfd_create,alarm,setitimer,timer_create \
-    -- "$@" > "$OUT/root.stdout" 2> "$OUT/root.stderr" &
+    -- "$@" > "$OUT/root.stdout" 2> "$OUT/root.stderr" 3> "$OUT/runner_record.json" &
   TPID=$!
   status tracer_pid "$TPID"
   status tracer_pgid "$(cut -d' ' -f5 /proc/$TPID/stat 2>/dev/null)"
@@ -119,7 +142,7 @@ if [ "$TRACE" = 1 ]; then
   [ -n "$KPID" ] && kill "$KPID" 2>/dev/null
   status tracer_exit "$RC"
 else
-  $AS_RUNNER "$@" > "$OUT/root.stdout" 2> "$OUT/root.stderr"
+  $AS_RUNNER "$@" > "$OUT/root.stdout" 2> "$OUT/root.stderr" 3> "$OUT/runner_record.json"
   RC=$?
   status untraced_exit "$RC"
 fi
@@ -134,9 +157,20 @@ cd /opt/ctl
 python -B -I /opt/ctl/container_harness/analyze_trace.py "$OUT" --run-dir "$RUN_DIR" \
   --out "$OUT/evidence.json" > "$OUT/analyze.stdout" 2> "$OUT/analyze.stderr"
 echo "in_container_analyze_exit=$?" >> "$OUT/post_status.txt"
-if [ "$MODE" = canary ] && [ -s "$OUT/evidence.json" ]; then
+if { [ "$MODE" = canary ] || [ "$MODE" = case ]; } && [ -s "$OUT/evidence.json" ]; then
   PYTHONPATH=/opt/ctl python -B /opt/ctl/container_harness/project_in_container.py "$RUN_DIR" "$OUT/evidence.json" \
     "$OUT/projection.json" > "$OUT/projection.stdout" 2> "$OUT/projection.stderr"
   echo "in_container_projection_exit=$?" >> "$OUT/post_status.txt"
+fi
+if [ "$MODE" = case ]; then
+  # Manifest of everything the case root holds after the run (the run dir itself is not copied
+  # out: results leave the container only through /harness-out via docker cp).
+  (cd /work && find case -type f -exec sha256sum {} + | sort -k2) > "$OUT/run_dir_manifest.txt" 2>/dev/null
+  # Pinned frozen guarded scorer, same container and path namespace; runs even when evidence or
+  # projection is absent so the case is recorded (HARNESS_ERROR / NOT_EXECUTED), never dropped.
+  PYTHONPATH=/opt/ctl python -B -m container_harness.case_driver score "$CASE_ID" \
+    "$OUT/runner_record.json" "$OUT/evidence.json" "$OUT/projection.json" "$OUT/score.json" \
+    > "$OUT/score.stdout" 2> "$OUT/score.stderr"
+  echo "in_container_score_exit=$?" >> "$OUT/post_status.txt"
 fi
 exit 0

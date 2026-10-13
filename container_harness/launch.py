@@ -2,8 +2,13 @@
 
 usage:
     python container_harness/launch.py build --tag simkit-harness-ctl:<sha> [--context DIR]
-    python container_harness/launch.py run MODE --image TAG --out DIR
+    python container_harness/launch.py run MODE --image TAG --out DIR [--case-id ID]
                                        [--no-trace] [--kill-tracer-after S] [--timeout S]
+    python container_harness/launch.py admission --image TAG --out ADMISSION.json
+                                       [--selector S] [--smoke-ids A,B]
+
+``admission`` runs the frozen runner's capability admission (case_driver.py) in one throwaway
+container under the same run conditions (no network, no mounts) and writes its stdout JSON.
 
 MODE is an entry.sh mode (canary, tree, kill-tracer). ``run`` creates ONE fresh container under
 the owner-ruled run conditions (container_route_ruling_2026-10-13), starts it attached, waits,
@@ -147,6 +152,10 @@ def run(args):
     out.mkdir(parents=True)
     name = f"simkit-harness-{args.mode}-{uuid.uuid4().hex[:8]}"
     entry_args = [args.mode]
+    if args.mode == "case":
+        if not args.case_id:
+            raise SystemExit("run case needs --case-id")
+        entry_args.append(args.case_id)
     if args.no_trace:
         entry_args.append("--no-trace")
     if args.kill_tracer_after:
@@ -218,6 +227,13 @@ def run(args):
             record["projection_status"] = json.loads(
                 (hout / "projection.json").read_text(encoding="utf-8")
             ).get("status")
+        for name in ("score.json", "runner_record.json", "stage.stdout", "run_dir_manifest.txt"):
+            if (hout / name).exists():
+                shutil.copy2(hout / name, out / name)
+        if (hout / "score.json").exists():
+            record["score_run_status"] = json.loads(
+                (hout / "score.json").read_text(encoding="utf-8")
+            ).get("run_status")
         record["tracer_status"] = evidence["harness_observations"]["tracer_status"]["status"]
         record["missing"] = evidence["missing"]
     else:
@@ -237,6 +253,7 @@ def run(args):
                     "tracer_status",
                     "host_reanalysis_equal",
                     "projection_status",
+                    "score_run_status",
                     "run_conditions",
                     "missing",
                 )
@@ -244,6 +261,44 @@ def run(args):
             indent=1,
         )
     )
+    return 0
+
+
+def admission(args):
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        *RUN_ARGS,
+        "--user",
+        "1000:1000",
+        "-w",
+        "/opt/ctl",
+        "-e",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "-e",
+        "HOME=/home/runner",
+        "--entrypoint",
+        "python",
+        args.image,
+        "-B",
+        "-m",
+        "container_harness.case_driver",
+        "admission",
+        "--selector",
+        args.selector,
+    ]
+    if args.smoke_ids:
+        cmd += ["--smoke-ids", args.smoke_ids]
+    assert not any(tok in FORBIDDEN or tok.startswith("--privileged") for tok in cmd), cmd
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        raise SystemExit(f"admission container failed rc={proc.returncode}")
+    result = json.loads(proc.stdout)
+    result["docker_run"] = cmd
+    Path(args.out).write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps({"counts": result["counts"], "selected": result["selected"]}, indent=1))
     return 0
 
 
@@ -255,14 +310,20 @@ def main(argv):
     b.add_argument("--context")
     b.add_argument("--record")
     r = sub.add_parser("run")
-    r.add_argument("mode", choices=["canary", "tree", "kill-tracer"])
+    r.add_argument("mode", choices=["canary", "tree", "kill-tracer", "case"])
+    r.add_argument("--case-id")
     r.add_argument("--image", required=True)
     r.add_argument("--out", required=True)
     r.add_argument("--no-trace", action="store_true")
     r.add_argument("--kill-tracer-after", type=float)
     r.add_argument("--timeout", type=int, default=1500)
+    a = sub.add_parser("admission")
+    a.add_argument("--image", required=True)
+    a.add_argument("--out", required=True)
+    a.add_argument("--selector", default="admission")
+    a.add_argument("--smoke-ids")
     args = ap.parse_args(argv[1:])
-    return build(args) if args.cmd == "build" else run(args)
+    return {"build": build, "run": run, "admission": admission}[args.cmd](args)
 
 
 if __name__ == "__main__":

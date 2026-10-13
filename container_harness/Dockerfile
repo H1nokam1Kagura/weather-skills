@@ -44,7 +44,15 @@ RUN (python -m compileall -q /opt/ctl/tools /opt/ctl/adapter_support /opt/ctl/co
      || echo "compileall reported errors (those modules run uncompiled)") \
  && chown -R root:root /opt/ctl /opt/simkit /opt/inputs.json \
  && chmod -R a-w /opt/ctl /opt/simkit /opt/inputs.json \
- && python -I /opt/ctl/container_harness/verify_inputs.py /opt/inputs.json
+ && python -I /opt/ctl/container_harness/verify_inputs.py /opt/inputs.json \
+ && python -I -B -c "import sys; sys.path.insert(0, '/opt/ctl/tests'); import frozen_v27 as f; from pathlib import Path; Path('/opt/frozen-v27').mkdir(); print(f.extract_fixture(dest=Path('/opt/frozen-v27')))" \
+ && python -m compileall -q /opt/frozen-v27/simkit >/dev/null \
+ && chown -R root:root /opt/frozen-v27 && chmod -R a-w /opt/frozen-v27
+
+# Frozen v2.7 package (24 files + FINAL-PINS.json), extracted from the committed fixture
+# tests/fixtures/frozen-v27.tar.xz and verified against FINAL_PINS_SHA256 and every file pin at
+# build; tests/frozen_v27.py re-verifies it on every use (SIMKIT_FROZEN_V27 never falls through).
+ENV SIMKIT_FROZEN_V27=/opt/frozen-v27
 
 ARG CONTROLLER_COMMIT=unknown
 LABEL org.simkit.harness="simkit-harness-ctl" org.simkit.controller_commit="${CONTROLLER_COMMIT}"

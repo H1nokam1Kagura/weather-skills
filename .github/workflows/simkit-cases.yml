@@ -1,0 +1,232 @@
+name: simkit-cases
+
+# Frozen SIMKIT v2.7 cases in the traced Linux container (owner ruling
+# container_route_ruling_2026-10-13). No secrets, no Kong, no network inside any run container:
+# live-role cases are NOT run here (BLOCKED_LIVE_ROLE_TRANSPORT until the host-side relay exists;
+# the Kong key never enters a container). Oracles are PROPOSED: every score is diagnostic.
+# Failed cases are never retried automatically; harness failures are recorded as HARNESS_ERROR,
+# distinct from system-under-test failures.
+on:
+  workflow_dispatch:
+    inputs:
+      selector:
+        description: "'admission' (admission only) | 'substituted' (all runnable substituted-role cases) | comma-separated case ids"
+        required: true
+        default: admission
+      max_parallel:
+        description: "max concurrent case jobs"
+        required: false
+        default: "8"
+  push:
+    branches: [feat/simkit-gh-cases-snowyowl]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: simkit-cases-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # push = smoke: at most these two cases (one fault/control pair), and only if admitted.
+  SMOKE_IDS: DEV-E2E-V2_7-E02-P1-CTL,DEV-E2E-V2_7-E02-P1-INJ
+
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      count: ${{ steps.matrix.outputs.count }}
+      image: ${{ steps.build.outputs.image }}
+    env:
+      OUT: ${{ github.workspace }}/admission-out
+      SELECTOR: ${{ github.event_name == 'push' && 'smoke' || github.event.inputs.selector }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Harness unit tests (analyzer + report; not in ci.yml testpaths)
+        run: |
+          python -m pip install --quiet pytest==9.1.1
+          python -B -m pytest -q -p no:cacheprovider container_harness/tests
+
+      - name: Verify frozen v2.7 package (committed fixture vs FINAL-PINS) and input pins
+        run: |
+          mkdir -p "$OUT"
+          python -B -c "import sys, json, pathlib, tempfile; sys.path.insert(0, 'tests'); import frozen_v27 as f; root = f.extract_fixture(dest=pathlib.Path(tempfile.mkdtemp())); print(json.dumps({'frozen_root': str(root), 'final_pins_sha256': f.FINAL_PINS_SHA256, 'verified': True}))" | tee "$OUT/frozen-verify.json"
+          python -I container_harness/verify_inputs.py <(python -c "import json; p = json.load(open('container_harness/pinned_inputs.json')); print(json.dumps({'supplement_id': p['supplement_id'], 'files': [{'role': f['role'], 'path': f['repo_path'], 'sha256': f['sha256']} for f in p['files']]}))") --out "$OUT/input-verify.json" > /dev/null
+
+      - name: Build harness image (once)
+        id: build
+        run: |
+          IMG="simkit-harness-ctl:${GITHUB_SHA::12}"
+          python container_harness/launch.py build --tag "$IMG" \
+            --context "$RUNNER_TEMP/harness-ctx" --record "$OUT/build.json"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Frozen-runner capability admission (all 66 cases; never executes a case)
+        run: |
+          python container_harness/launch.py admission --image "${{ steps.build.outputs.image }}" \
+            --out "$OUT/ADMISSION.json" --selector "$SELECTOR" --smoke-ids "$SMOKE_IDS"
+
+      - name: Case matrix
+        id: matrix
+        run: |
+          python - "$OUT/ADMISSION.json" >> "$GITHUB_OUTPUT" <<'EOF'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          print("matrix=" + json.dumps({"include": a["matrix"]}))
+          print("count=" + str(len(a["matrix"])))
+          EOF
+          python - "$OUT/ADMISSION.json" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          c = a["counts"]
+          print(f"### Admission (frozen runner)\n\nselector `{a['selector']}`: {c['total']} cases, "
+                f"admitted {c['admitted']}, NOT_IMPLEMENTED {c['not_implemented']}, "
+                f"selected {c['selected']}\n\ndispositions: `{json.dumps(c['dispositions'])}`\n")
+          for cap, n in list(a["missing_capability_counts"].items())[:10]:
+              print(f"- {cap}: {n} ({a['missing_capability_reasons'].get(cap)})")
+          EOF
+
+      - name: Save image for the case jobs
+        if: steps.matrix.outputs.count != '0'
+        run: |
+          docker save "${{ steps.build.outputs.image }}" | gzip -1 > "$RUNNER_TEMP/harness-image.tar.gz"
+          ls -l "$RUNNER_TEMP/harness-image.tar.gz"
+
+      - name: Upload image
+        if: steps.matrix.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-harness-image
+          path: ${{ runner.temp }}/harness-image.tar.gz
+          retention-days: 2
+          compression-level: 0
+
+      - name: Upload admission
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-admission
+          path: admission-out
+          retention-days: 30
+
+      - name: Unknown case ids in the selector fail the run (after the admission upload)
+        run: |
+          python -c "import json, sys; a = json.load(open('$OUT/ADMISSION.json')); u = a['unknown_selected_ids']; print('unknown ids:', u); sys.exit(1 if u else 0)"
+
+  case:
+    needs: admission
+    if: needs.admission.outputs.count != '0' && needs.admission.outputs.count != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '8') }}
+      matrix: ${{ fromJSON(needs.admission.outputs.matrix) }}
+    env:
+      CASE_OUT: ${{ github.workspace }}/case-out/${{ matrix.case_id }}
+      IMG: ${{ needs.admission.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: simkit-harness-image
+          path: ${{ runner.temp }}/img
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: simkit-admission
+          path: ${{ runner.temp }}/admission
+
+      - name: Load image and check it is the admission job's build
+        run: |
+          gunzip -c "$RUNNER_TEMP/img/harness-image.tar.gz" | docker load
+          want=$(python -c "import json; print(json.load(open('$RUNNER_TEMP/admission/build.json'))['image_id'])")
+          got=$(docker image inspect -f '{{.Id}}' "$IMG")
+          echo "built=$want loaded=$got"
+          test "$want" = "$got"
+
+      - name: Run case in the traced container (fixture/substituted roles; no network)
+        run: |
+          python container_harness/launch.py run case --case-id "${{ matrix.case_id }}" \
+            --image "$IMG" --out "$CASE_OUT"
+
+      - name: Pack raw trace separately
+        if: always()
+        run: |
+          mkdir -p "$CASE_OUT"
+          if [ -d "$CASE_OUT/harness-out/trace" ]; then
+            tar -czf "$RUNNER_TEMP/raw-trace.tgz" -C "$CASE_OUT/harness-out" trace
+            rm -rf "$CASE_OUT/harness-out/trace"
+          fi
+
+      - name: Upload case result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: case-${{ matrix.case_id }}
+          path: case-out
+          retention-days: 30
+
+      - name: Upload raw trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-${{ matrix.case_id }}
+          path: ${{ runner.temp }}/raw-trace.tgz
+          retention-days: 7
+          if-no-files-found: ignore
+
+  report:
+    needs: [admission, case]
+    if: always() && needs.admission.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: simkit-admission
+          path: report-in/admission
+
+      - uses: actions/download-artifact@v4
+        # No case artifacts (nothing admitted/selected) is a normal outcome; a selected case
+        # without an artifact is reported HARNESS_ERROR no_case_artifact, never dropped.
+        continue-on-error: true
+        with:
+          pattern: case-*
+          path: report-in/cases
+
+      - name: Aggregate RESULTS.json + RESULTS.md
+        run: |
+          mkdir -p results
+          mkdir -p report-in/cases
+          python -B container_harness/cases_report.py report-in/admission/ADMISSION.json report-in/cases \
+            --out results/RESULTS.json --markdown results/RESULTS.md \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          cp report-in/admission/ADMISSION.json results/
+          cat results/RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-results
+          path: results
+          retention-days: 30
