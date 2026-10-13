@@ -9,11 +9,13 @@
 import sys
 
 import numpy as np
+import pint
+import pint_xarray
 import xarray as xr
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.cf import auto_variable
 from weather_skills_core.standard_utils import latitude_weights
-from weather_skills_core.units import units_equal, ureg, variable_units
+from weather_skills_core.units import dequantify_dataset, ureg, variable_units
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -85,34 +87,33 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
 
     pair = []
     for da in (fc, truth):
-        if getattr(getattr(da, "pint", None), "units", None) is not None:
-            da = da.pint.dequantify()
         if "number" in da.dims:
             da = da.mean("number", keep_attrs=True)
         pair.append(da)
-    fc, truth = xr.align(*pair, join="inner")
+    fc, truth = pair
+    u_fc, u_obs = variable_units(fc), variable_units(truth)
+    if u_fc and u_obs:
+        # Compare in the forecast's units: deg C against K, mm hr-1 against mm day-1.
+        try:
+            truth = truth.pint.to(fc.pint.units)
+        except (pint.DimensionalityError, pint_xarray.errors.PintExceptionGroup):
+            raise UsageError(
+                f"--forecast {fc_name!r} ({u_fc}) and --obs {obs_name!r} ({u_obs}) carry "
+                "incompatible units (e.g. a total against a rate); put both on one basis "
+                "with aggregate-temporal / convert-to-totals first."
+            ) from None
+    fc, truth = xr.align(fc, truth, join="inner")
     if any(size == 0 for size in fc.sizes.values()):
         raise UsageError(
             "no overlapping coordinates between --forecast and --obs; "
             "coarsen --obs --reference-grid <forecast.zarr> and align time "
             "(step-to-time / aggregate-temporal) first."
         )
-
-    u_fc = variable_units(forecast[fc_name])
-    u_obs = variable_units(obs[obs_name])
-    if (
-        isinstance(u_fc, str)
-        and u_fc.strip()
-        and isinstance(u_obs, str)
-        and u_obs.strip()
-        and not units_equal(u_fc, u_obs)
-    ):
-        print(
-            f"Warning: --forecast {fc_name!r} units={u_fc.strip()!r} and --obs "
-            f"{obs_name!r} units={u_obs.strip()!r} differ. Values are compared "
-            "as stored.",
-            file=sys.stderr,
-        )
+    # Differences keep their units (a temperature bias is delta_degC).
+    error = fc - truth
+    if u_fc and u_obs:
+        error = dequantify_dataset(error.to_dataset(name="error"))["error"]
+    fc, truth = (da.pint.dequantify() if da.pint.units is not None else da for da in (fc, truth))
     if metric != "hits" and threshold != 1.0:
         print(
             f"Note: --threshold {threshold} is ignored for --metric {metric}.",
@@ -126,9 +127,9 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
         obs_event = truth >= threshold
         field = xr.where(fc_event & obs_event, 1, xr.where(fc_event != obs_event, -1, 0))
     elif metric == "bias":
-        field = fc - truth
+        field = error
     else:
-        field = np.abs(fc - truth)
+        field = np.abs(error)
     field = field.astype("float32").where(valid)
     field.name = _VAR[metric]
 
@@ -148,9 +149,11 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
             event_variable=fc_name if fc_name == obs_name else f"{fc_name},{obs_name}",
         )
     elif metric == "bias":
-        attrs["long_name"] = "Forecast bias (forecast − observation)"
+        attrs.update(
+            long_name="Forecast bias (forecast − observation)", units=error.attrs.get("units")
+        )
     else:
-        attrs["long_name"] = "Mean absolute error"
+        attrs.update(long_name="Mean absolute error", units=error.attrs.get("units"))
     field.attrs = attrs
 
     finite = field.notnull()

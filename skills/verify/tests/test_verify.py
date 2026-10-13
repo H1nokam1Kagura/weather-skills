@@ -161,3 +161,56 @@ def test_obs_finer_grid_is_refused(tmp_path, verify_fn):
             str(tmp_path / "out.zarr"),
         )
     assert exc.value.code == 2
+
+
+def _temp(value, units):
+    ds = make_gridded(n_time=1, fill=value, name="t2m")
+    ds["t2m"].attrs = {"units": units, "standard_name": "air_temperature"}
+    return ds
+
+
+def _verify(tmp_path, verify_fn, fc, obs, *args):
+    pf = write_zarr(fc, tmp_path / "fc.zarr")
+    po = write_zarr(obs, tmp_path / "obs.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(verify_fn, "--forecast", str(pf), "--obs", str(po), "-o", str(out), *args)
+    return xr.open_zarr(out, consolidated=True)
+
+
+def test_obs_converted_to_forecast_units(tmp_path, verify_fn):
+    """deg C forecast vs K obs: bias +2, not -271; units stay on the error field."""
+    ds = _verify(
+        tmp_path, verify_fn, _temp(27.0, "degree_Celsius"), _temp(298.15, "K"), "--metric", "bias"
+    )
+    assert ds["bias"].values == pytest.approx(2.0)
+    assert ds["bias"].attrs["units"] == "delta_degC"
+
+    rate = make_gridded(n_time=1, fill=24.0)
+    hourly = make_gridded(n_time=1, fill=0.5)
+    hourly["precip"].attrs["units"] = "mm hr-1"
+    ds = _verify(tmp_path, verify_fn, rate, hourly, "--metric", "mae")
+    assert ds["mae"].values == pytest.approx(12.0)
+    assert ds["mae"].attrs["units"] == "mm day-1"
+
+
+def test_threshold_applies_in_forecast_units(tmp_path, verify_fn):
+    """36 deg C forecast vs 300 K (26.85 deg C) obs at 35: a miss, not a hit."""
+    ds = _verify(
+        tmp_path,
+        verify_fn,
+        _temp(36.0, "degree_Celsius"),
+        _temp(300.0, "K"),
+        "--metric",
+        "hits",
+        "--threshold",
+        "35",
+    )
+    assert (ds["event_hit"].values == -1).all()
+
+
+def test_total_against_rate_is_refused(tmp_path, verify_fn):
+    total = make_gridded(n_time=1, fill=14.0)
+    total["precip"].attrs = {"units": "mm"}
+    with pytest.raises(SystemExit) as exc:
+        _verify(tmp_path, verify_fn, total, make_gridded(n_time=1, fill=2.0), "--metric", "mae")
+    assert exc.value.code == 2

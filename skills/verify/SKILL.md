@@ -22,7 +22,7 @@ with `--metric`:
 
 ### Hits (`--metric hits`)
 
-An **event** is `--variable` ≥ `--threshold` (default `1`, in stored units):
+An **event** is `--variable` ≥ `--threshold` (default `1`, in the forecast's units):
 
 | Value | Meaning |
 | --- | --- |
@@ -32,6 +32,15 @@ An **event** is `--variable` ≥ `--threshold` (default `1`, in stored units):
 
 NaNs in either input stay NaN. Ensemble `number` is averaged before
 comparison. Inputs are inner-joined (overlapping coordinates only).
+
+### Units
+
+`--obs` is converted to the forecast's units before any comparison (K
+observations against a °C forecast, `mm hr-1` against `mm day-1`), so
+`--threshold` is always in the forecast's units. Incompatible units — a
+weekly total in `mm` against a rate in `mm day-1` — exit non-zero; put both on
+one basis with `aggregate-temporal` / `convert-to-totals` first. `bias` and
+`mae` carry the forecast's units (a temperature error is `delta_degC`).
 
 Plot hits with `plot` (discrete red / gray / green map). For a lead-week
 grid of obs, forecast, and verification maps, use `plot-verify`.
