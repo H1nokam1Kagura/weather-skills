@@ -26,6 +26,18 @@ def main():
     run.add_argument("--timeout", type=int, default=1800)
     run.add_argument("--repair-limit", type=int, choices=[0, 1, 2], default=1)
     run.add_argument("--policy", choices=["rules", "shadow"], default="rules")
+    # D5 CP-A1: the two evidence modes are declared run configuration, not constructor-only.
+    # Both persist in the checkpoint, so resume inherits them and takes no flag.
+    run.add_argument(
+        "--dispatch-evidence",
+        action="store_true",
+        help="Record controller-sequenced dispatch, process and terminal evidence",
+    )
+    run.add_argument(
+        "--review-evidence",
+        action="store_true",
+        help="Bind review to versioned plan claims with cited documentation sources",
+    )
     for name in ("resume", "report", "status"):
         sub = commands.add_parser(name)
         sub.add_argument("--run-dir", type=Path, required=True)
@@ -115,7 +127,11 @@ def main():
         saved = read_checkpoint(root)
         budget, duration, elapsed = saved["budget"], saved["total_seconds"], saved["elapsed_s"]
         if elapsed >= duration or saved["spent"] >= budget:
-            raise Refused("original run budget exhausted; resume cannot reset limits")
+            raise Refused(
+                "original run budget exhausted; resume cannot reset limits",
+                gate="budget",
+                reason="resume_refused",
+            )
     with run_lock(root):
         processes = Processes(root / "processes", total_seconds=duration)
         processes.deadline -= elapsed
@@ -132,14 +148,28 @@ def main():
                 roles,
                 max_repairs=args.repair_limit,
                 policy_mode=args.policy,
+                review_evidence_mode=args.review_evidence,
+                dispatch_evidence_mode=args.dispatch_evidence,
             )
         )
         try:
             result = controller.run()
         except Exception as exc:
-            print(json.dumps({"status": "INCOMPLETE", "error": str(exc), "run_dir": str(root)}))
+            terminal = controller.context.get("terminal")
+            print(
+                json.dumps(
+                    {
+                        "status": "INCOMPLETE",
+                        "error": str(exc),
+                        "run_dir": str(root),
+                        "terminal": terminal,
+                    }
+                )
+            )
             raise SystemExit(1) from exc
         print(json.dumps(result, indent=2))
+        if result["terminal"]["outcome"] == "NEEDS_INFO":
+            raise SystemExit(2)  # an explicit stop awaiting a human answer, not a release
 
 
 if __name__ == "__main__":
