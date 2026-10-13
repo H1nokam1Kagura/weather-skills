@@ -5,7 +5,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from tools.workflow.agents import PROMPTS
+from tools.workflow.agents import PROMPTS, role_prompt
 from tools.workflow.contracts import Refused, digest
 from tools.workflow.kong_roles import (
     KIT_PYTHON,
@@ -169,7 +169,7 @@ def test_failure_before_send_is_refused_and_releases_reservation(tmp_path):
 @pytest.mark.parametrize(
     "changes",
     [
-        {"text": '```json\n{"verdict":"PASS"}\n```'},
+        {"text": 'Verdict:\n```json\n{"verdict":"PASS"}\n```'},
         {"text": "[]"},
         {"text": ""},
         {"model": None},
@@ -188,10 +188,11 @@ def test_policy_ack_prices_and_prompt_variants_are_enforced(tmp_path):
         KongRoles(Process(), tmp_path)
     with pytest.raises(Refused, match="cited source"):
         roles(tmp_path, Process(), prices={"m": {"input_per_mtok": 1, "output_per_mtok": 1}})
-    agent = roles(tmp_path, Process(envelope()))
+    process = Process(envelope(), envelope())
+    agent = roles(tmp_path, process)
     for payload in ({"review_evidence": {}}, {"review_evidence_request": {}}):
-        with pytest.raises(Refused, match="review-evidence"):
-            agent.ask("reviewer", payload)
+        agent.ask("reviewer", payload)  # shared role_prompt variants, no longer refused
+    assert process.calls[0]["stdin"]["system"] == role_prompt("reviewer", {"review_evidence": {}})
     with pytest.raises(Refused):
         agent.ask("not-a-role", {})
 
@@ -268,7 +269,8 @@ def test_real_worker_rejects_unsupported_sdk_argument_before_sending(tmp_path, m
 @needs_kit
 def test_real_worker_gateway_error_is_unknown(tmp_path, mock_gateway):
     (tmp_path / "proc").mkdir()
-    agent = mock_roles(tmp_path, mock_gateway, model="claude-not-routable")
+    agent = mock_roles(tmp_path, mock_gateway)
+    agent.models["verifier"] = "claude-not-routable"  # bypasses the roster check on purpose
     with pytest.raises(KongOutcomeUnknown) as caught:
         agent.ask("verifier", {"synthetic": True})
     assert caught.value.evidence["status"] == 404
