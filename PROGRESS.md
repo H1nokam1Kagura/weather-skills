@@ -126,7 +126,7 @@ model/usage only).
       case_driver: live-only admitted cases are now RUNNABLE via RelayRoles (env-gated);
       live+substituted stays BLOCKED_LIVE_ROLE_TRANSPORT; selector `substituted`/push smoke
       never select live cases, new selector `live` does. UNTESTED end to end (0 admitted).
-- [ ] R5 live relay-smoke on GHA (<=2 attempts total) — see Log.
+- [x] R5 live relay-smoke on GHA: attempt 2 run 38482123416 PASS (see Log). Live budget used: 2 of 2.
 - 2026-10-13 relay-smoke attempt 1, run 38481482724 (eef7878): live call SUCCESS (container ->
   relay -> Kong: model_observed claude-sonnet-4-6, request e8fb4f2ca700033137789159eb5ef767,
   via 1.1 kong/3.15.0.5-enterprise-edition, 184 in / 38 out tokens); all 13 egress probes as
@@ -136,3 +136,18 @@ model/usage only).
   Job FAILED on one harness check only: the in-container credential-FILENAME heuristic matched
   "kong" inside Hongkong CA certs / Asia/Hong_Kong (false positive). Fixed (credential_like_name
   + test). Artifacts: %TEMP%/simkit-gh-relay/38481482724/.
+- 2026-10-13 relay-smoke attempt 2 (FINAL; 2 of 2 live attempts used), run 38482123416
+  (38146d8): PASS, every check true. Live call: model_observed claude-sonnet-4-6, request
+  641c3a677aa1690f3857bf7729d52d1f, via 1.1 kong/3.15.0.5-enterprise-edition, 184 in / 38 out
+  tokens, latency 1902 ms. Probes identical to attempt 1. Key scan: 0 matches (973 MB fs, inspect,
+  17 artifacts). Push run 38482122727 (admission) also green. Artifacts:
+  %TEMP%/simkit-gh-relay/38482123416/.
+
+## Next (relay)
+- Live-role cases are still NOT admitted (0/66; blockers in SIMKIT-HANDOFF next action #2 /
+  "Local admission result" above). Once a live-only case is admitted, `selector=live` runs it
+  via `launch.py run case --relay-dir` (case job wiring exists, untested end to end): the adapter
+  must accept RelayRoles from profile["roles_factory"]; live+substituted cases need a combining
+  hook (BLOCKED_LIVE_ROLE_TRANSPORT).
+- Case-job relay limits are provisional: RELAY_MAX_REQUESTS 60, max_tokens 2048, all 7 roles.
+- Do not run more live relay smokes without a new owner decision (attempt budget spent).
