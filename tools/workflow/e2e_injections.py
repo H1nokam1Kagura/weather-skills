@@ -23,6 +23,49 @@ class InjectedInterruption(RuntimeError):
     """A known, quiescent durable-checkpoint interruption; not a process crash."""
 
 
+class InvalidSchedule(ValueError):
+    """A dependent schedule violates the id/requires contract; refused at load."""
+
+
+class HarnessDispatchError(RuntimeError):
+    """The harness itself observed an inconsistent boundary; dispatch stops."""
+
+
+# Boundaries the controller actually emits. Any other hook is NOT_IMPLEMENTED, never unmatched.
+KNOWN_HOOKS = frozenset(
+    {
+        "before_run",
+        "before_role",
+        "after_role",
+        "after_transition",
+        "before_tool",
+        "after_tool",
+        "after_review_approval",
+    }
+)
+APPROVAL_CONDITIONS = ("schema_valid", "binding_valid", "controller_accepted", "approval_committed")
+
+
+def validate_dependencies(schedule):
+    """Unique nonempty ids; each dependency names an earlier entry exactly once."""
+    seen = set()
+    for index, spec in enumerate(schedule):
+        name = spec.get("id") if isinstance(spec, dict) else None
+        if not isinstance(name, str) or not name or name in seen:
+            raise InvalidSchedule(f"entry {index}: unique nonempty id required")
+        requires = spec.get("requires")
+        if (
+            not isinstance(requires, list)
+            or not all(isinstance(r, str) for r in requires)
+            or len(requires) != len(set(requires))
+        ):
+            raise InvalidSchedule(f"{name}: requires must list distinct entry ids")
+        unknown = [r for r in requires if r not in seen]
+        if unknown:
+            raise InvalidSchedule(f"{name}: forward, cyclic or unknown dependency {unknown}")
+        seen.add(name)
+
+
 def unsupported_requirements(case):
     """Static capability findings, not oracle judgments or execution results."""
     findings = []
@@ -126,15 +169,58 @@ class InjectionHooks:
         self.done = set()
         self.resume_requested = False
         self.prepared = False
+        # CAP-SCHEDULE-DEPENDENCIES: only schedules declaring `requires` use the dependent
+        # dispatcher. Schedules without it keep the original dispatch unchanged.
+        self.dependent = any(isinstance(s, dict) and "requires" in s for s in self.schedule)
+        self.dispositions = {}
+        self.accepted_approvals = 0
+        self.initial_binding = None
+        self.stopped = False
+        self.harness_error = None
+        if self.dependent:
+            validate_dependencies(self.schedule)
+            for index, spec in enumerate(self.schedule):
+                if spec["hook"] not in KNOWN_HOOKS:
+                    self.dispositions[index] = {
+                        "disposition": "NOT_IMPLEMENTED",
+                        "reason": "controller emits no boundary for hook " + spec["hook"],
+                    }
 
     def coverage(self):
-        return {
+        result = {
             "scheduled": len(self.schedule),
             "applied": [r["index"] for r in self.records if r["status"] == "APPLIED"],
             "unsupported": [r for r in self.records if r["status"] == "UNSUPPORTED"],
             "errors": [r for r in self.records if r["status"] == "ERROR"],
             "unreached": [i for i in range(len(self.schedule)) if i not in self.done],
             "records": copy.deepcopy(self.records),
+        }
+        if self.dependent:
+            result["dependencies"] = self.dependency_report()
+        return result
+
+    def dependency_report(self):
+        """Per-entry DELIVERED / INACTIVE / NOT_IMPLEMENTED / HARNESS_ERROR dispositions.
+
+        An entry whose boundary was never reached is INACTIVE (early stop), never a pass.
+        """
+        entries = []
+        for index, spec in enumerate(self.schedule):
+            decided = self.dispositions.get(index)
+            if decided is None:
+                reason = "dispatch_stopped" if self.stopped else "boundary_not_reached"
+                decided = {"disposition": "INACTIVE", "reason": reason}
+            entries.append({"index": index, "id": spec["id"], "hook": spec["hook"], **decided})
+        found = {e["disposition"] for e in entries}
+        if self.harness_error:
+            found.add("HARNESS_ERROR")
+        status = next((s for s in ("HARNESS_ERROR", "NOT_IMPLEMENTED") if s in found), "OK")
+        return {
+            "capability": "CAP-SCHEDULE-DEPENDENCIES",
+            "status": status,
+            "harness_error": self.harness_error,
+            "accepted_approvals": self.accepted_approvals,
+            "entries": entries,
         }
 
     def resolve(self, value, controller):
@@ -185,6 +271,8 @@ class InjectionHooks:
             return name == role
         if point == "after_transition":
             return name == event.get("state")
+        if point == "after_review_approval":
+            return name == event.get("target")
         if point in {"before_tool", "after_tool"}:
             skill, _, suffix = name.partition("(")
             if skill != event.get("skill"):
@@ -198,7 +286,27 @@ class InjectionHooks:
             return True
         return False
 
+    def _occurrence(self, selector, point, identity):
+        # Count boundary occurrences once even when multiple operations share it.
+        name = selector["role_or_tool_or_stage"]
+        if name.startswith("compiler_"):
+            return 1
+        if "(" in name:
+            return self.counts[("selector", point, name)] + 1
+        return self.counts[(point, identity)]
+
+    def _count_artifact_selectors(self, point, event, controller):
+        for selector_name in {
+            s["selector"]["role_or_tool_or_stage"]
+            for s in self.schedule
+            if s["hook"] == point and "(" in s["selector"]["role_or_tool_or_stage"]
+        }:
+            if self._matches({"role_or_tool_or_stage": selector_name}, point, event, controller):
+                self.counts[("selector", point, selector_name)] += 1
+
     def _dispatch(self, point, event, controller):
+        if self.dependent:
+            return self._dispatch_dependent(point, event, controller)
         identity = event.get("role", event.get("skill", event.get("state", "before_run")))
         self.counts[(point, identity)] += 1
         interrupted = False
@@ -208,13 +316,7 @@ class InjectionHooks:
             selector = spec["selector"]
             if not self._matches(selector, point, event, controller):
                 continue
-            counter = ("selector", point, selector["role_or_tool_or_stage"])
-            # Count boundary occurrences once even when multiple operations share it.
-            occurrence = self.counts[(point, identity)]
-            if selector["role_or_tool_or_stage"].startswith("compiler_"):
-                occurrence = 1
-            elif "(" in selector["role_or_tool_or_stage"]:
-                occurrence = self.counts[counter] + 1
+            occurrence = self._occurrence(selector, point, identity)
             if occurrence != selector.get("occurrence", 1):
                 continue
             record = {
@@ -242,13 +344,134 @@ class InjectionHooks:
             except Exception as exc:
                 record["error"] = str(exc)
                 raise
-        for selector_name in {
-            s["selector"]["role_or_tool_or_stage"]
-            for s in self.schedule
-            if s["hook"] == point and "(" in s["selector"]["role_or_tool_or_stage"]
-        }:
-            if self._matches({"role_or_tool_or_stage": selector_name}, point, event, controller):
-                self.counts[("selector", point, selector_name)] += 1
+        self._count_artifact_selectors(point, event, controller)
+        if interrupted:
+            raise InjectedInterruption(
+                "injected quiescent checkpoint interruption; resume requested="
+                + str(self.resume_requested)
+            )
+
+    def _decide(self, index, disposition, **details):
+        self.dispositions[index] = {"disposition": disposition, **details}
+
+    def _delivered(self, name):
+        for index, spec in enumerate(self.schedule):
+            if spec["id"] == name:
+                return self.dispositions.get(index, {}).get("disposition") == "DELIVERED"
+        return False
+
+    def _in_plan_scope(self, selector, event):
+        """initial = first accepted plan identity; child_of_initial needs a real parent binding."""
+        scope = selector.get("plan_scope")
+        if scope is None:
+            return True
+        if scope != event.get("plan_scope"):
+            return False
+        binding = event.get("binding_hash")
+        if scope == "initial":
+            return self.initial_binding is None or binding in (None, self.initial_binding)
+        if scope == "child_of_initial":
+            return (
+                isinstance(self.initial_binding, str)
+                and bool(self.initial_binding)
+                and event.get("parent_binding_hash") == self.initial_binding
+                and isinstance(binding, str)
+                and bool(binding)
+                and binding != self.initial_binding
+            )
+        return False
+
+    @staticmethod
+    def _interrupt_observed(spec, event):
+        # Durability and an explicitly null pending operation must be observed, never inferred.
+        payload = spec.get("payload") or {}
+        return (
+            event.get("checkpoint_durable") is True
+            and event.get("checkpoint_state") == payload.get("checkpoint_state")
+            and "pending_operation" in event
+            and event["pending_operation"] is None
+        )
+
+    def _dispatch_dependent(self, point, event, controller):
+        """Scan each exact boundary once in listed order; decide each entry once, never replay."""
+        if self.stopped:
+            return
+        identity = event.get("role", event.get("skill", event.get("state", "before_run")))
+        self.counts[(point, identity)] += 1
+        approval = None
+        if point == "after_review_approval":
+            if event.get("verdict") != "APPROVE" or not all(
+                event.get(k) is True for k in APPROVAL_CONDITIONS
+            ):
+                return  # Not a controller-accepted approval: no boundary, no occurrence.
+            self.accepted_approvals += 1
+            approval = self.accepted_approvals
+            if event.get("occurrence", approval) != approval:
+                self.stopped = True
+                self.harness_error = "accepted-approval occurrence disagrees with controller"
+                raise HarnessDispatchError(self.harness_error)
+            if approval == 1:
+                self.initial_binding = event.get("binding_hash")
+        interrupted = False
+        for index, spec in enumerate(self.schedule):
+            if index in self.dispositions or spec["hook"] != point:
+                continue
+            selector = spec["selector"]
+            if not self._matches(selector, point, event, controller):
+                continue
+            occurrence = approval or self._occurrence(selector, point, identity)
+            if occurrence != selector.get("occurrence", 1):
+                continue
+            if not self._in_plan_scope(selector, event):
+                continue
+            missing = [r for r in spec["requires"] if not self._delivered(r)]
+            if missing:
+                self._decide(
+                    index,
+                    "INACTIVE",
+                    reason="dependency_undelivered",
+                    missing=missing,
+                    occurrence=occurrence,
+                )
+                continue
+            if spec["operation"] == "interrupt" and not self._interrupt_observed(spec, event):
+                reason = "interrupt_precondition_unobserved"
+                self._decide(index, "INACTIVE", reason=reason, occurrence=occurrence)
+                continue
+            record = {
+                "index": index,
+                "id": spec["id"],
+                "hook": point,
+                "selector": selector,
+                "operation": spec["operation"],
+                "state": event.get("state"),
+                "occurrence": occurrence,
+                "status": "ERROR",
+            }
+            self.records.append(record)
+            self.done.add(index)
+            try:
+                payload = self.resolve(spec.get("payload"), controller)
+                interrupted |= self._apply(
+                    spec["operation"], payload, point, event, controller, record
+                )
+                record["status"] = "APPLIED"
+                self._decide(index, "DELIVERED", occurrence=occurrence)
+            except UnsupportedInjection as exc:
+                record.update(status="UNSUPPORTED", error=str(exc))
+                self._decide(index, "NOT_IMPLEMENTED", reason=str(exc), occurrence=occurrence)
+                self.stopped = True
+                raise
+            except PermissionError as exc:
+                record.update(status="APPLIED", effect="injected_fault", error=str(exc))
+                self._decide(index, "DELIVERED", occurrence=occurrence, effect="injected_fault")
+                raise
+            except Exception as exc:
+                record["error"] = str(exc)
+                self._decide(index, "HARNESS_ERROR", reason=str(exc), occurrence=occurrence)
+                self.stopped = True
+                raise
+        self._count_artifact_selectors(point, event, controller)
         if interrupted:
             raise InjectedInterruption(
                 "injected quiescent checkpoint interruption; resume requested="
