@@ -9,7 +9,15 @@ import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import claim_gates, operator_ledger, policy, recovery, review_evidence
+from . import (
+    claim_gates,
+    operator_ledger,
+    policy,
+    recovery,
+    review_evidence,
+    shadow,
+    write_boundary,
+)
 from .admission import identity as admission_identity
 from .admission import record_for
 from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
@@ -104,6 +112,23 @@ TRANSITIONS = {
     "DATA_VERIFIED": "FINAL_VERIFIED",
     "FINAL_VERIFIED": "RELEASED",
 }
+
+
+# CAP-REREVIEW (CP-E09): approved-binding objects a re-review may follow (EVIDENCE_CONTRACT.md
+# v2_4.material_changes object vocabulary request|goal|plan|manifest|source), the states an
+# approval is active in, and the re-review cap per plan (UC-05: "if >2 then re-plan").
+APPROVED_STATES = ("REVIEW_APPROVED", "AUTHORIZED")
+MAX_REREVIEWS_PER_PLAN = 2
+
+
+class ReturnToReview(Refused):
+    """An approved binding changed before anything was produced. Raised by integrity()
+    without mutating state; Controller.run returns the run to PLAN_VALIDATED. Anywhere else
+    (e.g. resume verification) it is an ordinary review_binding refusal."""
+
+    def __init__(self, message, changes):
+        super().__init__(message, gate="review_binding", reason="approval_invalidated")
+        self.changes = changes
 
 
 def read_gate(process, schema, artifact, replay=False):
@@ -600,11 +625,43 @@ class Controller:
             }
             self.save(name, snapshot)
             self.checkpoint()
+        if target == "REVIEW_APPROVED":
+            self.issue_active_approval()
         self.emit("after_transition", {"state": self.state})
         if target == "REVIEW_APPROVED" and self.hooks is not None:
             approval = self.accepted_approval(evidence)
             if approval is not None:
                 self.emit("after_review_approval", approval)
+        shadow.after_transition(self, target)
+
+    def issue_active_approval(self):
+        """The approval the run now acts under; a re-reviewed approval replaces it durably
+        (EVIDENCE_CONTRACT.md controller_trace.active_approval)."""
+        reviewers = [r for r in self.roles.receipts if r.get("role") == "reviewer"]
+        approval = {
+            "approval_id": str(uuid.uuid4()),
+            "verdict": "APPROVE",
+            "reviewer_occurrence": len(reviewers),
+            "reviewer_session_id": reviewers[-1].get("session_id") if reviewers else None,
+            "request_hash": self.request_hash,
+            "goal_hash": digest(self.goal),
+            "plan_hash": digest(self.plan),
+            "manifest_hash": self.build_hash,
+            "source_hash": self.source_hash,
+            "binding_hash": self.binding,
+            "transition_index": len(self.events) - 1,
+        }
+        superseded = self.context.setdefault("superseded_approvals", [])
+        previous = self.context.pop("active_approval", None)
+        if previous is not None:
+            superseded.append(previous)
+        if superseded:
+            approval["replaces"] = superseded[-1]["approval_id"]
+        event = self.dispatch_event("active_approval", approval=approval)
+        approval["sequence"] = event["sequence"] if event else None
+        self.context["active_approval"] = approval
+        self.save(f"active-approval-{len(superseded):03}.json", approval)
+        self.checkpoint()
 
     def accepted_approval(self, review):
         """Normalized accepted-approval boundary, confirmed against the durable checkpoint.
@@ -1028,10 +1085,219 @@ class Controller:
 
         Inputs bound into an approval invalidate it when they change (review_binding);
         before any binding exists the same change fails the check that admitted it.
+        CAP-REREVIEW: while an approval is active and nothing has been produced
+        (rereview_open), a change to an approved object is followed instead: collected and
+        raised as ReturnToReview (re-review) by rereview_integrity().
         """
+        if self.rereview_open():
+            self.rereview_integrity()
+            return
         refusals = recovery.verify(self, stop_at_first=True)["refusals"]
         if refusals:
             raise refusals[0]
+
+    def rereview_integrity(self):
+        """integrity() while re-review is open (an approval is bound, nothing produced).
+
+        Same checks, order and gate codes as recovery.verify; source, manifest, request and
+        plan changes are collected and raised together as ReturnToReview. A goal change is
+        recorded and refused, never re-reviewed.
+        """
+        changes = []
+        with gated("source_check"):
+            admission_changed = (
+                record_for(self.admission, self.source) != self.admission_record
+                or admission_identity(self.admission_record) != self.admission_hash
+            )
+        if admission_changed:
+            raise Refused(
+                "source admission policy changed",
+                gate="review_binding",
+                reason="approval_invalidated",
+            )
+        for name, expected in self.evidence.items():
+            with gated("gate_evidence"):
+                observed = tree_hash(self.root / name)
+            if observed != expected:
+                raise Refused(
+                    "controller evidence changed: " + name,
+                    gate="gate_evidence",
+                    reason="artifact_identity_mismatch",
+                )
+        with gated("source_check"):
+            source_now = tree_hash(self.source)
+        if source_now != self.source_hash:
+            changes.append({"object": "source", "to_hash": source_now})
+        with gated("review_binding"):
+            build_now = build_manifest(self.repo)
+        if digest(build_now) != self.build_hash:
+            changes.append({"object": "manifest", "to_hash": digest(build_now), "build": build_now})
+        with gated("authorization"):
+            request_now = digest(self.request)
+            try:
+                goal_changed = request_goal(self.request) != self.goal
+            except Refused:
+                if request_now != self.request_hash:
+                    self.record_material_change("request", request_now)
+                raise
+        if request_now != self.request_hash or goal_changed:
+            # Recorded either way; a goal change is never re-reviewed (it needs new
+            # compiled authority, not a new look at the same plan).
+            self.record_material_change("request", request_now)
+            if goal_changed:
+                self.record_material_change("goal", digest(request_goal(self.request)))
+                raise Refused(
+                    "request/authorization changed since admission",
+                    gate="review_binding",
+                    reason="approval_invalidated",
+                )
+            changes.append({"object": "request", "to_hash": request_now, "recorded": True})
+        for name, value in self.artifacts.items():
+            if name == "source" and any(c["object"] == "source" for c in changes):
+                continue  # the same change, followed above
+            with gated("gate_evidence"):
+                observed = tree_hash(self.paths[name])
+            if observed != value:
+                raise Refused(
+                    f"artifact changed since its producing step: {name}",
+                    gate="gate_evidence",
+                    reason="artifact_identity_mismatch",
+                )
+        if self.context["active_approval"]["plan_hash"] != digest(self.plan):
+            changes.append({"object": "plan", "to_hash": digest(self.plan)})
+        if changes:
+            raise ReturnToReview(
+                "approved binding changed: " + ", ".join(c["object"] for c in changes), changes
+            )
+        if self.binding and self.current_binding() != self.binding:
+            raise Refused(
+                "plan or review binding changed", gate="review_binding", reason="stale_binding"
+            )
+
+    def rereview_open(self):
+        """An approval is active and no producing step has started or left output."""
+        approval = self.context.get("active_approval") or {}
+        return (
+            self.state in APPROVED_STATES
+            and bool(self.binding)
+            and self.pending is None
+            and set(self.artifacts) == {"source"}
+            and not any(Path(p).exists() for n, p in self.paths.items() if n != "source")
+            and approval.get("binding_hash") == self.binding
+        )
+
+    def record_material_change(self, kind, to_hash):
+        records = self.context.setdefault("material_changes", [])
+        record = {"index": len(records), "object": kind, "to_hash": to_hash, "state": self.state}
+        event = self.dispatch_event("material_change", change=record)
+        record["sequence"] = event["sequence"] if event else None
+        records.append(record)
+        self.save(f"material-change-{record['index']:03}.json", record)
+        self.checkpoint()
+        return record
+
+    def return_to_review(self, change):
+        """CAP-REREVIEW: record each change, re-check a changed source, withdraw the approval
+        and return to PLAN_VALIDATED under the same repair and resume budgets. The re-review
+        itself is the ordinary PLAN_VALIDATED loop (claim check, reviewer, repair)."""
+        for item in change.changes:
+            if not item.get("recorded"):
+                self.record_material_change(item["object"], item["to_hash"])
+        # A request change was recorded where it was detected, just before the others.
+        changed = self.context["material_changes"][-len(change.changes) :]
+        indexes = [r["index"] for r in changed]
+        plan_hash = digest(self.plan)
+        # Re-review wait boundary: an accepted attributed operator replan (operator channel,
+        # when this controller has one) returns to planning instead; a new plan starts its
+        # own re-reviews (UC-05). Same repair and resume budgets either way.
+        # consult_operator_ledger returns this consultation's decisions (a list, empty when no
+        # channel exists); a lone decision dict is treated as a one-item consultation. Only an
+        # accepted (literally True) replan decision counts.
+        consult = getattr(self, "consult_operator_ledger", None)
+        decisions = consult("re_review", allowed=("replan",)) if callable(consult) else None
+        if isinstance(decisions, dict):
+            decisions = [decisions]
+        decision = next(
+            (
+                d
+                for d in decisions or ()
+                if isinstance(d, dict) and d.get("accepted") is True and d.get("action") == "replan"
+            ),
+            None,
+        )
+        replan = decision is not None
+        done = [r for r in self.context.get("rereviews", []) if r["plan_hash"] == plan_hash]
+        if not replan and len(done) >= MAX_REREVIEWS_PER_PLAN:
+            # UC-05: a third re-review of one plan is not allowed. No re-plan is invented
+            # here: stop at the binding check, still at the approved state.
+            raise Refused(
+                "re-review cap reached for this plan; a new plan and approval are required",
+                gate="review_binding",
+                reason="approval_invalidated",
+            )
+        withdrawn, target = [], "GOAL_CHECKED" if replan else "PLAN_VALIDATED"
+        withdraw = APPROVED_STATES + (("PLAN_VALIDATED",) if replan else ())
+        while self.events and self.events[-1]["to"] in withdraw:
+            withdrawn.append(self.events.pop())
+        if not self.events or self.events[-1]["to"] != target:
+            raise Refused("re-review cannot return to " + target, gate="review_binding")
+        self.state = target
+        approval = self.context.pop("active_approval", None)
+        if approval is not None:
+            approval["invalidated_by"] = indexes
+            self.context.setdefault("superseded_approvals", []).append(approval)
+        self.context.pop("review", None)
+        for item in change.changes:
+            if item["object"] == "manifest":
+                self.build, self.build_hash = item["build"], item["to_hash"]
+                self.save(f"build-{indexes[-1]:03}.json", self.build)
+            elif item["object"] == "source":
+                self.source_hash = self.artifacts["source"] = item["to_hash"]
+            elif item["object"] == "request":
+                self.request_hash = item["to_hash"]
+        if replan:
+            self.plan, self.binding = None, None  # GOAL_CHECKED asks the planner again
+        else:
+            self.binding = self.current_binding()
+        rereviews = self.context.setdefault("rereviews", [])
+        rereview = {
+            "index": len(rereviews),
+            "plan_hash": plan_hash,
+            "material_changes": indexes,
+            "withdrawn_states": [e["to"] for e in reversed(withdrawn)],
+            "binding_hash": self.binding,
+            "returned_to": target,
+            "operator_decision": decision if replan else None,
+        }
+        rereviews.append(rereview)
+        self.dispatch_event("return_to_review", rereview=rereview)
+        self.checkpoint()
+        if any(item["object"] == "source" for item in change.changes):
+            self.recheck_source()
+        if replan:
+            self.checkpoint()
+            return
+        self.preflight_plan()  # revalidate the plan against the current manifest
+        self.save("plan.json", {"plan": self.plan, "binding_hash": self.binding})
+        self.checkpoint()
+
+    def recheck_source(self):
+        """UC-05 "new data new check": the source gate runs again before any re-review."""
+        records = self.context.setdefault("source_rechecks", [])
+        record = {"index": len(records), "source_hash": self.source_hash, "verdict": "FAIL"}
+        try:
+            self.context["metadata"] = self.inspect_source()
+            self.context["source_gate"] = self.check("source", self.state)
+            record["verdict"] = "PASS"
+        except Refused as exc:
+            tag(exc, "source_check", override=True)
+            raise
+        finally:
+            event = self.dispatch_event("source_recheck", recheck=record)
+            record["sequence"] = event["sequence"] if event else None
+            records.append(record)
+            self.save(f"source-recheck-{record['index']:03}.json", record)
+            self.checkpoint()
 
     def current_binding(self):
         bound = {
@@ -1199,6 +1465,10 @@ class Controller:
         self.emit("after_tool", {"skill": skill, "argv": argv, "process": result})
         self.integrity()
         self.save(f"tool-{self.state}-{skill}.json", {"parsed": parsed, "process": result})
+        artifact = write_boundary.artifact_for_output(self, argv)
+        if artifact is not None and result["exit_code"] == 0 and not result.get("stop_reason"):
+            # CAP-DENY-WRITE: the controller commits the produced artifact (write boundary).
+            write_boundary.commit(self, artifact, skill)
         self.checkpoint()
         return result
 
@@ -1378,7 +1648,10 @@ class Controller:
             mapping = {"source": source}
             if getattr(exc, "superseded_gate", None):
                 mapping["superseded_gate"] = exc.superseded_gate
-            return {"outcome": outcome, "reason": reason, "failed_gate": gate}, mapping
+            terminal = {"outcome": outcome, "reason": reason, "failed_gate": gate}
+            if getattr(exc, "denial_source", None):
+                terminal["denial_source"] = exc.denial_source  # write boundary (CAP-DENY-WRITE)
+            return terminal, mapping
         pending = self.pending is not None
         terminal = {
             "outcome": "INCOMPLETE",
@@ -1449,7 +1722,9 @@ class Controller:
         self.bind_recovery()
         while True:
             try:
-                return self._run()
+                # drive() follows ReturnToReview (a Refused) itself; anything else it raises
+                # reaches the recovery handling below exactly as _run() would.
+                return self.drive()
             except (NeedsInfo, Refused):
                 raise
             except Exception as exc:
@@ -1458,6 +1733,9 @@ class Controller:
                     raise
                 # Continue as the durably re-verified controller, in this same object.
                 self.__dict__.update(resumed.__dict__)
+                # A resumed controller starts its own _run (before_run included), as a fresh
+                # resume() would; a re-review re-entry flag does not survive the resume.
+                self.__dict__.pop("reentered", None)
                 self.bind_process_events()
                 self.bind_recovery()
 
@@ -1517,9 +1795,19 @@ class Controller:
             exc.add_note("Operator notification hook failed: " + type(hook_error).__name__)
         return None
 
+    def drive(self):
+        """_run, returning to PLAN_VALIDATED after each followed material change."""
+        while True:
+            try:
+                return self._run()
+            except ReturnToReview as change:
+                self.return_to_review(change)
+                self.reentered = True
+
     def _run(self):
         self.integrity()
-        self.emit("before_run", {})
+        if not getattr(self, "reentered", False):
+            self.emit("before_run", {})
         stop = self.context.get("needs_info")
         if stop:
             # A recorded NEEDS_INFO is final for this request: no role or process runs again.
@@ -1646,7 +1934,7 @@ class Controller:
             self.integrity()
             self.advance("AUTHORIZED", self.request["authorization"])
         if self.state == "AUTHORIZED":
-            if self.policy_mode != "rules":
+            if self.policy_mode not in ("rules", shadow.MODE):
                 prompt = self.policy_question(
                     self.state,
                     self.binding,
