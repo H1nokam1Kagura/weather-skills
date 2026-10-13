@@ -64,6 +64,7 @@ MAP_GOAL = {
     "title": "Eastern Kenya: 2025 short rains",
 }
 DATA_GOAL = {**MAP_GOAL, "task": "onset_data", "title": None}
+TEST_FREE_RAM_GIB = 16.0
 TOOL_SCRIPT = '''
 import json, pathlib, sys
 argv = sys.argv[1:]
@@ -289,7 +290,11 @@ class Lab:
             "definition_source": self.definition,
             "repo": self.repo,
             "roles_factory": lambda run_dir: agents.Roles(stub, run_dir, budget=5),
-            "processes_factory": lambda run_dir: Processes(run_dir / "processes"),
+            # A fixed injected reading keeps the synthetic runs independent of host free RAM;
+            # the launch checks record reading_source "injected" (never presented as observed).
+            "processes_factory": lambda run_dir: Processes(
+                run_dir / "processes", memory_reader=lambda: TEST_FREE_RAM_GIB
+            ),
             "input_supplement": {"supplement_id": "test-only", "sha256": None},
         }
 
