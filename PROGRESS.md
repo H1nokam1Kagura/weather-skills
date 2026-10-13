@@ -33,5 +33,15 @@ Branch: feat/simkit-w3-review-shadow-snowyowl. WIP file requested by the coordin
 - Coordinator: no full suite; targeted suites only (e2e_injections, runner_lifecycle, workflow, agents,
   admission, schedule_dispatch, recovery, review_evidence, dispatch_evidence).
 
+- Resume #2 (2026-10-13): reviewed coordinator checkpoint 3c98c36 (PROGRESS.md only; kept). Added
+  test_forged_role_channel_replan_is_rejected_and_the_cap_still_stops (CAP-REREVIEW negative 4) and
+  missing-variable negatives for FX-DEF-PARAM-EDIT / FX-DEF-TOUCH (CAP-FIXTURE-OP). File: 39 tests,
+  36 passed + 3 transient host WinError 5 on checkpoint os.replace (persistence.atomic_json), all 3
+  pass on rerun. Ruff check + format clean on all changed files.
+- Targeted: test_e2e_injections.py + test_workflow.py + Refused census test: 42 passed.
+- Not done by design: CAP-METRIC free_ram_gib injection (needs a Processes memory_reader seam in
+  processes.py, outside declared files); stays UNSUPPORTED. request_transition replan delivery is
+  the operator track's; here it stays UNSUPPORTED (tested).
+
 ## Open questions
 - Re-entering _run after return-to-review needs a one-line change in run(); reported as outside strict region.
