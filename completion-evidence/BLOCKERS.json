@@ -1,0 +1,63 @@
+{
+  "blockers": [
+    {
+      "id": "B2-SIGNAL",
+      "scope": "all 66 cases",
+      "status": "NOT_IMPLEMENTED",
+      "source": "adapter-preflight/process-backend-design.json",
+      "reason": "No faithful exhaustive per-PID/parent-at-signal backend established. Job notifications, taskkill diagnostics and callback logs do not prove complete target ancestry. Debugger candidate retains chain, broker, timing and crash-evidence limitations.",
+      "next": "Evaluate separately versioned containment proposal and owned feasibility canaries; original signal requirement remains unmet.",
+      "owner": "SIMKIT/controller implementation owner"
+    },
+    {
+      "id": "B2-DISPATCH",
+      "scope": "all 66 cases",
+      "status": "NOT_IMPLEMENTED",
+      "source": "adapter_support/weather_adapter.py; simkit/simkit/adapter.py",
+      "reason": "WeatherAdapter does not override run_case and advertises only CAP-NOT-IMPLEMENTED. Standalone fixture/signal helpers and diagnostic review mapping are not complete capability implementations.",
+      "next": "No runnable frozen slice while universal capabilities are missing. Keep run_case unavailable; do not install a refusal-only method that falsely advertises dispatch support.",
+      "owner": "SIMKIT/controller implementation owner"
+    },
+    {
+      "id": "B2-RECEIPTS",
+      "status": "PARTIAL_NATIVE_PRODUCER_IMPLEMENTED",
+      "source": "adapter-preflight/evidence-mapping.json",
+      "reason": "Native invocation receipts lack controller-global seq and resume phase; failed-dispatch invocation/receipt correlation incomplete.",
+      "next": "Review opt-in dispatch evidence; complete frozen receipt mapping separately. No full capability promotion.",
+      "owner": "SIMKIT/controller implementation owner"
+    },
+    {
+      "id": "B2-SEMANTICS",
+      "status": "NOT_IMPLEMENTED",
+      "source": "tools/workflow/review_evidence.py; adapter-preflight/evidence-mapping.json",
+      "reason": "Claim entailment, derivable-claim computation and claim-gate verdicts absent. One observed diagnostic symbol is not broad CAP-SYMBOLS; partial review projection is not exhaustive harness observation.",
+      "next": "Implement reviewed producer semantics or keep unsupported; never fill from model self-report or harness guesses.",
+      "owner": "SIMKIT/controller implementation owner"
+    },
+    {
+      "id": "B2-NOTIFY-RETRY-OPERATOR",
+      "status": "NOT_IMPLEMENTED",
+      "source": "adapter-preflight/hooks.md",
+      "reason": "No controller notification lifecycle/delivery receipt, same-invocation transport retry, attributed operator acceptance channel, or faithful PID-bearing stale-lock repair mapping. Kernel lock release is not the latter behavior.",
+      "next": "Require real controller semantics and named boundary evidence before adapter mappings; do not invent new SUT behavior in the adapter.",
+      "owner": "SIMKIT/controller implementation owner"
+    },
+    {
+      "id": "B2-DELIVERY-AUTH-OUTPUT",
+      "status": "NOT_DEMONSTRATED",
+      "source": "SIMKIT_adapter-v2_7_WORK-ORDER_2026-10-12.json; policy-revision/releases/oracle-policy-1-r2.zip",
+      "reason": "Trusted injection DELIVERY or legitimate skip records, user-facing output capture, and accepted authentication scope are not demonstrated by current diagnostic adapter. Content hashes alone do not authenticate a producer.",
+      "next": "Use separately versioned accepted policy and observed producer records; policy review is not oracle ratification.",
+      "owner": "SIMKIT/controller implementation owner"
+    },
+    {
+      "id": "B2-PINS",
+      "status": "RESOLVED_EXACT_FROZEN_PACKAGE_PRESERVED",
+      "source": "casesets/cached-onset-e2e-v2_7/verification/FINAL-PINS.json",
+      "reason": "23 of 24 frozen baseline raw-byte pins match current checkout; cli.py differs. No other mismatch inferred.",
+      "next": "Use BASELINE-SELECTION.json; no repinning or successor substitution.",
+      "owner": "SIMKIT/controller implementation owner"
+    }
+  ],
+  "hitl": "No additional HITL for authorized local implementation or owned feasibility canaries. Verify existing authority before proposing any concrete frozen contract/scorer/policy change. No blanket 66-case human judgment requirement."
+}

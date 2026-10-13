@@ -1,0 +1,52 @@
+{
+  "case": "normal",
+  "status": "CLEAN",
+  "evidence": [
+    {
+      "seq": 1,
+      "monotonic_ns": 181294531000000,
+      "event": "job_ready",
+      "flags": 8192,
+      "noninheritable": true
+    },
+    {
+      "seq": 2,
+      "monotonic_ns": 181294593000000,
+      "event": "admitted_suspended",
+      "pid": 41196,
+      "membership": true
+    },
+    {
+      "seq": 3,
+      "monotonic_ns": 181294593000000,
+      "event": "resumed",
+      "pid": 41196,
+      "prior_suspend_count": 1
+    },
+    {
+      "seq": 4,
+      "monotonic_ns": 181294968000000,
+      "event": "root_wait",
+      "native_result": 0
+    },
+    {
+      "seq": 5,
+      "monotonic_ns": 181294968000000,
+      "event": "active_query",
+      "result": 1,
+      "active": 1,
+      "total": 2
+    },
+    {
+      "seq": 6,
+      "monotonic_ns": 181295031000000,
+      "event": "active_query",
+      "result": 1,
+      "active": 0,
+      "total": 2
+    }
+  ],
+  "exhaustive_signal_capture": false,
+  "scope": "trusted direct-launch synthetic fixtures",
+  "zero_observed": true
+}

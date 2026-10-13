@@ -1,0 +1,153 @@
+{
+  "selection": "EXACT_FROZEN_V2_7_FINAL_PINS",
+  "status": "SOURCE_PACKAGE_ONLY_NOT_EXECUTED",
+  "pins_manifest_sha256": "153f207e89c6ac7786d8203413eeef1e1fce219aef7252d63aced1b5b33d0402",
+  "cli_provenance": "Recovered uncommitted file bytes; identified by frozen hash, not its source HEAD.",
+  "policy_successor": "Separate oracle-policy-1-r2 package remains unadopted and unratified.",
+  "files": [
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/frozen/agentic-e2e-injections.DEV-ONLY.json",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\frozen\\agentic-e2e-injections.DEV-ONLY.json",
+      "sha256": "9c3ea347454c76410e2e73adfb24aabca70018f1e7c3fd6bf4a4f11bfac241b0",
+      "bytes": 50776970
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/frozen/agentic-e2e-injections.ADAPTER-REQUIREMENTS.json",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\frozen\\agentic-e2e-injections.ADAPTER-REQUIREMENTS.json",
+      "sha256": "3b183eb41d73caa25318fe89a669efeec38f8945b7c3f8a353475583058972c2",
+      "bytes": 62200
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/requirements.json",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\requirements.json",
+      "sha256": "7e06a75fefcd86da12ea4b708d994abc0185c72315cc63053906ad66c93fabab",
+      "bytes": 122418
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/OPEN-QUESTIONS.json",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\OPEN-QUESTIONS.json",
+      "sha256": "2b4b11bd954a4d432a61edeeb909b0e2650c6a6a47603010688254887b60dd53",
+      "bytes": 15045
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/spec-rulings.json",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\spec-rulings.json",
+      "sha256": "f3478cf6283719b10c59ee39651f88618a1e70611d91e3c68e5e40561e90f40e",
+      "bytes": 13625
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\EVIDENCE_CONTRACT.json",
+      "sha256": "2478c5085f1a1a79828978972e3d86b12cb3966ed0323e5db11d7b28478b2548",
+      "bytes": 2933792
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.md",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\EVIDENCE_CONTRACT.md",
+      "sha256": "fb22a4c7b729cefb6f6965af4f8cb2a99ebe06168e4b1b44812702dfaab6dfd1",
+      "bytes": 90376
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/amendments.json",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\amendments.json",
+      "sha256": "0af3c5554aa52e93bb18bdf29a64ae72f55aceb07f7e1fdcad86fddc4b502154",
+      "bytes": 22
+    },
+    {
+      "relative_path": "simkit/adapter.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\adapter.py",
+      "sha256": "0566e56e575f24d0949c394826e0a5973d8fcc74895af24bde3623634c00e335",
+      "bytes": 5862
+    },
+    {
+      "relative_path": "simkit/cli.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\simkit-v2_7-closure-20261011\\simkit\\cli.py",
+      "sha256": "1be700205bbd63526cfcdfc803b5954341973c9ce84414b44f9891536df0e33d",
+      "bytes": 7030
+    },
+    {
+      "relative_path": "simkit/contract.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\contract.py",
+      "sha256": "d2e171aa5215469241ba9f6db1af0fc90685ea4e33e161227838b68ce3bdc70c",
+      "bytes": 18683
+    },
+    {
+      "relative_path": "simkit/core.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\core.py",
+      "sha256": "57576ef36dd98755d7f30296e2cce7e09e9de1b54d4431ad705d3f75e9e9067d",
+      "bytes": 5519
+    },
+    {
+      "relative_path": "simkit/guarded.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\guarded.py",
+      "sha256": "8261820629d76529bd8e0815a27d7051f59474542646027d12ede0771efe92c1",
+      "bytes": 5329
+    },
+    {
+      "relative_path": "simkit/profile.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\profile.py",
+      "sha256": "43513e74589e998cea332cbc321acef28fe876ee064c0c8d50c4a20201a099d9",
+      "bytes": 4608
+    },
+    {
+      "relative_path": "simkit/ratify.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\ratify.py",
+      "sha256": "6d62612dfb658fff3b60272c2d3df483e95566b75132ddb6abcec07a0a895534",
+      "bytes": 9022
+    },
+    {
+      "relative_path": "simkit/runner.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\runner.py",
+      "sha256": "43329bed8f5f3cb2d8e560cb2919f8dc9fb48ffb7a1ea2b9911c014f2de23297",
+      "bytes": 1432
+    },
+    {
+      "relative_path": "simkit/score.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\score.py",
+      "sha256": "aabe153188db1e28d0e541628d26b89097d834dd08efa2cb932af93a730aec86",
+      "bytes": 168605
+    },
+    {
+      "relative_path": "simkit/v27_validation.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\v27_validation.py",
+      "sha256": "a2b87a7983217760580485bcf5e0e78d6d2c57c7dff4d15bac8bf37c1bbdbf33",
+      "bytes": 2608
+    },
+    {
+      "relative_path": "simkit/validate.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\validate.py",
+      "sha256": "84fcb37fa1cc9a8b0361c29870016203424a170eddc7ae33920a019f2608aa59",
+      "bytes": 56219
+    },
+    {
+      "relative_path": "simkit/__init__.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\__init__.py",
+      "sha256": "c5c5dc42982a5e12979b9dc071221ade680d43db2729fd9ecb482dcea1c6cdd1",
+      "bytes": 551
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/capability_fixes.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\capability_fixes.py",
+      "sha256": "d684d51ed614fdad2e44a1a41bf9c1ca54a0ee1e82305531f60f9a32e8d4817b",
+      "bytes": 2766
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/cases_v2_7.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\cases_v2_7.py",
+      "sha256": "c3d8309fa045e7880ea8acbd4a0ac7598158a38f692ca3087aa1bacfc58770fa",
+      "bytes": 4410
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/rubric_fixes.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\rubric_fixes.py",
+      "sha256": "bc68c9aca3404e2303220cac672593e536a4080a2a3e230783da0220bc41169e",
+      "bytes": 1012
+    },
+    {
+      "relative_path": "casesets/cached-onset-e2e-v2_7/schedule_fixes.py",
+      "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\schedule_fixes.py",
+      "sha256": "473582ff43c84c964fd7db58512af2b9365c5f937bd3befeb8a38bbb5fb7974a",
+      "bytes": 23998
+    }
+  ]
+}

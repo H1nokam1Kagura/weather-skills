@@ -6,6 +6,7 @@ import uuid
 
 from .catalog import child_environment
 from .contracts import Refused, digest
+from .review_evidence import text_hash
 
 PROMPTS = {
     "repairer": "Repair a typed plan only within the supplied immutable goal and registered profile. "
@@ -52,6 +53,24 @@ class Roles:
         if not executable:
             raise Refused("Claude CLI unavailable")
         invocation = str(uuid.uuid4())
+        dispatch_context = getattr(self, "dispatch_context", None)
+        if dispatch_context is not None:
+            self.dispatch_observation = {
+                "attempt_id": dispatch_context["attempt_id"],
+                "invocation_id": invocation, "process_boundary": "NOT_ENTERED",
+            }
+        prompt = PROMPTS[role]
+        if role in {"planner", "repairer"} and "review_evidence_request" in payload:
+            prompt += (
+                " In this opt-in invocation follow review_evidence_request for the versioned "
+                "plan envelope and emitted claims. Keep the executable typed plan unchanged."
+            )
+        if role == "reviewer" and "review_evidence" in payload:
+            prompt += (
+                " Review the exact review_evidence envelope and its plan_claims. Only its "
+                "bound sources are citable. Citation identity checks do not establish "
+                "entailment or computational correctness; do not treat them as support."
+            )
         command = [
             executable,
             "-p",
@@ -69,18 +88,25 @@ class Roles:
             "--max-budget-usd",
             str(self.budget - self.spent),
             "--system-prompt",
-            PROMPTS[role],
+            prompt,
         ]
         spent_before = self.spent
         # Reserve the remaining ceiling before launch. An unreadable/missing cost receipt
         # cannot create fresh budget on resume; known cost reconciles the reservation.
         self.spent = self.budget
+        stdin = json.dumps(payload)
+        if dispatch_context is not None:
+            self.dispatch_observer(dict(self.dispatch_observation))
+            self.dispatch_observation["process_boundary"] = "ENTERED"
         result = self.processes.run(
             command,
             self.workspace,
             child_environment(self.workspace.parent / "scratch"),
-            json.dumps(payload),
+            stdin,
         )
+        if dispatch_context is not None:
+            self.dispatch_observation.update(process_boundary="RETURNED",
+                                             exit_code=result["exit_code"])
         if result["exit_code"] != 0:
             raise Refused(f"{role} CLI failed: {result['stderr'][-500:]}")
         try:
@@ -111,4 +137,10 @@ class Roles:
                 "model_usage": envelope.get("modelUsage", {}),
             }
         )
+        if role == "reviewer" and "review_evidence" in payload:
+            self.receipts[-1]["dispatch"] = {
+                "stdin_hash": text_hash(stdin),
+                "system_prompt": prompt,
+                "system_prompt_hash": text_hash(prompt),
+            }
         return value

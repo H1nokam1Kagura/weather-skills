@@ -3,10 +3,12 @@
 import json
 import sys
 import time
+import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
 from . import policy
+from . import review_evidence
 from .admission import identity as admission_identity
 from .admission import record_for
 from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
@@ -79,6 +81,8 @@ class Controller:
         policy_mode="rules",
         hooks=None,
         admission=None,
+        review_evidence_mode=False,
+        dispatch_evidence_mode=False,
     ):
         self.repo = safe_path(repo)
         self.request = json.loads(json.dumps(request))
@@ -106,6 +110,17 @@ class Controller:
         self.profile = PROFILES[self.goal["task"]]["id"]
         self.sequence = stages(self.goal["task"])
         self.context = {}
+        if dispatch_evidence_mode:
+            self.context["dispatch_evidence"] = {
+                "schema": "workflow.dispatch-evidence/1",
+                "run_id": str(uuid.uuid4()), "sequence": 0, "occurrences": {},
+            }
+        if review_evidence_mode:
+            self.context["review_evidence"] = {
+                "schema": review_evidence.SCHEMA,
+                "run_id": str(uuid.uuid4()),
+                "reviewer_occurrence": 0,
+            }
         self.hooks = hooks
         if hooks is not None:
             self.context["injection_harness"] = True
@@ -250,8 +265,27 @@ class Controller:
         )
         self.resumes = value["resumes"] + 1
         self.integrity()
+        self.dispatch_event("resume")
         self.checkpoint()
         return self
+
+    def dispatch_event(self, kind, **details):
+        """One controller-owned sequence for opt-in dispatch and transition evidence."""
+        context = self.context.get("dispatch_evidence")
+        if context is None:
+            return None
+        context["sequence"] += 1
+        record = {"schema": context["schema"], "run_id": context["run_id"],
+                  "sequence": context["sequence"], "resume_phase": self.resumes,
+                  "kind": kind, **details}
+        self.save(f"dispatch-event-{context['sequence']:06}.json", record)
+        return record
+
+    def capture_invocation(self, observation):
+        if observation["attempt_id"] != self.pending["attempt_id"]:
+            raise Refused("dispatch attempt correlation mismatch")
+        self.dispatch_event("invocation_prepared", **observation)
+        self.checkpoint()
 
     def advance(self, target, evidence):
         index = self.sequence.index(self.state)
@@ -266,7 +300,21 @@ class Controller:
             }
         )
         self.state = target
+        self.dispatch_event("transition", transition=self.events[-1])
         self.checkpoint()
+        if target == "REVIEW_APPROVED" and "review_evidence" in self.context:
+            # Acceptance must refer to a transition already durably committed.
+            evidence_context = self.context["review_evidence"]
+            name = evidence_context["last_capture"]
+            snapshot = json.loads((self.root / name).read_text(encoding="utf-8"))
+            snapshot["accepted_review"] = True
+            snapshot["committed_transition"] = {
+                "index": len(self.events) - 1,
+                "event": json.loads(json.dumps(self.events[-1])),
+                "binding_hash": self.binding,
+            }
+            self.save(name, snapshot)
+            self.checkpoint()
         self.emit("after_transition", {"state": self.state})
 
     def emit(self, point, event):
@@ -277,24 +325,100 @@ class Controller:
     def ask(self, role, payload):
         self.integrity()
         self.emit("before_role", {"role": role, "payload": payload})
+        captured = None
+        if role == "reviewer" and "review_evidence" in self.context:
+            self.integrity()
+            payload = json.loads(json.dumps(payload))
+            captured = review_evidence.capture(self, payload)
         before = len(self.roles.receipts)
         self.pending = {"kind": "model", "role": role, "input_hash": digest(payload)}
+        attempt = None
+        context = self.context.get("dispatch_evidence")
+        if context is not None:
+            occurrence = context["occurrences"].get(role, 0) + 1
+            context["occurrences"][role] = occurrence
+            attempt = self.dispatch_event(
+                "dispatch_attempt", attempt_id=str(uuid.uuid4()), role=role,
+                occurrence=occurrence, input_hash=digest(payload), state=self.state,
+            )
+            self.pending["attempt_id"] = attempt["attempt_id"]
+            # Native Roles consumes this context; custom roles may leave correlation unknown.
+            self.roles.dispatch_context = dict(attempt)
+            self.roles.dispatch_observation = None
+            self.roles.dispatch_observer = self.capture_invocation
+            if captured:
+                captured[1]["controller_attempt"] = dict(attempt)
+                self.save(captured[0], captured[1])
         self.checkpoint()
         try:
             answer = self.roles.ask(role, payload)
-        except Exception:
-            self.pending = None
-            self.checkpoint()
+        except BaseException as exc:
+            if attempt is None and not isinstance(exc, Exception):
+                raise  # Preserve legacy interruption/checkpoint behavior.
+            try:
+                if attempt is not None:
+                    observed = getattr(self.roles, "dispatch_observation", None)
+                    self.dispatch_event("dispatch_failed", attempt_id=attempt["attempt_id"],
+                                        error_type=type(exc).__name__, outcome="UNKNOWN",
+                                        invocation_observation=observed)
+                if captured:
+                    name, snapshot = captured
+                    snapshot["dispatch_status"] = "FAILED"
+                    if attempt is not None:
+                        snapshot["invocation_observation"] = observed
+                    self.save(name, snapshot)
+                if attempt is None:
+                    self.pending = None
+                self.checkpoint()
+            except BaseException as observation_error:
+                try:
+                    exc.add_note("Dispatch failure evidence incomplete: "
+                                 + type(observation_error).__name__)
+                except BaseException:
+                    pass
             raise
-        self.pending = None
+        finally:
+            if attempt is not None:
+                self.roles.dispatch_context = None
+                self.roles.dispatch_observer = None
+        if attempt is None:
+            self.pending = None
         self.emit("after_role", {"role": role, "answer": answer})
         if len(self.roles.receipts) != before + 1 or self.roles.receipts[-1]["role"] != role:
             self.checkpoint()
             raise Refused("independent role invocation evidence is incomplete")
+        if attempt is not None:
+            receipt = self.roles.receipts[-1]
+            if (receipt.get("input_hash") != attempt["input_hash"]
+                    or receipt.get("output_hash") != digest(answer)):
+                raise Refused("dispatch receipt binding mismatch")
+            receipt["controller_dispatch"] = {
+                "attempt_id": attempt["attempt_id"], "sequence": context["sequence"] + 1,
+                "occurrence": attempt["occurrence"], "resume_phase": self.resumes,
+            }
+            self.dispatch_event(
+                "dispatch_returned", attempt_id=attempt["attempt_id"],
+                invocation_id=receipt.get("invocation_id"), receipt=receipt,
+            )
+        if captured:
+            name, snapshot = captured
+            receipt = self.roles.receipts[-1]
+            if (receipt.get("input_hash") != snapshot["input_hash"]
+                    or receipt.get("output_hash") != digest(answer)
+                    or digest(payload) != snapshot["input_hash"]
+                    or receipt.get("dispatch", {}).get("stdin_hash") != snapshot["stdin_hash"]
+                    or not receipt.get("invocation_id") or not receipt.get("session_id")):
+                raise Refused("review dispatch receipt binding mismatch")
+            snapshot["dispatch_status"] = "RETURNED"
+            snapshot["receipt"] = json.loads(json.dumps(receipt))
+            snapshot["output"] = json.loads(json.dumps(answer))
+            self.save(name, snapshot)
+            self.context["review_evidence"]["last_capture"] = name
         self.save(
             f"role-{len(self.roles.receipts):03}-{role}.json",
             {"input": payload, "output": answer, "receipt": self.roles.receipts[-1]},
         )
+        self.pending = None
         self.checkpoint()
         return answer
 
@@ -324,12 +448,18 @@ class Controller:
                 "instruction": "Repair only within this exact task and profile. Explain a factual correction to review if needed; no changes to authorization or scientific scope.",
             },
         )
-        keys(value, {"plan", "response"}, "repair")
+        repair_fields = {"plan", "response"}
+        if "review_evidence" in self.context:
+            repair_fields |= {"plan_claims", "schema"}
+        keys(value, repair_fields, "repair")
         validate_plan(value["plan"], self.goal)
         if not isinstance(value["response"], str) or len(value["response"]) > 4000:
             raise Refused("invalid bounded repair response")
         self.context["repair_response"] = value["response"]
-        self.plan = value["plan"]
+        if "review_evidence" in self.context:
+            self.accept_plan({k: value[k] for k in ("schema", "plan", "plan_claims")})
+        else:
+            self.plan = value["plan"]
         self.preflight_plan()
         self.checkpoint()
 
@@ -368,8 +498,7 @@ class Controller:
             raise Refused("plan or review binding changed")
 
     def current_binding(self):
-        return digest(
-            {
+        bound = {
                 "request": self.request_hash,
                 "goal": self.goal,
                 "plan": self.plan,
@@ -377,7 +506,23 @@ class Controller:
                 "source": self.source_hash,
                 "admission": self.admission_hash,
             }
-        )
+        if "review_evidence" in self.context:
+            evidence = self.context["review_evidence"]
+            bound["review_evidence"] = {
+                "schema": evidence["schema"],
+                "plan_claims": evidence["plan_claims"],
+                "sources": evidence["sources"],
+            }
+        return digest(bound)
+
+    def accept_plan(self, value):
+        if "review_evidence" not in self.context:
+            self.plan = value
+            return
+        evidence = self.context["review_evidence"]
+        parsed = review_evidence.unpack_plan(value, self.goal, evidence["sources"])
+        self.plan = parsed["plan"]
+        evidence["plan_claims"] = parsed["plan_claims"]
 
     def tool(self, skill, argv, allowed_state):
         if self.state != allowed_state:
@@ -488,10 +633,25 @@ class Controller:
         return metadata
 
     def docs(self):
-        return {
-            name: (self.repo / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+        docs = {
+            name: (
+                (self.repo / "skills" / name / "SKILL.md").read_bytes().decode("utf-8")
+                if "review_evidence" in self.context else
+                (self.repo / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            )
             for name in ("onset-date", "plot-onset", "check-artifact", "verify-run")
         }
+        if "review_evidence" in self.context:
+            path = self.repo / "skills/onset-date/references/onset_definitions.toml"
+            try:
+                # Preserve the whole authoritative document, including newlines.
+                text = path.read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise Refused("required definition source unavailable") from exc
+            if not text:
+                raise Refused("required definition source empty")
+            docs[review_evidence.DEFINITION_SOURCE_ID] = text
+        return docs
 
     def execute_step(self, index, state, target):
         if self.state != state:
@@ -562,6 +722,12 @@ class Controller:
             self.save("compiled-goals.json", compiles)
             self.advance("GOAL_CHECKED", compiles)
         docs = self.docs()
+        if "review_evidence" in self.context:
+            evidence = self.context["review_evidence"]
+            sources = review_evidence.sources_from_docs(docs)
+            if "sources" in evidence and evidence["sources"] != sources:
+                raise Refused("bound review sources changed")
+            evidence["sources"] = sources
         plan_payload = {
             "execution_context": self.execution_context(),
             "goal": self.goal,
@@ -572,9 +738,20 @@ class Controller:
             "profile_template": expected_plan(self.goal),
             "instruction": "Return the exact typed plan this scientific profile permits, preserving every constraint.",
         }
+        if "review_evidence" in self.context:
+            plan_payload["review_evidence_request"] = {
+                "schema": review_evidence.SCHEMA,
+                "sources": self.context["review_evidence"]["sources"],
+                "instruction": "Return schema, plan (the unchanged typed plan), and nonempty "
+                "plan_claims. Each claim contains claim_id, text, citations (source_id, "
+                "source_hash, verbatim quote), and your boolean derivable declaration. "
+                "Use only these bound documentation sources; never invent a source. "
+                "Declarations and citations are not controller support verdicts. "
+                "For a repair also include response; retain all envelope fields.",
+            }
         if self.state == "GOAL_CHECKED":
             if not self.plan:
-                self.plan = self.ask("planner", plan_payload)
+                self.accept_plan(self.ask("planner", plan_payload))
             try:
                 self.preflight_plan()
             except Refused as exc:
@@ -598,6 +775,8 @@ class Controller:
                     "repair_response": self.context.get("repair_response"),
                     "controller_gates": "Mandatory onset check then strict final data replay for every declared final artifact; no source refetch.",
                 }
+                if "review_evidence" in self.context:
+                    review_payload["review_evidence"] = review_evidence.envelope(self)
                 if self.context.get("review_retry_required"):
                     self.repair(plan_payload, json.dumps(self.context["rejected_review"]))
                     self.context["review_retry_required"] = False

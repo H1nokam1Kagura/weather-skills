@@ -1,0 +1,54 @@
+{
+  "case": "observer_failure",
+  "status": "UNKNOWN",
+  "evidence": [
+    {
+      "seq": 1,
+      "monotonic_ns": 181757390000000,
+      "event": "job_ready",
+      "flags": 8192,
+      "noninheritable": true
+    },
+    {
+      "seq": 2,
+      "monotonic_ns": 181757406000000,
+      "event": "admitted_suspended",
+      "pid": 32400,
+      "membership": true
+    },
+    {
+      "seq": 3,
+      "monotonic_ns": 181757406000000,
+      "event": "resumed",
+      "pid": 32400,
+      "prior_suspend_count": 1
+    },
+    {
+      "seq": 4,
+      "monotonic_ns": 181757562000000,
+      "event": "observer_callback_failed",
+      "error": "owned observer failure at termination_request"
+    },
+    {
+      "seq": 5,
+      "monotonic_ns": 181757562000000,
+      "event": "independent_cleanup_return",
+      "native_result": 1,
+      "error": null
+    },
+    {
+      "seq": 6,
+      "monotonic_ns": 181757562000000,
+      "event": "independent_active_query",
+      "native_result": 1,
+      "active": 0,
+      "error": null
+    }
+  ],
+  "exhaustive_signal_capture": false,
+  "scope": "trusted direct-launch synthetic fixtures",
+  "observation_integrity": "GAP",
+  "independent_zero_observed": true,
+  "observer_error": "owned observer failure at termination_request",
+  "independent_termination_succeeded": true
+}

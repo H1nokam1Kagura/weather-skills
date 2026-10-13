@@ -1,0 +1,16 @@
+{
+  "gs1": "NOT_MET",
+  "counts": {
+    "total": 66,
+    "pairs": 33,
+    "executed": 0,
+    "passed": 0,
+    "unsupported": 66,
+    "excluded": 0
+  },
+  "reason": "All frozen cases lack complete required capabilities; no registered controls or faults executed.",
+  "scorer_invoked": false,
+  "frozen_pins_modified": false,
+  "component_tests": "See XML and logs; not registered SIMKIT case evidence.",
+  "containment_candidate": "Separate feasibility evidence; no frozen equivalence or ratification."
+}

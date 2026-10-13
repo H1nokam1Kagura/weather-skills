@@ -1,0 +1,46 @@
+{
+  "status": "BOUNDED_FEASIBILITY_ONLY",
+  "results": [
+    {
+      "case": "normal",
+      "status": "CLEAN",
+      "exhaustive_signal_capture": false,
+      "scope": "trusted direct-launch synthetic fixtures",
+      "zero_observed": true
+    },
+    {
+      "case": "timeout",
+      "status": "CLEAN",
+      "exhaustive_signal_capture": false,
+      "scope": "trusted direct-launch synthetic fixtures",
+      "zero_observed": true
+    },
+    {
+      "case": "orphan",
+      "status": "CLEAN",
+      "exhaustive_signal_capture": false,
+      "scope": "trusted direct-launch synthetic fixtures",
+      "zero_observed": true
+    },
+    {
+      "case": "observer_failure",
+      "status": "UNKNOWN",
+      "exhaustive_signal_capture": false,
+      "scope": "trusted direct-launch synthetic fixtures",
+      "observation_integrity": "GAP",
+      "independent_zero_observed": true,
+      "observer_error": "owned observer failure at termination_request",
+      "independent_termination_succeeded": true
+    },
+    {
+      "case": "supervisor_crash",
+      "status": "UNKNOWN",
+      "exhaustive_signal_capture": false,
+      "scope": "trusted direct-launch synthetic fixtures",
+      "independent_fixture_exit_observed": true,
+      "reason": "Supervisor crash: mandatory job accounting/journal unavailable; fixture exit is not boundary-zero evidence."
+    }
+  ],
+  "remaining": "N0-N11 full design coverage, production integration and candidate contract adoption are incomplete.",
+  "hitl": "No new HITL required for already authorized canaries."
+}
