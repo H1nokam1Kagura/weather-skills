@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 from conftest import load_skill, make_gridded, run_skill, write_zarr
@@ -33,3 +34,54 @@ def test_difference_requires_two_inputs(tmp_path, difference):
     with pytest.raises(SystemExit) as exc:
         run_skill(difference, "-i", str(a), "-o", str(out))
     assert exc.value.code == 2
+
+
+def _field(name, value, units, lats=(1.0, 2.0), standard_name=None):
+    attrs = {"units": units}
+    if standard_name:
+        attrs["standard_name"] = standard_name
+    return xr.Dataset(
+        {name: (("latitude", "longitude"), np.full((len(lats), 2), value), attrs)},
+        coords={"latitude": list(lats), "longitude": [10.0, 11.0]},
+    )
+
+
+def _run(tmp_path, difference, a, b, *args):
+    pa = write_zarr(a, tmp_path / "a.zarr")
+    pb = write_zarr(b, tmp_path / "b.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(difference, "-i", str(pa), "-i", str(pb), "-o", str(out), *args)
+    return xr.open_zarr(out, consolidated=True)
+
+
+def test_difference_converts_units_and_keeps_temperature_differences(tmp_path, difference):
+    t = "air_temperature"
+    r = _run(
+        tmp_path,
+        difference,
+        _field("t2m", 27.0, "degree_Celsius", standard_name=t),
+        _field("t2m", 298.15, "K", standard_name=t),
+    )
+    assert r["t2m"].values == pytest.approx(2.0)
+    assert r["t2m"].attrs["units"] == "delta_degC"
+
+    r = _run(
+        tmp_path, difference, _field("precip", 24.0, "mm day-1"), _field("precip", 0.5, "mm hr-1")
+    )
+    assert r["precip"].values == pytest.approx(12.0)
+
+
+@pytest.mark.parametrize(
+    "b, args",
+    [
+        (_field("precip", 14.0, "mm"), ()),  # rate minus amount
+        (_field("precip", 1.0, "mm day-1", lats=(1.05, 2.05)), ()),  # no shared labels
+        (_field("tp", 1.0, "mm day-1"), ()),  # no shared variable
+        (_field("tp", 1.0, "mm day-1"), ("-v", "precip")),  # named var missing from B
+    ],
+)
+def test_difference_refuses_instead_of_writing_garbage(tmp_path, difference, b, args):
+    with pytest.raises(SystemExit) as exc:
+        _run(tmp_path, difference, _field("precip", 2.0, "mm day-1"), b, *args)
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()

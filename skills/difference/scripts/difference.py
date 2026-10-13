@@ -29,13 +29,22 @@ def difference(ds, variable, **kwargs):
     ds_a = ensure_normalized_longitude(ds_a)
     ds_b = ensure_normalized_longitude(ds_b)
     import numpy as np
+    import pint
     import xarray as xr
 
-    vars_ = (
-        list(dict.fromkeys(variable))
-        if variable
-        else [v for v in ds_a.data_vars if v in ds_b.data_vars]
-    )
+    shared = [v for v in ds_a.data_vars if v in ds_b.data_vars]
+    vars_ = list(dict.fromkeys(variable)) if variable else shared
+    if not vars_:
+        raise UsageError(
+            f"inputs share no data variable (A: {list(ds_a.data_vars)}, "
+            f"B: {list(ds_b.data_vars)}); rename one first"
+        )
+    for v in vars_:
+        if v not in shared:
+            raise UsageError(
+                f"--variable {v!r} must be in both inputs (A: {list(ds_a.data_vars)}, "
+                f"B: {list(ds_b.data_vars)})"
+            )
     out = {}
     for v in vars_:
         a, b = ds_a[v], ds_b[v]
@@ -48,7 +57,19 @@ def difference(ds, variable, **kwargs):
             b = b.astype(np.int16)
         elif b.dtype.kind == "u":
             b = b.astype(getattr(np, _WIDEN.get(b.dtype.itemsize, "int64")))
-        out[v] = (a - b).assign_attrs(ds_a[v].attrs)
+        try:
+            diff = a - b
+        except pint.DimensionalityError as exc:
+            raise UsageError(f"{v!r}: A and B carry incompatible units: {exc}") from None
+        except ValueError as exc:  # unlabeled dims of different sizes
+            raise UsageError(f"{v!r}: cannot align A and B: {exc}") from None
+        empty = [d for d in diff.dims if diff.sizes[d] == 0]
+        if empty:
+            raise UsageError(
+                f"{v!r}: no overlapping {empty} labels between A and B; put both on one "
+                "grid with coarsen --reference-grid (or downscale) first"
+            )
+        out[v] = diff.assign_attrs(ds_a[v].attrs)
     return xr.Dataset(out)
 
 
