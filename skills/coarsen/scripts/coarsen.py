@@ -45,7 +45,9 @@ def _clip_reference_axis(input_vals, ref_vals):
         spacing = float(np.median(np.abs(np.diff(np.sort(np.unique(ref))))))
     else:
         spacing = 0.0
-    pad = 0.5 * spacing
+    # Half a cell past each edge, plus slack for float32 coords (a reference
+    # point exactly half a cell out would otherwise fall just outside).
+    pad = 0.5 * spacing + 1e-4
     kept = ref[(ref >= vmin - pad) & (ref <= vmax + pad)]
     if kept.size == 0:
         raise UsageError(

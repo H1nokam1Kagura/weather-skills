@@ -21,10 +21,12 @@ def fetch(mod):
     return mod.fetch
 
 
-def test_login_without_credentials_raises_data_error(mod):
+def test_login_without_credentials_raises_data_error(mod, tmp_path):
     env = {
         k: v for k, v in os.environ.items() if k not in ("EARTHDATA_USERNAME", "EARTHDATA_PASSWORD")
     }
+    # Keep a real ~/.netrc on the dev machine from satisfying the netrc strategy.
+    env["NETRC"] = str(tmp_path / "missing.netrc")
     with patch.dict(os.environ, env, clear=True):
         with pytest.raises(DataError, match="Earthdata authentication failed"):
             mod._login()
