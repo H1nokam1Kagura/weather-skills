@@ -140,7 +140,14 @@ def test_manifest_only_extension_name_is_not_implemented():
     declared = copy.deepcopy(adapter.extension_methods)
     assert declared == {"CAP-BOUND-SOURCES": "capture_bound_sources"}
     assert not hasattr(adapter, "capture_bound_sources")
-    assert adapter.implemented_capabilities() == {"CAP-NOT-IMPLEMENTED"}
+    assert "CAP-BOUND-SOURCES" not in adapter.implemented_capabilities()
+    assert adapter.implemented_capabilities() == {
+        "CAP-NOT-IMPLEMENTED",
+        "CAP-CONTROLLER-HASH",
+        "CAP-REPAIR-CONFIG",
+        "CAP-DISPOSABLE-FIXTURE",
+        "CAP-GATE-REPORT-PATCH",
+    }
 
 
 def test_definition_symbol_resolves_only_exact_reviewed_whole_registry(tmp_path, monkeypatch):
