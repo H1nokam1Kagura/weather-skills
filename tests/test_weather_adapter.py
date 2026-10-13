@@ -139,7 +139,10 @@ def test_manifest_only_extension_name_is_not_implemented():
     adapter = WeatherAdapter()
     declared = copy.deepcopy(adapter.extension_methods)
     assert declared["CAP-BOUND-SOURCES"] == "capture_bound_sources"
-    assert not hasattr(adapter, "capture_bound_sources")
+    # P8 adds the method; owner ruling D4 keeps it undeclared until its producer record is
+    # reviewed (CAPABILITY-PRODUCERS.json reviewer is null).
+    assert callable(adapter.capture_bound_sources)
+    assert adapter.d4_declared("CAP-BOUND-SOURCES") is False
     assert "CAP-BOUND-SOURCES" not in adapter.implemented_capabilities()
     assert adapter.implemented_capabilities() == {
         "CAP-NOT-IMPLEMENTED",
