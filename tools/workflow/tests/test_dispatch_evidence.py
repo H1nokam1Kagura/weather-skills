@@ -13,11 +13,13 @@ from tools.workflow.tests.test_workflow import request
 
 class Boundary:
     total_seconds = 1800
+    # dispatch_evidence_mode requires the on_event / run(tool=...) process-receipt interface.
+    on_event = None
 
     def __init__(self, root, failure=None):
         self.root, self.failure, self.calls = root, failure, 0
 
-    def run(self, argv, cwd, env, stdin):
+    def run(self, argv, cwd, env, stdin, tool=None):
         self.calls += 1
         checkpoint = read_checkpoint(self.root)
         if "dispatch_evidence" in checkpoint["context"]:
