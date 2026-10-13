@@ -33,8 +33,10 @@ only model PROBED on the native route. Overrides are explicit (``models=`` /
 | verifier | claude-sonnet-4-6 | Mostly mechanical, but E08-P2 plants a FAIL in the verifier's own evidence copy |
 | router | claude-sonnet-4-6 | Shadow policy must resist a quoted plausible-but-wrong action (E09-P2) |
 
-``claude-haiku-4-5`` is the cheap candidate for compiler/verifier/router once a native-route
-probe and a held-out comparison on those cases exist; it is CODE-labelled on this route today.
+No cheaper model is available on this route today: the cheap candidate ``claude-haiku-4-5``
+was refused by the gateway's native-route model validator in the 2026-10-13 wiring smoke
+(``NATIVE_REJECTED``). A cheaper default for compiler/verifier/router needs a model the native
+route accepts, a probe, and a held-out comparison on the cases named above.
 
 Budget (D16; spend is untracked by owner ruling):
 - ``budget_guard="on"`` (default): a cited price table prices the OBSERVED model; the remaining
@@ -79,14 +81,19 @@ KIT_PYTHON = KIT_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else 
 TRANSPORT = "kong-native-anthropic"
 DEFAULT_MODEL = "claude-sonnet-4-6"  # PROBED OK on /v2/anthropic/v1/messages (kit, 2026-10-06)
 
-# Model ids evidenced on the native route, with the kit's evidence label
-# (kong-ai-gateway references/models.md and references/probe-log.md). Nothing else is accepted.
+# Model ids the native route is OBSERVED to serve (kong-ai-gateway references/probe-log.md,
+# plus this repo's completion-evidence/kong-live-probe). Nothing else is accepted. The kit's
+# CODE-only native ids (ET fallback roster: claude-sonnet-5, claude-opus-4-8, claude-opus-4-7)
+# are deliberately absent until a live probe shows the gateway accepts them.
 NATIVE_ROSTER = {
-    "claude-sonnet-4-6": "PROBED native small_text PASS 2026-10-06 (run fc4dfd14)",
-    "claude-haiku-4-5": "CODE native (ET fallback roster); PROBED routable on Unified only",
-    "claude-sonnet-5": "CODE native (ET fallback roster)",
-    "claude-opus-4-8": "CODE native (ET fallback roster)",
-    "claude-opus-4-7": "CODE native (ET fallback roster)",
+    "claude-sonnet-4-6": "PROBED native: kit small_text PASS 2026-10-06 (run fc4dfd14); "
+    "role calls SUCCESS 2026-10-13 (WIRING-RESULT.json)",
+}
+# Ids the native route refused live. Kept so a refusal names its evidence.
+NATIVE_REJECTED = {
+    "claude-haiku-4-5": "HTTP 400 'property model validation failed: matches none of the enum "
+    "values' on /v2/anthropic, 2026-10-13, request f2c338128953ca05ed84677558b20f2f "
+    "(WIRING-RESULT.json shape C); routable on the Unified route only",
 }
 ROLE_MODELS = {role: DEFAULT_MODEL for role in PROMPTS}
 BUDGET_GUARDS = ("on", "off")
@@ -180,14 +187,19 @@ def price_usage(model, usage, prices):
 
 def role_models(overrides=None, default=DEFAULT_MODEL):
     """The full per-role model map; ValueError on an unknown role or an unevidenced model id."""
-    if default not in NATIVE_ROSTER:
-        raise ValueError(f"model {default!r} is not on the evidenced native roster")
+
+    def check(model, where):
+        if model not in NATIVE_ROSTER:
+            refused = NATIVE_REJECTED.get(model)
+            detail = f" (refused live: {refused})" if refused else ""
+            raise ValueError(f"model {model!r} {where}is not on the observed native roster{detail}")
+
+    check(default, "")
     models = {role: default for role in PROMPTS}
     for role, model in dict(overrides or {}).items():
         if role not in PROMPTS:
             raise ValueError(f"unknown role {role!r} in model map")
-        if model not in NATIVE_ROSTER:
-            raise ValueError(f"model {model!r} for {role} is not on the evidenced native roster")
+        check(model, f"for {role} ")
         models[role] = model
     return models
 

@@ -140,9 +140,9 @@ def run_shape(spec, scratch):
                 k: worker["error"].get(k) for k in ("status", "via", "request_id", "hint")
             }
         text = worker.get("text")
-        row["worker"]["text_starts_with_fence"] = isinstance(text, str) and text.lstrip().startswith(
-            "```"
-        )
+        row["worker"]["text_starts_with_fence"] = isinstance(
+            text, str
+        ) and text.lstrip().startswith("```")
     if roles.receipts:
         receipt = roles.receipts[0]
         row["receipt"] = {k: receipt.get(k) for k in RECEIPT_KEEP}

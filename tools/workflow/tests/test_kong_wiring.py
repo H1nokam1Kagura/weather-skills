@@ -26,6 +26,7 @@ from tools.workflow.kong_roles import (
     DEFAULT_MODEL,
     KIT_PYTHON,
     KIT_ROOT,
+    NATIVE_REJECTED,
     NATIVE_ROSTER,
     KongOutcomeUnknown,
     KongRoles,
@@ -36,6 +37,14 @@ from tools.workflow.review_evidence import text_hash
 
 ANSWER = {"verdict": "PASS", "binding_hash": "h", "scope": "data-replay"}
 FENCED = "```json\n" + json.dumps(ANSWER) + "\n```"
+# A second roster id for exercising the map mechanism; no cheaper id is served natively.
+CHEAP = "claude-test-cheap"
+
+
+@pytest.fixture
+def cheap(monkeypatch):
+    monkeypatch.setitem(NATIVE_ROSTER, CHEAP, "test fixture, not a gateway id")
+    return CHEAP
 
 
 def envelope(**changes):
@@ -214,8 +223,7 @@ def test_default_map_uses_the_probed_native_model_for_every_role():
     assert NATIVE_ROSTER[DEFAULT_MODEL].startswith("PROBED")
 
 
-def test_role_model_is_sent_and_recorded_per_role(tmp_path):
-    cheap = "claude-haiku-4-5"
+def test_role_model_is_sent_and_recorded_per_role(tmp_path, cheap):
     process = Process(envelope(model=cheap), envelope())
     agent = kong(tmp_path, process, models={"verifier": cheap})
     agent.ask("verifier", {})
@@ -228,11 +236,23 @@ def test_role_model_is_sent_and_recorded_per_role(tmp_path):
 
 @pytest.mark.parametrize(
     "models",
-    [{"verifier": "claude-opus-5-5"}, {"verifier": "gpt-5.6-sol"}, {"not-a-role": DEFAULT_MODEL}],
+    [
+        {"verifier": "claude-opus-5-5"},
+        {"verifier": "gpt-5.6-sol"},
+        {"verifier": "claude-sonnet-5"},
+        {"not-a-role": DEFAULT_MODEL},
+    ],
 )
 def test_unevidenced_model_or_unknown_role_is_rejected(tmp_path, models):
     with pytest.raises(ValueError):
         kong(tmp_path, Process(), models=models)
+
+
+def test_model_refused_live_names_its_evidence(tmp_path):
+    with pytest.raises(ValueError, match="refused live") as caught:
+        kong(tmp_path, Process(), models={"compiler": "claude-haiku-4-5"})
+    assert "f2c338128953ca05ed84677558b20f2f" in str(caught.value)
+    assert "claude-haiku-4-5" in NATIVE_REJECTED and "claude-haiku-4-5" not in NATIVE_ROSTER
 
 
 def test_observed_model_mismatch_is_recorded(tmp_path):
@@ -293,13 +313,13 @@ def test_guard_configuration_is_explicit_and_unmixed(tmp_path):
         kong(tmp_path, Process(), budget_guard="maybe")
 
 
-def test_provenance_states_guard_off_and_spent_semantics(tmp_path):
-    agent = kong(tmp_path, Process(), models={"router": "claude-haiku-4-5"})
+def test_provenance_states_guard_off_and_spent_semantics(tmp_path, cheap):
+    agent = kong(tmp_path, Process(), models={"router": cheap})
     value = agent.provenance()
     assert value["budget_guard"] == "off" and value["cost_tracking"] == "untracked"
     assert "not a measure of Kong spend" in value["spent_field_semantics"]
-    assert value["models"]["router"] == "claude-haiku-4-5"
-    assert set(value["model_evidence"]) == {DEFAULT_MODEL, "claude-haiku-4-5"}
+    assert value["models"]["router"] == cheap
+    assert set(value["model_evidence"]) == {DEFAULT_MODEL, cheap}
     assert value["output_normalization"] == OUTPUT_NORMALIZATION and value["retries"] == 0
 
 
@@ -315,22 +335,23 @@ def parser_and_args(*argv):
     return parser, parser.parse_args(list(argv))
 
 
-def test_cli_kong_transport_requires_ack_and_valid_models():
+def test_cli_kong_transport_requires_ack_and_valid_models(cheap):
     assert cli.kong_transport(*parser_and_args()) is None
     transport = cli.kong_transport(
         *parser_and_args(
-            "--roles", "kong", "--kong-data-policy-ack", "--role-model", "router=claude-haiku-4-5"
+            "--roles", "kong", "--kong-data-policy-ack", "--role-model", f"router={cheap}"
         )
     )
     assert transport["budget_guard"] == "off" and transport["max_tokens"] == 4096
-    assert transport["models"]["router"] == "claude-haiku-4-5"
+    assert transport["models"]["router"] == cheap
     assert transport["models"]["reviewer"] == DEFAULT_MODEL
     for argv in (
         ("--roles", "kong"),
         ("--roles", "kong", "--kong-data-policy-ack", "--role-model", "router"),
         ("--roles", "kong", "--kong-data-policy-ack", "--role-model", "router=gpt-5.6-sol"),
         ("--roles", "kong", "--kong-data-policy-ack", "--kong-max-tokens", "0"),
-        ("--role-model", "router=claude-haiku-4-5"),
+        ("--roles", "kong", "--kong-data-policy-ack", "--role-model", "router=claude-haiku-4-5"),
+        ("--role-model", f"router={cheap}"),
         ("--kong-data-policy-ack",),
     ):
         with pytest.raises(SystemExit):
@@ -351,10 +372,10 @@ class RecordingController:
         self.events.append((kind, details))
 
 
-def test_cli_records_provenance_and_resume_inherits_transport(tmp_path):
+def test_cli_records_provenance_and_resume_inherits_transport(tmp_path, cheap):
     transport = cli.kong_transport(
         *parser_and_args(
-            "--roles", "kong", "--kong-data-policy-ack", "--role-model", "verifier=claude-haiku-4-5"
+            "--roles", "kong", "--kong-data-policy-ack", "--role-model", f"verifier={cheap}"
         )
     )
     (tmp_path / "proc").mkdir()

@@ -43,8 +43,16 @@
 - Kong/agents/lifecycle tests: 126 passed (test_kong_wiring, test_kong_roles, test_agents,
   test_runner_lifecycle_v27). Full suite run pending.
 
-## Live Kong smoke
-- About to run (3 shapes, one call each, no retry).
+## Live Kong smoke (DONE 2026-10-13T14:41Z; do NOT rerun)
+- 3 calls, one each, no retry -> completion-evidence/kong-live-probe/WIRING-RESULT.json.
+- A verifier/plain (sonnet-4-6): SUCCESS, fenced output normalized (output_form json_fence).
+- B reviewer/review_evidence (sonnet-4-6): SUCCESS, dispatch receipt block present.
+- C planner/review_evidence_request (haiku-4-5): UNKNOWN, HTTP 400 at gateway model validator
+  (request f2c338128953ca05ed84677558b20f2f). Diagnosed once: native route rejects haiku-4-5.
+  Follow-up: haiku moved to NATIVE_REJECTED; roster = sonnet-4-6 only; tests use a fixture id.
+  Shape C prompt suffix NOT proven live (would need a new call; not retried by rule).
+- 310ab9b kept: it only follows intentional changes (shared fence rule, shared prompt variants,
+  construction-time roster check).
 
 ## Open questions
 - Approval for the one-line out-of-set update to tools/workflow/tests/test_agents.py.
