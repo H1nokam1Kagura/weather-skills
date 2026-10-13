@@ -392,3 +392,48 @@ def test_weekly_rates_probability(tmp_path, indicator_fn):
             "--rule",
             "tp sum 10d <= 9",
         )
+
+
+@pytest.mark.parametrize(
+    "units, scale", [("mm day-1", 1), ("mm hr-1", 1 / 24), ("kg m-2 s-1", 1 / 86400)]
+)
+def test_precip_threshold_is_mm_whatever_the_stored_rate_units(
+    tmp_path, indicator_fn, units, scale
+):
+    ds = _daily(8)
+    ds["precip"].values[:, 0, 0] = np.array([0, 0, 12, 12, 12, 0, 0, 0]) * scale
+    ds["precip"].attrs["units"] = units
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(indicator_fn, "-i", str(src), "-o", str(out), "--rule", "precip sum 3d >= 20")
+    assert _cell(out).values[:6].tolist() == [0.0, 1.0, 1.0, 1.0, 0.0, 0.0]
+
+
+def test_temperature_threshold_is_celsius(tmp_path, indicator_fn):
+    ds = _daily(4, name="t2m")
+    ds["t2m"].values[:, 0, 0] = [300.0, 310.0, 300.0, 310.0]  # 26.85 / 36.85 deg C
+    ds["t2m"].attrs.update(units="K", standard_name="air_temperature")
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(indicator_fn, "-i", str(src), "-o", str(out), "--rule", "t2m mean 1d >= 35")
+    assert _cell(out).values.tolist() == [0.0, 1.0, 0.0, 1.0]
+
+
+def test_detect_first_is_unknown_after_a_gap(tmp_path, indicator_fn):
+    """Missing days before the first observed onset could hide an earlier one."""
+    ds = _daily(10)
+    ds["precip"].values[:, 0, 0] = [np.nan, np.nan, 0, 0, 10, 10, 10, 0, 0, 0]
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        indicator_fn,
+        "-i",
+        str(src),
+        "-o",
+        str(out),
+        "--rule",
+        "precip sum 3d >= 20",
+        "--detect",
+        "first",
+    )
+    assert np.isnat(_cell(out, "indicator_time").values)

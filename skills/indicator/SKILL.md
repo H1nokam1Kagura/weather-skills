@@ -38,10 +38,12 @@ when you want a mean onset day-of-year.
 
 **Daily or weekly input.** A whole-day step from `data_interval` or the
 spacing on `time` / `step` (e.g. `1 day`, `7 day`). Windows are `Nd` or `Nw`
-and must be a whole number of steps (`1w`, not `10d`, on weekly data). Precip
-rates are multiplied by the step, so thresholds are mm per step: weekly
-`mm day-1` becomes mm per week. Daily `mm day-1` rates and `mm` totals are
-treated as equivalent. Classic forecasts may stay on `step`;
+and must be a whole number of steps (`1w`, not `10d`, on weekly data).
+Thresholds are in standard units whatever the input stores: precipitation in
+**mm per step** (a rate in any units — `mm day-1`, `mm hr-1`, `kg m-2 s-1` —
+is multiplied by the step, so weekly data is mm per week; `mm` totals are used
+as is) and air temperature in **°C** (K input is converted). Other variables
+are compared as stored. Classic forecasts may stay on `step`;
 run `step-to-time` when you need calendar onset dates. Restrict the search
 window with `select` first (MAM/OND is not built in).
 
@@ -74,7 +76,9 @@ Applied in order. Default: 0/1 `indicator`, all dims kept.
 
 1. `--cumulative` — once True, stay True (“has it happened yet?”).
 2. `--detect first|any` — collapse time. `first` writes `indicator_time`
-   (NaT if none) and `indicator_doy` on a datetime axis. `any` writes 0/1.
+   and `indicator_doy` (datetime axis only); both are NaT/NaN when the rule is
+   never true **or** when missing data comes before the first true day (a gap
+   could hide an earlier onset, so the date is unknown, not later). `any` writes 0/1.
    Mutex with `--cumulative`. `--detect first` cannot combine with
    `--probability` (dates are not 0/1).
 3. `--probability` — mean over `number`. Variable `probability` (`units="1"`).
