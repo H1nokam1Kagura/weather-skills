@@ -335,3 +335,15 @@ def test_refuses_one_overlapping_pair_among_clean_bins(tmp_path, convert_to_tota
     with pytest.raises(SystemExit) as exc:
         run_skill(convert_to_totals, "-i", str(src), "-o", str(tmp_path / "out.zarr"))
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("method", ["max", "min"])
+def test_refuses_weekly_extremes(tmp_path, aggregate, convert_to_totals, method):
+    """A weekly max of 10 mm/day is not a 70 mm weekly total."""
+    ds = _daily({"precip": (1.0, PRECIP_RATE)}, n_days=7)
+    src = write_zarr(ds, tmp_path / "daily.zarr")
+    agg = tmp_path / "agg.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(agg), "--period", "weekly", "--method", method)
+    with pytest.raises(SystemExit) as exc:
+        run_skill(convert_to_totals, "-i", str(agg), "-o", str(tmp_path / "out.zarr"))
+    assert exc.value.code == 2

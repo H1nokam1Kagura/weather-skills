@@ -612,6 +612,20 @@ def aggregate(
             raise UsageError(
                 "--window is a step count; irregular axes with CF bounds require --period"
             )
+        if interval is not None and ds.sizes[dim] > 1:
+            import numpy as np
+            import pandas as pd
+
+            spacing = pd.to_timedelta(np.diff(np.asarray(ds[dim].values)))
+            native = pd.Timedelta(
+                seconds=float(parse_aggregation_period(interval).to("s").magnitude)
+            )
+            if (spacing != native).any():
+                # A window of N rows across a gap spans more than N intervals.
+                raise UsageError(
+                    f"--window counts rows and {dim!r} has missing rows (spacing other "
+                    f"than {interval}); use --period, which counts them against coverage"
+                )
         out = roll_and_agg(ds, window, dim, method, align=align, stride=stride_val)
         n = out.sizes.get(dim, 0)
         if n:

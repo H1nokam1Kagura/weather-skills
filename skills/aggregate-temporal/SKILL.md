@@ -54,10 +54,13 @@ Exactly one of `--period` or `--window` is required.
   Mutex with `--window`. Use a duration when you need a window the named
   periods do not cover (e.g. 21-day totals from half-hourly IMERG).
 - `--window` — rolling window length in axis steps. Mutex with `--period`.
-  Refused when the input has CF `{dim}_bounds` (use `--period`).
+  Refused when the input has CF `{dim}_bounds`, or missing rows (spacing
+  other than `data_interval`): N rows across a gap span more than N
+  intervals. Use `--period`, which counts missing rows against coverage.
 - `--align` — with `--window`: label placement `left` (default), `right`, or `center`.
 - `--stride` — with `--window`: integer subsample step, or a date stride (`day`, `week`, `month`, `year`, or weekday names like `Monday`).
-- `--method` — reducer: `mean` (default), `max`, `min`. There is no `sum`; totals are a separate skill.
+- `--method` — reducer: `mean` (default), `max`, `min`. There is no `sum`; totals are a separate skill,
+  and only a `mean` converts to a total (a weekly max × 7 days is not a weekly total).
 - `--variable`, `-v` — repeatable; restricts aggregation to the named data variable(s).
 - `--time-dim` — override; by default uses `time` if present, else `step`.
 - `--end-time` — with `--period` on a `time` axis: exclusive right edge of
@@ -96,8 +99,9 @@ On the time/step axis:
   (0–1). Incomplete bins are kept. A native sample counts only if it has
   **finite data** (all-NaN unpublished forecast leads do not). A persistent
   spatial hole (land mask) does not mark the time as missing. Uniform:
-  finite count / (`aggregation_period / native spacing`). Irregular CF
-  bounds: finite covered duration / window. convert-to-totals
+  finite count / (`aggregation_period / native spacing`); a missing row
+  counts against its own bin. Irregular CF bounds: finite covered duration /
+  window. convert-to-totals
   `--min-coverage` (default 1.0) drops incomplete bins.
 
 Inputs with CF `{dim}_bounds` are duration-weighted (`sum(rate × dt) / sum(dt)`), so a 1-day cell and a 5-day cell in the same week are not equal-weighted. `--window` is a step count and is refused on those axes.

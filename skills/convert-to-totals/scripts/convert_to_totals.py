@@ -6,6 +6,8 @@
 # ///
 """Convert precipitation rates to period totals using stamped aggregation_period."""
 
+import re
+
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.units import (
     AGGREGATION_COVERAGE_COORD,
@@ -107,6 +109,12 @@ def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
             raise UsageError(
                 f"variable {name!r} has no {AGGREGATION_PERIOD_ATTR!r}; "
                 "run aggregate-temporal first"
+            )
+        cell_methods = str(da.attrs.get("cell_methods", ""))
+        if re.search(r":\s*(maximum|minimum)\b", cell_methods):
+            raise UsageError(
+                f"variable {name!r} is an extreme, not a mean rate "
+                f"(cell_methods {cell_methods!r}); only a mean rate x period is a total"
             )
         if dim is not None:
             assert_nonoverlapping_intervals(ds, dim, period)

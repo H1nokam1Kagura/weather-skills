@@ -14,6 +14,7 @@ from conftest import (
     write_zarr,
 )
 from weather_skills_core.provenance import load_history
+from weather_skills_core.units import AGGREGATION_COVERAGE_COORD
 
 
 @pytest.fixture(scope="module")
@@ -502,3 +503,46 @@ def test_partial_grid_cell_is_nan(tmp_path, aggregate):
     assert np.isnan(weekly[0, 0])
     assert weekly[1, 1] == pytest.approx(2.0)
     assert int(np.isnan(weekly).sum()) == 2
+
+
+def _daily_with_gap(stamp_interval):
+    """Two weeks of daily 1 mm/day with no row at all for 2026-01-05."""
+    days = np.array([d for d in range(14) if d != 4])
+    times = (np.datetime64("2026-01-01", "ns") + days.astype("timedelta64[D]")).astype(
+        "datetime64[ns]"
+    )
+    attrs = {"units": "mm day-1", "standard_name": "lwe_precipitation_rate"}
+    if stamp_interval:
+        attrs["data_interval"] = "1 day"
+    return xr.Dataset(
+        {"precip": (("time", "latitude", "longitude"), np.ones((days.size, 1, 1)), attrs)},
+        coords={"time": times, "latitude": [1.0], "longitude": [10.0]},
+    )
+
+
+@pytest.mark.parametrize("stamp_interval", [True, False])
+def test_missing_row_lowers_coverage_of_its_own_week(tmp_path, aggregate, stamp_interval):
+    """A missing day is missing coverage, never a neighbour stretched over the gap."""
+    src = write_zarr(_daily_with_gap(stamp_interval), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(out), "--period", "weekly")
+    ds = xr.open_zarr(out, consolidated=True)
+    assert ds[AGGREGATION_COVERAGE_COORD].values.tolist() == pytest.approx([6 / 7, 1.0])
+
+
+@pytest.mark.parametrize("stamp_interval", [True, False])
+def test_window_refused_across_missing_rows(tmp_path, aggregate, stamp_interval):
+    src = write_zarr(_daily_with_gap(stamp_interval), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            aggregate,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "out.zarr"),
+            "--window",
+            "7",
+            "--stride",
+            "7",
+        )
+    assert exc.value.code == 2

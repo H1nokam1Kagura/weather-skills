@@ -17,7 +17,9 @@ amount (`mm`)**.
 Intended only before plot/export. Converts precipitation-rate variables only
 (recognized by CF `standard_name`, or a precip name such as `precip`, `tp`,
 `pr`, or `total_precipitation` with rate units). Other variables
-(temperature, pressure, wind, …) pass through unchanged. Refuses precip totals
+(temperature, pressure, wind, …) pass through unchanged. Only a mean rate
+converts: a weekly `max`/`min` (`cell_methods` maximum/minimum) is refused,
+since the wettest day × 7 is not a weekly total. Refuses precip totals
 (`cell_methods` with `sum`, or amount units) — multiplying an amount by the
 period would double-count.
 
@@ -44,9 +46,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/convert_to_totals.py \
   (0–1). Default **1.0** (every native sample has finite data).
   `aggregate-temporal` keeps incomplete bins and only stamps coverage; this
   flag is what filters them. All-NaN unpublished forecast leads stamp
-  coverage 0 and are dropped at the default. A 21-day bin that only has 90%
-  of the expected finite slots fails at the default; pass `0.6` to allow it.
-  If no intervals remain, the skill errors.
+  coverage 0 and are dropped at the default. Below 1.0, an incomplete bin's
+  mean rate is multiplied by the full period, so the missing days are filled
+  with that mean — an estimate, not an observed total. If no intervals remain,
+  the skill errors.
 - `--variable`, `-v` — limit to named precipitation variables (default: every
   precipitation-rate variable). Naming a variable that is not precipitation
   exits non-zero; with no `--variable` and no precipitation rate in the input,
