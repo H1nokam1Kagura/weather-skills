@@ -256,8 +256,10 @@ def verify(controller, stop_at_first=False):
     checked.append("admission")
     changed, error = guarded(
         "source_check",
-        lambda: record_for(c.admission, c.source) != c.admission_record
-        or admission_identity(c.admission_record) != c.admission_hash,
+        lambda: (
+            record_for(c.admission, c.source) != c.admission_record
+            or admission_identity(c.admission_record) != c.admission_hash
+        ),
     )
     if error is not None:
         fail("admission", error)
@@ -358,7 +360,9 @@ def verify(controller, stop_at_first=False):
     if c.binding and c.current_binding() != c.binding:
         fail(
             "binding",
-            Refused("plan or review binding changed", gate="review_binding", reason="stale_binding"),
+            Refused(
+                "plan or review binding changed", gate="review_binding", reason="stale_binding"
+            ),
         )
     return {"checked_items": checked, "failed_items": failed, "refusals": refusals}
 
@@ -438,31 +442,49 @@ def new_decision(request, attribution, override, interruption):
     return record
 
 
-def check_operator_record(controller, record_id, interruption):
-    """Consult the operator ledger by its stable hook; absent hook -> no operator resume."""
-    consult = getattr(controller, "consult_operator_ledger", None)
-    if consult is None:
-        return "operator_record:ledger_unavailable"
-    if record_id is None:
-        return "operator_record:missing"
-    found = consult(
-        {
-            "point": "resume_request",
-            "action": "resume",
-            "operator_record_id": record_id,
-            "interruption_index": interruption["index"] if interruption else None,
-        }
-    )
-    if not (
-        isinstance(found, dict)
-        and found.get("record_id") == record_id
-        and found.get("action") == "resume"
-        and found.get("accepted") is True
-        and found.get("source") == "operator_ledger"
-        and found.get("speaker") == "user"
-    ):
-        return "operator_record:" + record_id
-    return None
+def operator_authorization(controller):
+    """The accepted user resume record_id the operator channel binds to this resume, or None.
+
+    Uses the operator channel's stable hook (Controller.operator_resume_authorization, which
+    reads the ledger at the before_resume boundary and hands each accepted record out once).
+    Returns (record_id, problem); an absent channel accepts no operator resume.
+    """
+    authorize = getattr(controller, "operator_resume_authorization", None)
+    if authorize is None:
+        return None, "operator_record:ledger_unavailable"
+    record_id = authorize()
+    if not isinstance(record_id, str) or not record_id:
+        return None, "operator_record:none_accepted"
+    return record_id, None
+
+
+def check_operator_record(controller, record_id):
+    """An operator_ledger request binds exactly the accepted record the channel hands out."""
+    bound, problem = operator_authorization(controller)
+    if problem:
+        return None, problem
+    if record_id is not None and record_id != bound:
+        return None, "operator_record:" + record_id
+    return bound, None
+
+
+def transition_request(state, request, result, reasons):
+    """controller_trace.transition_requests entry for an operator resume request (E10/E11):
+    the result is the controller's own resume decision, never the requester's claim."""
+    return {
+        "request": "resume",
+        "from_state": state,
+        "to_state": request.get("to_state"),
+        "requested_by": request.get("requested_by"),
+        "result": "ACCEPTED" if result == "ACCEPTED" else "REJECTED",
+        "requested_via": "resume_request",
+        "reasons": list(reasons),
+        **({"run_id": request["run_id"]} if "run_id" in request else {}),
+    }
+
+
+def is_operator_request(request):
+    return isinstance(request, dict) and request.get("requested_by") == "operator"
 
 
 def check_repair_binding(context, interruption):
@@ -510,7 +532,7 @@ def refusal_terminal(refusal):
     return {"outcome": outcome, "reason": reason, "failed_gate": gate}
 
 
-def record_refused(root, value, decision, refusal):
+def record_refused(root, value, decision, refusal, request=None):
     """REFUSED decision + terminal record, written durably on the checkpoint before raising."""
     book = ledger(value["context"])
     decision["index"] = len(book["resume"])
@@ -518,6 +540,15 @@ def record_refused(root, value, decision, refusal):
     event = _payload_event(root, value, "resume", record=detached(decision))
     decision["sequence"] = event["sequence"] if event else None
     book["resume"].append(decision)
+    if is_operator_request(request):
+        failed = decision["verification"]["failed_items"]
+        reasons = failed or ["override_refused" if decision["override_requested"] else "refused"]
+        record = transition_request(value["state"], request, "REJECTED", reasons)
+        requests = value["context"].setdefault("transition_requests", [])
+        record["sequence"] = len(requests) + 1
+        event = _payload_event(root, value, "transition_request", transition_request=dict(record))
+        record["event_seq"] = event["sequence"] if event else None
+        requests.append(record)
     terminal = refusal_terminal(refusal)
     mapping = {"source": "resume_refusal", "resume_index": decision["index"]}
     value["context"]["terminal"] = {**terminal, "mapping": mapping}
@@ -536,7 +567,7 @@ def record_refused(root, value, decision, refusal):
     )
 
 
-def record_accepted(controller, decision):
+def record_accepted(controller, decision, request=None):
     book = ledger(controller.context)
     counters = book["counters"]
     key = {
@@ -552,6 +583,13 @@ def record_accepted(controller, decision):
     event = controller.dispatch_event("resume", record=detached(decision))
     decision["sequence"] = event["sequence"] if event else None
     book["resume"].append(decision)
+    if is_operator_request(request):
+        record = transition_request(controller.state, request, "ACCEPTED", [])
+        requests = controller.context.setdefault("transition_requests", [])
+        record["sequence"] = len(requests) + 1
+        event = controller.dispatch_event("transition_request", transition_request=dict(record))
+        record["event_seq"] = event["sequence"] if event else None
+        requests.append(record)
     controller.checkpoint()
     return decision
 
@@ -677,7 +715,9 @@ def notify(controller, diagnosis):
     )
     book["stop"] = {"kind": "notify_and_wait", "notification_index": record["index"]}
     controller.checkpoint()
-    if record["emitted"]:
+    if not record["emitted"]:
+        return record
+    try:
         occurrence = sum(
             1 for n in book["operator_notifications"] if n["recorded"] and n["emitted"]
         )
@@ -691,6 +731,11 @@ def notify(controller, diagnosis):
                 "notification": detached(record),
             },
         )
+    finally:
+        # The operator channel's wait boundary, read only after recorded+emitted are durable.
+        consult = getattr(controller, "consult_operator_ledger", None)
+        if consult is not None:
+            consult("operator_notification")
     return record
 
 

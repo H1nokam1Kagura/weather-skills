@@ -334,9 +334,11 @@ class Controller:
                     "interruption:not_transient",
                     Refused("automatic resume needs a transient interruption", gate=verify),
                 )
-        elif initiated is None and value["resumes"] >= 2:
-            fail("resume_limit", exhausted)
+        # Legacy cap for an unattributed resume, applied below unless the operator channel
+        # binds an accepted user resume record to it (operator resumes are uncapped).
+        legacy_capped = initiated is None and value["resumes"] >= 2
         self = cls.__new__(cls)
+        self.resumes = value["resumes"]
         for key in (
             "state",
             "events",
@@ -462,16 +464,26 @@ class Controller:
             )
         if not failed and initiated == "operator_ledger":
             checked.append("operator_record")
-            problem = recovery.check_operator_record(
-                self, attribution["operator_record_id"], interruption
-            )
+            bound, problem = recovery.check_operator_record(self, attribution["operator_record_id"])
             if problem:
                 fail(problem, Refused("no accepted operator resume record", gate=verify))
+            else:
+                decision["operator_record_id"] = bound
+        elif not failed and initiated is None and override is None:
+            # An unattributed request becomes an operator_ledger resume only when the operator
+            # channel hands out an accepted user resume record for it (P-01).
+            bound, _ = recovery.operator_authorization(self)
+            if bound is not None:
+                decision["initiated_by"] = initiated = "operator_ledger"
+                decision["operator_record_id"] = bound
+                checked.append("operator_record")
         elif not failed and initiated == "evidenced_repair":
             checked.append("repair_binding")
             problem = recovery.check_repair_binding(self.context, interruption)
             if problem:
                 fail(problem, Refused("no evidenced mechanical repair to resume", gate=verify))
+        if legacy_capped and initiated is None:
+            fail("resume_limit", exhausted)
         decision["verification"] = {
             "verdict": "FAIL" if failed else "PASS",
             "checked_items": checked,
@@ -488,7 +500,7 @@ class Controller:
                 ),
             )
         if refusals:
-            recovery.record_refused(root, value, decision, refusals[0])
+            recovery.record_refused(root, value, decision, refusals[0], request)
             raise refusals[0]
         processes.total_seconds = value["total_seconds"]
         processes.deadline = min(
@@ -496,7 +508,7 @@ class Controller:
         )
         self.resumes = value["resumes"] + 1
         self.bind_process_events()
-        recovery.record_accepted(self, decision)  # dispatch 'resume' + checkpoint, durable
+        recovery.record_accepted(self, decision, request)  # resume event + checkpoint
         return self
 
     def dispatch_event(self, kind, **details):

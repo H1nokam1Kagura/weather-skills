@@ -15,8 +15,23 @@
 4. e2e_injections.py: interrupt mode harness_drop_model_connection raises classified ConnectionResetError/TimeoutError; accept pending null only when the durable checkpoint (read_checkpoint) observes null; keep legacy 'none'; defer after_role interrupts to after_role_committed on a real controller; after_operator_notification as opt-in known hook (flag) because test_schedule_dispatch_v27.py (not my file) asserts it is NOT_IMPLEMENTED.
 5. NEW tests/test_recovery_v27.py with P0 negative tests.
 
+## Resume session (2026-10-13, after network outage)
+- Coordinator integration note APPLIED (was uncommitted at outage, reviewed and kept):
+  (1) recovery.notify() calls consult_operator_ledger("operator_notification") after the
+  notification is durably recorded+emitted (in finally, after the hook);
+  (2) resume() binds Controller.operator_resume_authorization() -> initiated_by=operator_ledger
+  + operator_record_id (explicit operator_ledger requests must match the handed-out record;
+  unattributed requests are upgraded when a record is handed out; legacy cap of 2 applies only
+  to still-unattributed resumes, itemized after verification);
+  (3) requested_by=operator resume requests write controller_trace.transition_requests
+  ACCEPTED/REJECTED (shape matches operator_ledger.submit_transition_request, requested_via
+  resume_request) with a transition_request dispatch event.
+- test_recovery_v27.py written; two assertions updated to follow (2)/(3).
+- ruff format applied to changed files; ruff check clean.
+- Per coordinator: full suite NOT run here (coordinator runs it at merge).
+
 ## Test status
-- Existing suite run in progress after runner changes; test_recovery_v27.py not yet written.
+- See final commit message / report.
 
 ## Open questions
 - test_schedule_dispatch_v27.py asserts after_operator_notification is unproduced; flipping the default needs that file updated by main session.

@@ -664,7 +664,9 @@ class InjectionHooks:
         observed condition; null additionally requires reading the durable checkpoint.
         """
         if point not in {"after_transition", "after_role_committed"}:
-            raise UnsupportedInjection("midprocess hard-crash injection needs a process-start adapter")
+            raise UnsupportedInjection(
+                "midprocess hard-crash injection needs a process-start adapter"
+            )
         durable = self._durable(controller)
         wanted = payload.get("checkpoint_state", event.get("state"))
         if payload.get("pending_operation") == "none":
