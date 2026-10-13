@@ -2,6 +2,7 @@
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -34,13 +35,17 @@ def test_direct_stop_observer_errors_cannot_prevent_owned_cleanup():
     def broken_observer(*args, **kwargs):
         raise RuntimeError("Injected direct observer failure")
 
+    # Neither actor may exit on its own: each blocks on stdin, so the root is alive when
+    # taskkill reaches it and the decoy outlives the stop until it is released below.
     with (
         subprocess.Popen(
-            [ACTOR_PYTHON, "-c", "import time; time.sleep(3)"],
+            [ACTOR_PYTHON, "-c", "import sys; sys.stdin.read()"],
+            stdin=subprocess.PIPE,
             creationflags=subprocess.CREATE_NO_WINDOW,
         ) as root,
         subprocess.Popen(
-            [ACTOR_PYTHON, "-c", "import time; time.sleep(4)"],
+            [ACTOR_PYTHON, "-c", "import sys; sys.stdin.read()"],
+            stdin=subprocess.PIPE,
             creationflags=subprocess.CREATE_NO_WINDOW,
         ) as decoy,
     ):
@@ -57,6 +62,7 @@ def test_direct_stop_observer_errors_cannot_prevent_owned_cleanup():
         assert receipt["exhaustive_signal_capture"] is False
         assert decoy.poll() is None
         assert observe(decoy.pid) == decoy_identity
+        decoy.stdin.close()  # Release the decoy only now: it must outlive the stop.
         assert decoy.wait(timeout=5) == 0
         print(
             json.dumps(
@@ -95,20 +101,26 @@ def test_direct_observer_cannot_mask_original_backend_failure(monkeypatch):
 
 @pytest.mark.parametrize("mode", ["guard", "observer_error", "exception_unregistered"])
 def test_actual_stop_with_owned_child_and_decoy(tmp_path, monkeypatch, mode):
-    child_file = tmp_path / "child.json"
-    child_code = "import time; time.sleep(4)"
+    # Owned actors live until the controller stops them: neither may exit on its own
+    # (the root must not exit when taskkill /T kills its child first). The child PID is
+    # announced over loopback, so no file can be read half-written or while locked.
+    announce = socket.create_server(("127.0.0.1", 0))
+    port = announce.getsockname()[1]
+    child_code = "import time; time.sleep(60)"
     parent_code = (
-        "import subprocess,sys,pathlib; "
+        "import socket,subprocess,sys,time; "
         f"p=subprocess.Popen([sys.executable,'-c',{child_code!r}]); "
-        f"pathlib.Path({str(child_file)!r}).write_text(str(p.pid)); p.wait()"
+        f"s=socket.create_connection(('127.0.0.1',{port})); s.sendall(str(p.pid).encode()); "
+        "s.close(); time.sleep(60)"
     )
     monkeypatch.setattr(processes, "free_gib", lambda: 10.0)
     observer = ControllerProcessObserver()
-    real_sleep = time.sleep
     with ExitStack() as stack:
+        stack.enter_context(announce)
         decoy = stack.enter_context(
             subprocess.Popen(
-                [ACTOR_PYTHON, "-c", "import time; time.sleep(6)"],
+                [ACTOR_PYTHON, "-c", "import sys; sys.stdin.read()"],
+                stdin=subprocess.PIPE,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         )
@@ -118,12 +130,26 @@ def test_actual_stop_with_owned_child_and_decoy(tmp_path, monkeypatch, mode):
         def callback(event, proc, details):
             result = observer(event, proc, details)
             if event == "launch":
-                deadline = time.monotonic() + 2
-                while not child_file.exists():
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError("Owned child announcement missing")
-                    real_sleep(0.01)
-                child_pid = int(child_file.read_text())
+                announce.settimeout(0.05)
+                # Hang ceiling only (~10x the worst loaded gap observed); never a timing assumption.
+                ceiling = time.monotonic() + 120
+                while True:
+                    try:
+                        conn, _ = announce.accept()
+                        break
+                    except TimeoutError:
+                        if proc.poll() is not None:
+                            raise RuntimeError(
+                                "Owned root exited before announcing its child"
+                            ) from None
+                        if time.monotonic() > ceiling:
+                            raise RuntimeError("Owned root never announced its child") from None
+                with conn:
+                    conn.settimeout(None)  # Root sends then closes: EOF ends the read.
+                    data = b""
+                    while chunk := conn.recv(64):
+                        data += chunk
+                child_pid = int(data)
                 child_receipt["identity"] = observe(child_pid)
                 kernel, _, handle = stack.enter_context(_handle(child_pid))
                 child_receipt.update(kernel=kernel, handle=handle)
@@ -142,11 +168,15 @@ def test_actual_stop_with_owned_child_and_decoy(tmp_path, monkeypatch, mode):
 
             monkeypatch.setattr(processes.time, "sleep", interrupted_sleep)
 
+        # Guard modes trip on the first monitor pass (timeout=0). The interruption mode must
+        # reach the injected sleep instead, so no time budget may preempt it however long
+        # actor start-up takes: its budgets are unbounded, not merely generous.
+        unbounded = mode == "exception_unregistered"
         controller = processes.Processes(
             tmp_path,
-            timeout=10 if mode == "exception_unregistered" else 0,
+            timeout=float("inf") if unbounded else 0,
             ram_floor=0,
-            total_seconds=15,
+            total_seconds=float("inf") if unbounded else 15,
             observer=callback,
         )
         expected = RuntimeError if mode == "exception_unregistered" else Refused
@@ -177,6 +207,7 @@ def test_actual_stop_with_owned_child_and_decoy(tmp_path, monkeypatch, mode):
         assert code.value != 259  # Independent retained handle confirms child exited.
         assert decoy.poll() is None
         assert observe(decoy.pid) == decoy_identity
+        decoy.stdin.close()  # Release the decoy only now: it must outlive every stop.
         assert decoy.wait(timeout=7) == 0
         print(
             json.dumps(
