@@ -7,6 +7,7 @@
 """Convert precipitation rates to period totals using stamped aggregation_period."""
 
 import re
+import sys
 
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.units import (
@@ -69,7 +70,10 @@ def _sum_cell_methods_dim(da, dim: str | None) -> str:
     "--min-coverage",
     type=float,
     default=1.0,
-    help="Drop intervals whose aggregation_coverage is below this (0–1). Default 1.0.",
+    help=(
+        "Drop intervals whose aggregation_coverage is below this (0–1). Default 1.0; "
+        "lower only when a task explicitly wants estimated totals from incomplete bins."
+    ),
 )
 @weather_skill.argument("--time-dim")
 def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
@@ -131,7 +135,18 @@ def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
         out[name] = plain
         out[name].attrs = attrs
     if AGGREGATION_COVERAGE_COORD in out.coords:
-        out = out.drop_vars(AGGREGATION_COVERAGE_COORD)
+        partial = int((out[AGGREGATION_COVERAGE_COORD] < 1).sum())
+        if partial == 0:
+            out = out.drop_vars(AGGREGATION_COVERAGE_COORD)
+        else:
+            # Kept so the output records which bins are estimates.
+            print(
+                f"WARNING: {partial} incomplete bin(s) converted (--min-coverage "
+                f"{min_coverage}); their missing samples are filled with the bin's mean "
+                f"rate, so those totals are estimates, not observed totals. See "
+                f"{AGGREGATION_COVERAGE_COORD!r} in the output.",
+                file=sys.stderr,
+            )
     return out
 
 

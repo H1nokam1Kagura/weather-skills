@@ -138,7 +138,7 @@ def test_convert_to_totals_after_select_collapsed_time(tmp_path, convert_to_tota
     assert result["precip"].attrs[AGGREGATION_PERIOD_ATTR] == "7 day"
 
 
-def test_convert_min_coverage_default_rejects_partial(tmp_path, convert_to_totals):
+def test_convert_min_coverage_default_rejects_partial(tmp_path, convert_to_totals, capsys):
     ds = make_gridded(n_time=1, fill=1.0)
     ds["precip"].attrs[AGGREGATION_PERIOD_ATTR] = "21 day"
     ds["precip"].attrs[DATA_INTERVAL_ATTR] = "1 day"
@@ -162,6 +162,9 @@ def test_convert_min_coverage_default_rejects_partial(tmp_path, convert_to_total
     result = xr.open_zarr(out, consolidated=True)
     assert result["precip"].attrs["units"] == "mm"
     assert result["precip"].values == pytest.approx(21.0)
+    # The estimated bin stays identifiable, and the run says so.
+    assert result[AGGREGATION_COVERAGE_COORD].values.tolist() == pytest.approx([0.9])
+    assert "estimates, not observed totals" in capsys.readouterr().err
 
 
 def test_convert_refuses_overlapping_21_day(tmp_path, convert_to_totals):

@@ -1,6 +1,6 @@
 ---
 name: convert-to-totals
-description: Convert precipitation rates to period totals (mm) by multiplying by the stamped aggregation_period — calendar months by their real length. Use as a terminal step before plotting, after aggregate-temporal. Converts precipitation only; other variables pass through unchanged. Refuses precip totals (would double-count) and overlapping intervals — run select on time/step first. Default --min-coverage 1.0.
+description: Convert precipitation rates to period totals (mm) by multiplying by the stamped aggregation_period — calendar months by their real length. Use as a terminal step before plotting, after aggregate-temporal. Converts precipitation only; other variables pass through unchanged. Refuses precip totals (would double-count) and overlapping intervals — run select on time/step first. Default --min-coverage 1.0; lowering it fills missing days with the bin mean and is rarely appropriate.
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/convert_to_totals.py *)
@@ -46,10 +46,13 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/convert_to_totals.py \
   (0–1). Default **1.0** (every native sample has finite data).
   `aggregate-temporal` keeps incomplete bins and only stamps coverage; this
   flag is what filters them. All-NaN unpublished forecast leads stamp
-  coverage 0 and are dropped at the default. Below 1.0, an incomplete bin's
-  mean rate is multiplied by the full period, so the missing days are filled
-  with that mean — an estimate, not an observed total. If no intervals remain,
-  the skill errors.
+  coverage 0 and are dropped at the default. **Keep the default.** Lower it
+  only in the rare case a task explicitly asks for totals from incomplete
+  bins: an incomplete bin's mean rate is multiplied by the full period, so the
+  missing days are filled with that mean — an estimate, not an observed total.
+  When that happens the skill warns on stderr and keeps `aggregation_coverage`
+  on the output so the estimated bins stay identifiable; say so when reporting
+  those totals. If no intervals remain, the skill errors.
 - `--variable`, `-v` — limit to named precipitation variables (default: every
   precipitation-rate variable). Naming a variable that is not precipitation
   exits non-zero; with no `--variable` and no precipitation rate in the input,
@@ -88,6 +91,7 @@ period. In that case conversion uses the stamped `aggregation_period` alone;
 - Precip `long_name` → `Total precipitation` (replaces product/rate names; the
   quantity is now a period total). Rate-like `GRIB_name` is rewritten the same way.
 - `cell_methods` → `{dim}: sum`.
-- `aggregation_coverage` removed (coverage gate already applied).
+- `aggregation_coverage` removed when every converted bin is complete; kept
+  when `--min-coverage` below 1.0 let incomplete (estimated) bins through.
 - `aggregation_period` **kept** so plotters can crop the nested precip
   color scale (daily / week / month / season windows).
