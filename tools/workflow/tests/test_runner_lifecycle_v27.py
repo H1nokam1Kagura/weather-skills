@@ -224,6 +224,22 @@ def message(call):
     return ast.unparse(call.args[0]) if call.args else ""
 
 
+def canonical(text):
+    """Render a pinned message in this interpreter's ast.unparse form.
+
+    ast.unparse's quote choice for f-strings changed within 3.12 patch releases (3.12.3 on CI
+    renders f'..{d['k']}..', 3.12.13 renders f"..{d['k']}.."), so a pinned source expression is
+    re-parsed and re-unparsed on both sides of the census comparison. Two keys still match only
+    if they are the identical text or parse to the identical expression; plain-text constant
+    messages that are not expressions pass through unchanged.
+    """
+    try:
+        node = ast.parse(text, mode="eval").body
+    except SyntaxError:
+        return text
+    return text if isinstance(node, ast.Constant) else ast.unparse(node)
+
+
 # ------------------------------------------------------------------ item 1: census + terminal
 
 
@@ -258,9 +274,12 @@ def test_static_census_every_refused_raise_carries_a_declared_gate():
             if module in DECLARED:
                 untagged_declared.add((module, message(call)))
             else:
-                outside[(module, message(call))] += 1
+                outside[(module, canonical(message(call)))] += 1
     assert untagged_declared == PENDING_PROTECTED
-    unexpected = outside - OUTSIDE_INVENTORY
+    expected = Counter()
+    for (module, text), count in OUTSIDE_INVENTORY.items():
+        expected[(module, canonical(text))] += count
+    unexpected = outside - expected
     assert not unexpected, f"new untagged raise(s): {sorted(unexpected)}"
     for module in {module for module, _ in outside}:
         assert module in runner.CALL_SITE_GATES, f"no call-site gate documented for {module}"
