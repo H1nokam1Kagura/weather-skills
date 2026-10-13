@@ -60,6 +60,9 @@ def unit_convert(ds, variable, to_units, to_standard, standard_name, **kwargs):
     out = ds.copy()
     for name in names:
         da = ds[name]
+        # Inputs open with pint units on the data, not in attrs.
+        if da.pint.units is not None:
+            da = da.pint.dequantify()
         src_units = da.attrs.get("units")
         if not (isinstance(src_units, str) and src_units.strip()):
             raise UsageError(f"variable '{name}' has no units attr")

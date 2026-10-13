@@ -51,3 +51,14 @@ def test_unit_convert_requires_target(tmp_path, unit_convert):
     with pytest.raises(SystemExit) as exc:
         run_skill(unit_convert, "-i", str(src), "-o", str(out))
     assert exc.value.code == 2
+
+
+def test_unit_convert_to_units(tmp_path, unit_convert):
+    src = write_zarr(make_gridded(fill=24.0), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+
+    run_skill(unit_convert, "-i", str(src), "-o", str(out), "--to-units", "mm hr-1")
+
+    ds = xr.open_zarr(out, consolidated=True)
+    assert ds["precip"].values == pytest.approx(1.0)
+    assert units_equal(ds["precip"].attrs["units"], "mm hr-1")
