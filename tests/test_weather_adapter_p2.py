@@ -46,6 +46,8 @@ IMPLEMENTED = {
     "CAP-REPAIR-CONFIG",
     "CAP-DISPOSABLE-FIXTURE",
     "CAP-GATE-REPORT-PATCH",
+    "CAP-SCHEDULE-DEPENDENCIES",
+    "CAP-REVIEW-APPROVAL-HOOK",
 }
 
 
@@ -69,11 +71,17 @@ def test_implemented_capabilities_gain_exactly_the_p2_set():
     assert implemented == IMPLEMENTED
     for absent in ("CAP-SIGNAL-CAPTURE", "CAP-RUN-PROVENANCE", "CAP-PROFILE", "CAP-BOUND-SOURCES"):
         assert absent not in implemented
-    assert {CAPABILITY_METHODS[c] for c in IMPLEMENTED - {"CAP-NOT-IMPLEMENTED"}} == {
+    frozen_table = {c for c in IMPLEMENTED if c in CAPABILITY_METHODS} - {"CAP-NOT-IMPLEMENTED"}
+    assert {CAPABILITY_METHODS[c] for c in frozen_table} == {
         "controller_goal_hash",
         "configure_repair",
         "prepare_fixture",
         "patch_gate_report",
+    }
+    # Capabilities absent from the frozen table are admitted only via extension_methods.
+    assert IMPLEMENTED - frozen_table - {"CAP-NOT-IMPLEMENTED"} == {
+        "CAP-SCHEDULE-DEPENDENCIES",
+        "CAP-REVIEW-APPROVAL-HOOK",
     }
     assert not hasattr(WeatherAdapter, "capture_bound_sources")
     assert WeatherAdapter().can_run() is False

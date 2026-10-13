@@ -138,7 +138,7 @@ def test_real_simkit_blocks_required_caps_before_run_case():
 def test_manifest_only_extension_name_is_not_implemented():
     adapter = WeatherAdapter()
     declared = copy.deepcopy(adapter.extension_methods)
-    assert declared == {"CAP-BOUND-SOURCES": "capture_bound_sources"}
+    assert declared["CAP-BOUND-SOURCES"] == "capture_bound_sources"
     assert not hasattr(adapter, "capture_bound_sources")
     assert "CAP-BOUND-SOURCES" not in adapter.implemented_capabilities()
     assert adapter.implemented_capabilities() == {
@@ -147,7 +147,43 @@ def test_manifest_only_extension_name_is_not_implemented():
         "CAP-REPAIR-CONFIG",
         "CAP-DISPOSABLE-FIXTURE",
         "CAP-GATE-REPORT-PATCH",
+        "CAP-SCHEDULE-DEPENDENCIES",
+        "CAP-REVIEW-APPROVAL-HOOK",
     }
+
+
+def test_dependency_dispatch_methods_report_observed_dispositions_only():
+    from adapter_support.weather_adapter import AdapterRefusal
+    from tools.workflow.e2e_injections import InjectionHooks
+
+    schedule = [
+        {
+            "id": "approve-1",
+            "hook": "after_review_approval",
+            "operation": "replace_role_output",
+            "selector": "reviewer/1",
+            "payload": {},
+            "requires": [],
+        },
+        {
+            "id": "after-approve",
+            "hook": "after_transition",
+            "operation": "replace_role_output",
+            "selector": "REVIEW_APPROVED/1",
+            "payload": {},
+            "requires": ["approve-1"],
+        },
+    ]
+    hooks = InjectionHooks({"injection_schedule": schedule})
+    adapter = WeatherAdapter()
+    report = adapter.dispatch_dependent_schedule(hooks)
+    assert [e["disposition"] for e in report["entries"]] == ["INACTIVE", "INACTIVE"]
+    assert {e["reason"] for e in report["entries"]} == {"boundary_not_reached"}
+    approval = adapter.dispatch_after_accepted_review(hooks)
+    assert [e["id"] for e in approval["entries"]] == ["approve-1"]
+    assert approval["accepted_approvals"] == 0
+    with pytest.raises(AdapterRefusal):
+        adapter.dispatch_dependent_schedule(object())
 
 
 def test_definition_symbol_resolves_only_exact_reviewed_whole_registry(tmp_path, monkeypatch):

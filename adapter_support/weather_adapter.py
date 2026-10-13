@@ -33,7 +33,11 @@ class WeatherAdapter(Adapter):
     # Extend introspection for the frozen capability absent from base Simkit's
     # method table. A manifest string is never an implementation. No placeholder
     # method is provided: this capability remains unavailable in this adapter.
-    extension_methods = {"CAP-BOUND-SOURCES": "capture_bound_sources"}
+    extension_methods = {
+        "CAP-BOUND-SOURCES": "capture_bound_sources",
+        "CAP-SCHEDULE-DEPENDENCIES": "dispatch_dependent_schedule",
+        "CAP-REVIEW-APPROVAL-HOOK": "dispatch_after_accepted_review",
+    }
 
     def implemented_capabilities(self):
         implemented = super().implemented_capabilities()
@@ -170,6 +174,29 @@ class WeatherAdapter(Adapter):
             "raw_report_record": "process manager process record (unpatched stdout)",
             "delivered_report_record": "after_tool process consumed by read_gate",
             "records": json.loads(json.dumps(hooks.records[first:])),
+        }
+
+    def dispatch_dependent_schedule(self, hooks):
+        """CAP-SCHEDULE-DEPENDENCIES: per-entry dispositions from InjectionHooks.
+
+        Delivery happens at the controller's own hook points; this only returns
+        the observed DELIVERED / INACTIVE / NOT_IMPLEMENTED / HARNESS_ERROR record.
+        """
+        if not isinstance(hooks, InjectionHooks):
+            raise AdapterRefusal("the existing InjectionHooks delivery path is required")
+        return hooks.dependency_report()
+
+    def dispatch_after_accepted_review(self, hooks):
+        """CAP-REVIEW-APPROVAL-HOOK: dispositions of after_review_approval entries.
+
+        The controller emits the hook only after a durably committed accepted
+        approval; rejected or uncommitted reviews consume no occurrence.
+        """
+        report = self.dispatch_dependent_schedule(hooks)
+        return {
+            "capability": "CAP-REVIEW-APPROVAL-HOOK",
+            "accepted_approvals": report["accepted_approvals"],
+            "entries": [e for e in report["entries"] if e["hook"] == "after_review_approval"],
         }
 
     def resolve_review_diagnostic_symbol(self, controller, symbol, reviewer_occurrence):
