@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 import numpy as np
 import xarray as xr
@@ -55,9 +55,7 @@ def stage_fixture(
     writes remain incomplete and are never retried in place. Units are retained
     exactly; no physical-unit conversion, resampling or NaN filling occurs.
     """
-    source, destination, harness = map(
-        _local_path, (source, destination, harness_directory)
-    )
+    source, destination, harness = map(_local_path, (source, destination, harness_directory))
     if not source.is_file():
         raise ValueError("source must be a local NetCDF file")
     if destination.exists() or harness.exists():
@@ -111,12 +109,14 @@ def stage_fixture(
         float(original.latitude.min()),
         float(original.longitude.max()),
     ]
-    history = [{
-        "skill": "chirps-fetch",
-        "version": presented_fetch_version,
-        "args": {"start_time": str(dates[0]), "end_time": str(dates[-1]), "bbox": bounds},
-        "input": None,
-    }]
+    history = [
+        {
+            "skill": "chirps-fetch",
+            "version": presented_fetch_version,
+            "args": {"start_time": str(dates[0]), "end_time": str(dates[-1]), "bbox": bounds},
+            "input": None,
+        }
+    ]
     staged = original.copy(deep=True)
     staged.attrs.update(
         weather_skills_source="chirps",
@@ -143,11 +143,18 @@ def stage_fixture(
         "generator_provenance": provenance,
         "actual_fetch_executed": False,
         "source": {"path": str(source), "sha256": source_hash, "format": "NetCDF"},
-        "output": {"path": str(destination), "sha256": _tree_hash(destination),
-                   "format": "Zarr v2", "tag": "synthetic"},
+        "output": {
+            "path": str(destination),
+            "sha256": _tree_hash(destination),
+            "format": "Zarr v2",
+            "tag": "synthetic",
+        },
         "conversion": "Decoded values, dtypes, coordinates, NaNs and units retained exactly",
-        "presentation_only": {"owner_ruling": "UC-12", "added_attributes": [
-            "weather_skills_source", "weather_skills_history"], "history": history},
+        "presentation_only": {
+            "owner_ruling": "UC-12",
+            "added_attributes": ["weather_skills_source", "weather_skills_history"],
+            "history": history,
+        },
         "validation": "storage preservation only; no admission or scientific correctness claim",
     }
     with (harness / "manifest.json").open("x", encoding="utf-8") as stream:

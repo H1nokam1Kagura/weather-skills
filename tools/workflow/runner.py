@@ -7,8 +7,7 @@ import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import policy
-from . import review_evidence
+from . import policy, review_evidence
 from .admission import identity as admission_identity
 from .admission import record_for
 from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
@@ -113,7 +112,9 @@ class Controller:
         if dispatch_evidence_mode:
             self.context["dispatch_evidence"] = {
                 "schema": "workflow.dispatch-evidence/1",
-                "run_id": str(uuid.uuid4()), "sequence": 0, "occurrences": {},
+                "run_id": str(uuid.uuid4()),
+                "sequence": 0,
+                "occurrences": {},
             }
         if review_evidence_mode:
             self.context["review_evidence"] = {
@@ -275,9 +276,14 @@ class Controller:
         if context is None:
             return None
         context["sequence"] += 1
-        record = {"schema": context["schema"], "run_id": context["run_id"],
-                  "sequence": context["sequence"], "resume_phase": self.resumes,
-                  "kind": kind, **details}
+        record = {
+            "schema": context["schema"],
+            "run_id": context["run_id"],
+            "sequence": context["sequence"],
+            "resume_phase": self.resumes,
+            "kind": kind,
+            **details,
+        }
         self.save(f"dispatch-event-{context['sequence']:06}.json", record)
         return record
 
@@ -338,8 +344,12 @@ class Controller:
             occurrence = context["occurrences"].get(role, 0) + 1
             context["occurrences"][role] = occurrence
             attempt = self.dispatch_event(
-                "dispatch_attempt", attempt_id=str(uuid.uuid4()), role=role,
-                occurrence=occurrence, input_hash=digest(payload), state=self.state,
+                "dispatch_attempt",
+                attempt_id=str(uuid.uuid4()),
+                role=role,
+                occurrence=occurrence,
+                input_hash=digest(payload),
+                state=self.state,
             )
             self.pending["attempt_id"] = attempt["attempt_id"]
             # Native Roles consumes this context; custom roles may leave correlation unknown.
@@ -358,9 +368,13 @@ class Controller:
             try:
                 if attempt is not None:
                     observed = getattr(self.roles, "dispatch_observation", None)
-                    self.dispatch_event("dispatch_failed", attempt_id=attempt["attempt_id"],
-                                        error_type=type(exc).__name__, outcome="UNKNOWN",
-                                        invocation_observation=observed)
+                    self.dispatch_event(
+                        "dispatch_failed",
+                        attempt_id=attempt["attempt_id"],
+                        error_type=type(exc).__name__,
+                        outcome="UNKNOWN",
+                        invocation_observation=observed,
+                    )
                 if captured:
                     name, snapshot = captured
                     snapshot["dispatch_status"] = "FAILED"
@@ -372,8 +386,9 @@ class Controller:
                 self.checkpoint()
             except BaseException as observation_error:
                 try:
-                    exc.add_note("Dispatch failure evidence incomplete: "
-                                 + type(observation_error).__name__)
+                    exc.add_note(
+                        "Dispatch failure evidence incomplete: " + type(observation_error).__name__
+                    )
                 except BaseException:
                     pass
             raise
@@ -389,25 +404,33 @@ class Controller:
             raise Refused("independent role invocation evidence is incomplete")
         if attempt is not None:
             receipt = self.roles.receipts[-1]
-            if (receipt.get("input_hash") != attempt["input_hash"]
-                    or receipt.get("output_hash") != digest(answer)):
+            if receipt.get("input_hash") != attempt["input_hash"] or receipt.get(
+                "output_hash"
+            ) != digest(answer):
                 raise Refused("dispatch receipt binding mismatch")
             receipt["controller_dispatch"] = {
-                "attempt_id": attempt["attempt_id"], "sequence": context["sequence"] + 1,
-                "occurrence": attempt["occurrence"], "resume_phase": self.resumes,
+                "attempt_id": attempt["attempt_id"],
+                "sequence": context["sequence"] + 1,
+                "occurrence": attempt["occurrence"],
+                "resume_phase": self.resumes,
             }
             self.dispatch_event(
-                "dispatch_returned", attempt_id=attempt["attempt_id"],
-                invocation_id=receipt.get("invocation_id"), receipt=receipt,
+                "dispatch_returned",
+                attempt_id=attempt["attempt_id"],
+                invocation_id=receipt.get("invocation_id"),
+                receipt=receipt,
             )
         if captured:
             name, snapshot = captured
             receipt = self.roles.receipts[-1]
-            if (receipt.get("input_hash") != snapshot["input_hash"]
-                    or receipt.get("output_hash") != digest(answer)
-                    or digest(payload) != snapshot["input_hash"]
-                    or receipt.get("dispatch", {}).get("stdin_hash") != snapshot["stdin_hash"]
-                    or not receipt.get("invocation_id") or not receipt.get("session_id")):
+            if (
+                receipt.get("input_hash") != snapshot["input_hash"]
+                or receipt.get("output_hash") != digest(answer)
+                or digest(payload) != snapshot["input_hash"]
+                or receipt.get("dispatch", {}).get("stdin_hash") != snapshot["stdin_hash"]
+                or not receipt.get("invocation_id")
+                or not receipt.get("session_id")
+            ):
                 raise Refused("review dispatch receipt binding mismatch")
             snapshot["dispatch_status"] = "RETURNED"
             snapshot["receipt"] = json.loads(json.dumps(receipt))
@@ -499,13 +522,13 @@ class Controller:
 
     def current_binding(self):
         bound = {
-                "request": self.request_hash,
-                "goal": self.goal,
-                "plan": self.plan,
-                "build": self.build_hash,
-                "source": self.source_hash,
-                "admission": self.admission_hash,
-            }
+            "request": self.request_hash,
+            "goal": self.goal,
+            "plan": self.plan,
+            "build": self.build_hash,
+            "source": self.source_hash,
+            "admission": self.admission_hash,
+        }
         if "review_evidence" in self.context:
             evidence = self.context["review_evidence"]
             bound["review_evidence"] = {
@@ -636,8 +659,8 @@ class Controller:
         docs = {
             name: (
                 (self.repo / "skills" / name / "SKILL.md").read_bytes().decode("utf-8")
-                if "review_evidence" in self.context else
-                (self.repo / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+                if "review_evidence" in self.context
+                else (self.repo / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
             )
             for name in ("onset-date", "plot-onset", "check-artifact", "verify-run")
         }

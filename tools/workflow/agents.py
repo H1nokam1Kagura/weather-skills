@@ -57,7 +57,8 @@ class Roles:
         if dispatch_context is not None:
             self.dispatch_observation = {
                 "attempt_id": dispatch_context["attempt_id"],
-                "invocation_id": invocation, "process_boundary": "NOT_ENTERED",
+                "invocation_id": invocation,
+                "process_boundary": "NOT_ENTERED",
             }
         prompt = PROMPTS[role]
         if role in {"planner", "repairer"} and "review_evidence_request" in payload:
@@ -105,8 +106,9 @@ class Roles:
             stdin,
         )
         if dispatch_context is not None:
-            self.dispatch_observation.update(process_boundary="RETURNED",
-                                             exit_code=result["exit_code"])
+            self.dispatch_observation.update(
+                process_boundary="RETURNED", exit_code=result["exit_code"]
+            )
         if result["exit_code"] != 0:
             raise Refused(f"{role} CLI failed: {result['stderr'][-500:]}")
         try:

@@ -37,14 +37,20 @@ class ProcessStub:
                 value = {
                     "schema": review_evidence.SCHEMA,
                     "plan": value,
-                    "plan_claims": [{
-                        "claim_id": "planner-emitted-claim",
-                        "text": source["text"].splitlines()[0],
-                        "derivable": False,
-                        "citations": [{"source_id": source["source_id"],
-                                       "source_hash": source["source_hash"],
-                                       "quote": source["text"].splitlines()[0]}],
-                    }],
+                    "plan_claims": [
+                        {
+                            "claim_id": "planner-emitted-claim",
+                            "text": source["text"].splitlines()[0],
+                            "derivable": False,
+                            "citations": [
+                                {
+                                    "source_id": source["source_id"],
+                                    "source_hash": source["source_hash"],
+                                    "quote": source["text"].splitlines()[0],
+                                }
+                            ],
+                        }
+                    ],
                 }
                 if self.change == "missing_claims":
                     del value["plan_claims"]
@@ -58,16 +64,22 @@ class ProcessStub:
         else:
             if self.change == "failed_dispatch":
                 raise RuntimeError("stub dispatch failed")
-            value = {"verdict": "APPROVE", "binding_hash": payload["binding_hash"],
-                     "findings": []}
+            value = {"verdict": "APPROVE", "binding_hash": payload["binding_hash"], "findings": []}
             if self.change == "wrong_binding":
                 value["binding_hash"] = "wrong"
             if self.change == "reject_once" and not payload.get("prior_review"):
                 value["verdict"] = "REJECT"
-        return {"exit_code": 0, "stderr": "", "stdout": json.dumps({
-            "session_id": "stub-session-" + str(len(self.calls)),
-            "total_cost_usd": 0.0, "result": json.dumps(value),
-        })}
+        return {
+            "exit_code": 0,
+            "stderr": "",
+            "stdout": json.dumps(
+                {
+                    "session_id": "stub-session-" + str(len(self.calls)),
+                    "total_cost_usd": 0.0,
+                    "result": json.dumps(value),
+                }
+            ),
+        }
 
 
 def make_controller(tmp_path, monkeypatch, mode=True, change=None, hook=None):
@@ -80,16 +92,22 @@ def make_controller(tmp_path, monkeypatch, mode=True, change=None, hook=None):
         )
     registry = repo / "skills/onset-date/references/onset_definitions.toml"
     registry.parent.mkdir()
-    original = Path(__file__).resolve().parents[3] / "skills/onset-date/references/onset_definitions.toml"
+    original = (
+        Path(__file__).resolve().parents[3] / "skills/onset-date/references/onset_definitions.toml"
+    )
     registry.write_bytes(original.read_bytes())
     source = tmp_path / "source.zarr"
     source.write_bytes(b"stub source only; not scientific data")
     root = tmp_path / "run"
     root.mkdir()
-    monkeypatch.setattr(runner, "build_manifest", lambda base: {
-        str(p.relative_to(base)): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in sorted(Path(base).rglob("SKILL.md"))
-    })
+    monkeypatch.setattr(
+        runner,
+        "build_manifest",
+        lambda base: {
+            str(p.relative_to(base)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(Path(base).rglob("SKILL.md"))
+        },
+    )
     monkeypatch.setattr(runner, "preflight", lambda *args: ({}, {}))
     monkeypatch.setattr(agents.shutil, "which", lambda _: "never-launched-claude")
     process = ProcessStub(mode, change)
@@ -101,8 +119,9 @@ def make_controller(tmp_path, monkeypatch, mode=True, change=None, hook=None):
         if point == "after_transition" and event["state"] == "REVIEW_APPROVED":
             raise ReviewReached
 
-    c = runner.Controller(repo, request(), source, root, process, roles,
-                          hooks=boundary, review_evidence_mode=mode)
+    c = runner.Controller(
+        repo, request(), source, root, process, roles, hooks=boundary, review_evidence_mode=mode
+    )
     monkeypatch.setattr(c, "inspect_source", lambda: {"stub_metadata": True})
     monkeypatch.setattr(c, "check", lambda *args: {"stub_check": True})
     return c, process
@@ -116,7 +135,7 @@ def test_actual_dispatch_captures_original_reviewed_bytes_and_binding(tmp_path, 
     c, process = make_controller(tmp_path, monkeypatch)
     with pytest.raises(ReviewReached):
         c._run()
-    snapshot, = snapshots(c)
+    (snapshot,) = snapshots(c)
     actual = process.calls[-1]
     assert snapshot["stdin"] == actual["stdin"]
     assert snapshot["stdin_hash"] == review_evidence.text_hash(actual["stdin"])
@@ -131,7 +150,9 @@ def test_actual_dispatch_captures_original_reviewed_bytes_and_binding(tmp_path, 
     assert snapshot["receipt"]["invocation_id"]
     prompt = actual["command"][actual["command"].index("--system-prompt") + 1]
     assert snapshot["receipt"]["dispatch"]["system_prompt"] == prompt
-    assert snapshot["receipt"]["dispatch"]["system_prompt_hash"] == review_evidence.text_hash(prompt)
+    assert snapshot["receipt"]["dispatch"]["system_prompt_hash"] == review_evidence.text_hash(
+        prompt
+    )
     envelope = snapshot["review_evidence"]
     assert envelope["binding_hash"] == c.current_binding()
     assert envelope["plan_hash"] == digest(expected_plan(GOAL))
@@ -158,10 +179,12 @@ def test_full_original_registry_is_delivered_before_planning_and_review(tmp_path
     planner = process.calls[3]["payload"]
     reviewer = process.calls[4]["payload"]
     source_id = review_evidence.DEFINITION_SOURCE_ID
-    planner_source, = [s for s in planner["review_evidence_request"]["sources"]
-                       if s["source_id"] == source_id]
-    reviewer_source, = [s for s in reviewer["review_evidence"]["sources"]
-                        if s["source_id"] == source_id]
+    (planner_source,) = [
+        s for s in planner["review_evidence_request"]["sources"] if s["source_id"] == source_id
+    ]
+    (reviewer_source,) = [
+        s for s in reviewer["review_evidence"]["sources"] if s["source_id"] == source_id
+    ]
     assert planner_source == reviewer_source
     assert reviewer_source["text"].encode("utf-8") == raw
     assert reviewer_source["source_hash"] == "sha256:" + hashlib.sha256(raw).hexdigest()
@@ -189,8 +212,9 @@ def test_missing_or_unreadable_registry_cannot_reach_planner(tmp_path, monkeypat
     assert snapshots(c) == []
 
 
-@pytest.mark.parametrize("change", ["wrong_binding", "missing_claims", "missing_source",
-                                   "wrong_source_hash"])
+@pytest.mark.parametrize(
+    "change", ["wrong_binding", "missing_claims", "missing_source", "wrong_source_hash"]
+)
 def test_invalid_identity_cannot_gain_accepted_capture(tmp_path, monkeypatch, change):
     c, _ = make_controller(tmp_path, monkeypatch, change=change)
     with pytest.raises(Refused):
@@ -223,7 +247,7 @@ def test_failed_dispatch_has_attempt_without_success_receipt(tmp_path, monkeypat
     c, _ = make_controller(tmp_path, monkeypatch, change="failed_dispatch")
     with pytest.raises(RuntimeError, match="stub dispatch failed"):
         c._run()
-    snapshot, = snapshots(c)
+    (snapshot,) = snapshots(c)
     assert snapshot["dispatch_status"] == "FAILED"
     assert snapshot["accepted_review"] is False
     assert "receipt" not in snapshot
@@ -252,7 +276,7 @@ def test_checkpoint_failure_cannot_create_accepted_review_capture(tmp_path, monk
     monkeypatch.setattr(c, "checkpoint", fail_commit)
     with pytest.raises(OSError, match="checkpoint failure"):
         c._run()
-    snapshot, = snapshots(c)
+    (snapshot,) = snapshots(c)
     assert snapshot["accepted_review"] is False
     assert "committed_transition" not in snapshot
     assert json.loads((c.root / "checkpoint.json").read_text())["state"] == "PLAN_VALIDATED"
@@ -281,9 +305,16 @@ def test_legacy_plan_and_binding_unchanged(tmp_path, monkeypatch):
     assert snapshots(c) == []
     assert "review_evidence" not in process.calls[-1]["payload"]
     assert "review_evidence_request" not in process.calls[-2]["payload"]
-    assert c.binding == digest({"request": c.request_hash, "goal": c.goal,
-                               "plan": c.plan, "build": c.build_hash,
-                               "source": c.source_hash, "admission": c.admission_hash})
+    assert c.binding == digest(
+        {
+            "request": c.request_hash,
+            "goal": c.goal,
+            "plan": c.plan,
+            "build": c.build_hash,
+            "source": c.source_hash,
+            "admission": c.admission_hash,
+        }
+    )
 
 
 def test_resume_retains_run_and_occurrence_and_refuses_changed_capture(tmp_path, monkeypatch):

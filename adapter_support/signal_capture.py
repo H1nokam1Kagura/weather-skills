@@ -10,8 +10,8 @@ import os
 import subprocess
 import time
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
 from ctypes import wintypes
+from dataclasses import asdict, dataclass
 
 
 class ObservationError(RuntimeError):
@@ -41,7 +41,10 @@ def _api():
     kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
     kernel.TerminateProcess.restype = wintypes.BOOL
     native.NtQueryInformationProcess.argtypes = [
-        wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
+        wintypes.HANDLE,
+        wintypes.ULONG,
+        ctypes.c_void_p,
+        wintypes.ULONG,
         ctypes.POINTER(wintypes.ULONG),
     ]
     native.NtQueryInformationProcess.restype = wintypes.LONG
@@ -64,9 +67,12 @@ def _handle(pid, terminate=False):
 def _identity(kernel, native, handle, pid):
     class Basic(ctypes.Structure):
         _fields_ = [
-            ("exit_status", wintypes.LONG), ("peb", ctypes.c_void_p),
-            ("affinity", ctypes.c_size_t), ("priority", wintypes.LONG),
-            ("pid", ctypes.c_size_t), ("parent", ctypes.c_size_t),
+            ("exit_status", wintypes.LONG),
+            ("peb", ctypes.c_void_p),
+            ("affinity", ctypes.c_size_t),
+            ("priority", wintypes.LONG),
+            ("pid", ctypes.c_size_t),
+            ("parent", ctypes.c_size_t),
         ]
 
     basic = Basic()
@@ -77,8 +83,13 @@ def _identity(kernel, native, handle, pid):
     if status < 0 or basic.pid != pid:
         raise ObservationError("Parent identity query failed")
     created, exited, kernel_time, user_time = (wintypes.FILETIME() for _ in range(4))
-    if not kernel.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited),
-                                  ctypes.byref(kernel_time), ctypes.byref(user_time)):
+    if not kernel.GetProcessTimes(
+        handle,
+        ctypes.byref(created),
+        ctypes.byref(exited),
+        ctypes.byref(kernel_time),
+        ctypes.byref(user_time),
+    ):
         raise ObservationError("Creation identity query failed")
     exit_code = wintypes.DWORD()
     if not kernel.GetExitCodeProcess(handle, ctypes.byref(exit_code)) or exit_code.value != 259:

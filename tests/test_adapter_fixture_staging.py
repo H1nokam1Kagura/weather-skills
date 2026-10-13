@@ -17,11 +17,18 @@ def source(tmp_path):
     values[:, 1, 1] = np.nan
     ds = xr.Dataset(
         {"precip": (("time", "latitude", "longitude"), values, {"units": "mm day-1"})},
-        coords={"time": np.arange("2026-01-01", "2026-01-31", dtype="datetime64[D]")
-                .astype("datetime64[ns]"),
-                "latitude": np.array([1.05, 1.0]), "longitude": np.array([30.0, 30.05])},
-        attrs={"dataset": "chirps", "source_lineage": "chirps-fetch",
-               "title": "CHIRPS daily precipitation (cached subset)"},
+        coords={
+            "time": np.arange("2026-01-01", "2026-01-31", dtype="datetime64[D]").astype(
+                "datetime64[ns]"
+            ),
+            "latitude": np.array([1.05, 1.0]),
+            "longitude": np.array([30.0, 30.05]),
+        },
+        attrs={
+            "dataset": "chirps",
+            "source_lineage": "chirps-fetch",
+            "title": "CHIRPS daily precipitation (cached subset)",
+        },
     )
     path = tmp_path / "fixture.nc"
     ds.to_netcdf(path, engine="scipy")
@@ -29,10 +36,13 @@ def source(tmp_path):
 
 
 def stage(source, tmp_path, **overrides):
-    args = dict(source=source, destination=tmp_path / "staged.zarr",
-                harness_directory=tmp_path / "harness",
-                generator_provenance={"synthetic": True, "generator": "unit-test-grid/1",
-                                      "seed": 17}, presented_fetch_version="0.0.2")
+    args = dict(
+        source=source,
+        destination=tmp_path / "staged.zarr",
+        harness_directory=tmp_path / "harness",
+        generator_provenance={"synthetic": True, "generator": "unit-test-grid/1", "seed": 17},
+        presented_fetch_version="0.0.2",
+    )
     args.update(overrides)
     return stage_fixture(**args)
 
@@ -74,12 +84,12 @@ def test_existing_destinations_refused_without_changes(source, tmp_path, existin
 
 def test_repeat_staging_refuses_and_preserves_output(source, tmp_path):
     first = stage(source, tmp_path)
-    before = {str(p): p.read_bytes() for p in (tmp_path / "staged.zarr").rglob("*")
-              if p.is_file()}
+    before = {str(p): p.read_bytes() for p in (tmp_path / "staged.zarr").rglob("*") if p.is_file()}
     with pytest.raises(FileExistsError):
         stage(source, tmp_path)
-    assert before == {str(p): p.read_bytes() for p in (tmp_path / "staged.zarr").rglob("*")
-                      if p.is_file()}
+    assert before == {
+        str(p): p.read_bytes() for p in (tmp_path / "staged.zarr").rglob("*") if p.is_file()
+    }
     assert json.loads((tmp_path / "harness/manifest.json").read_text()) == first
 
 
@@ -144,8 +154,11 @@ def test_real_source_inspector_accepts_staged_and_refuses_plain_conversion(sourc
     controller = object.__new__(Controller)
     controller.source = tmp_path / "staged.zarr"
     controller.admission = None
-    controller.goal = {"start_date": "2026-01-01", "end_date": "2026-01-30",
-                       "bbox": [1.05, 30.0, 1.0, 30.05]}
+    controller.goal = {
+        "start_date": "2026-01-01",
+        "end_date": "2026-01-30",
+        "bbox": [1.05, 30.0, 1.0, 30.05],
+    }
     metadata = controller.inspect_source()
     assert metadata["source"] == "chirps"
     assert metadata["units"] == "mm day-1"
@@ -167,8 +180,11 @@ def test_real_source_inspector_refuses_changed_request_and_wrong_lineage(source,
     controller = object.__new__(Controller)
     controller.source = tmp_path / "staged.zarr"
     controller.admission = None
-    controller.goal = {"start_date": "2026-01-02", "end_date": "2026-01-30",
-                       "bbox": [1.05, 30.0, 1.0, 30.05]}
+    controller.goal = {
+        "start_date": "2026-01-02",
+        "end_date": "2026-01-30",
+        "bbox": [1.05, 30.0, 1.0, 30.05],
+    }
     with pytest.raises(Refused, match="dates/cadence"):
         controller.inspect_source()
     controller.goal["start_date"] = "2026-01-01"

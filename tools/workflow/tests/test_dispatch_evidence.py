@@ -27,10 +27,17 @@ class Boundary:
             assert records[-1]["attempt_id"] == checkpoint["pending"]["attempt_id"]
         if self.failure:
             raise self.failure
-        return {"exit_code": 0, "stderr": "", "stdout": json.dumps({
-            "total_cost_usd": 0.1, "session_id": f"session-{self.calls}",
-            "result": '{"ok": true}',
-        })}
+        return {
+            "exit_code": 0,
+            "stderr": "",
+            "stdout": json.dumps(
+                {
+                    "total_cost_usd": 0.1,
+                    "session_id": f"session-{self.calls}",
+                    "result": '{"ok": true}',
+                }
+            ),
+        }
 
 
 def events(root):
@@ -46,8 +53,9 @@ def make(tmp_path, monkeypatch, enabled=True, failure=None):
     root.mkdir()
     process = Boundary(root, failure)
     roles = Roles(process, root, budget=5)
-    return Controller(tmp_path, request(), source, root, process, roles,
-                      dispatch_evidence_mode=enabled)
+    return Controller(
+        tmp_path, request(), source, root, process, roles, dispatch_evidence_mode=enabled
+    )
 
 
 def test_attempt_is_durable_before_invocation_and_correlates_success(tmp_path, monkeypatch):
@@ -76,7 +84,9 @@ def test_resume_continues_global_sequence_and_role_occurrence(tmp_path, monkeypa
 
 @pytest.mark.parametrize("error", [RuntimeError("lost envelope"), KeyboardInterrupt()])
 def test_failed_boundary_has_identity_no_fabricated_receipt_and_refuses_resume(
-    tmp_path, monkeypatch, error,
+    tmp_path,
+    monkeypatch,
+    error,
 ):
     c = make(tmp_path, monkeypatch, failure=error)
     with pytest.raises(type(error)):
@@ -101,31 +111,39 @@ def test_legacy_receipts_and_checkpoint_have_no_opt_in_fields(tmp_path, monkeypa
 
 def test_combined_modes_persist_identical_correlated_receipt(tmp_path, monkeypatch):
     from tools.workflow.tests.test_review_evidence import (
-        ReviewReached, make_controller, snapshots,
+        ReviewReached,
+        make_controller,
+        snapshots,
     )
 
     c, _ = make_controller(tmp_path, monkeypatch)
     c.context["dispatch_evidence"] = {
-        "schema": "workflow.dispatch-evidence/1", "run_id": "combined-test",
-        "sequence": 0, "occurrences": {},
+        "schema": "workflow.dispatch-evidence/1",
+        "run_id": "combined-test",
+        "sequence": 0,
+        "occurrences": {},
     }
     c.checkpoint()
     with pytest.raises(ReviewReached):
         c._run()
-    snapshot, = snapshots(c)
+    (snapshot,) = snapshots(c)
     receipt = c.roles.receipts[-1]
-    assert receipt["controller_dispatch"]["attempt_id"] == snapshot["controller_attempt"]["attempt_id"]
+    assert (
+        receipt["controller_dispatch"]["attempt_id"] == snapshot["controller_attempt"]["attempt_id"]
+    )
     assert snapshot["receipt"] == receipt
     returned = [r for r in events(c.root) if r["kind"] == "dispatch_returned"][-1]
     assert returned["receipt"] == receipt
-    role_file, = c.root.glob("role-*-reviewer.json")
+    (role_file,) = c.root.glob("role-*-reviewer.json")
     assert json.loads(role_file.read_text())["receipt"] == receipt
     assert read_checkpoint(c.root)["role_receipts"][-1] == receipt
 
 
 @pytest.mark.parametrize("failure_point", ["save", "checkpoint"])
 def test_failure_evidence_errors_preserve_primary_exception_and_pending(
-    tmp_path, monkeypatch, failure_point,
+    tmp_path,
+    monkeypatch,
+    failure_point,
 ):
     primary = RuntimeError("original dispatch failure")
     c = make(tmp_path, monkeypatch, failure=primary)

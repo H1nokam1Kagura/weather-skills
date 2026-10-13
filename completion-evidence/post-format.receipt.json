@@ -1,0 +1,34 @@
+{
+  "command": [
+    "C:/Users/neilha/weather-skills-demo/.venv/Scripts/python.exe",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "-p",
+    "no:cacheprovider",
+    "--basetemp",
+    "completion-evidence/post-format-tmp",
+    "tools/workflow/tests/test_dispatch_evidence.py",
+    "tools/workflow/tests/test_review_evidence.py",
+    "tools/workflow/tests/test_agents.py",
+    "tests/test_weather_adapter.py",
+    "completion-evidence/test_containment_canary.py",
+    "--junitxml",
+    "completion-evidence/post-format.xml"
+  ],
+  "cwd": "C:\\Users\\neilha\\.agentbus\\simkit-controller-snowyowl",
+  "platform": "Windows-11-10.0.26100-SP0",
+  "started_at": "2026-10-13T01:54:50.172821+00:00",
+  "source_pins": {
+    "tools\\workflow\\runner.py": "91b91f04f65313af8d1a6d3d7feb605d3656c67b04d872aec4f6ae8fb8f33c64",
+    "tools\\workflow\\agents.py": "37d0cc162e765b7ec04baaff6d8fb4535af5efffecf078544bd554b6ddaafac7",
+    "completion-evidence\\containment_canary.py": "f83efed42b72e80370c8ffffb2dbf59206dfd5c54064cee2825d131c87af2140"
+  },
+  "kind": "LOCAL_COMPONENT_CHECK_NOT_REGISTERED_CASE",
+  "status": "COMPLETED",
+  "exit_code": 0,
+  "elapsed_seconds": 60.10999999998603,
+  "source_unchanged": true
+}

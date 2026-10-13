@@ -44,8 +44,13 @@ def stop(proc, observe=None, reason="unspecified"):
                 pass  # Never replace the original backend/wait failure.
 
     mechanism = "taskkill_tree" if os.name == "nt" else "killpg"
-    emit("stop_request", reason=reason, mechanism=mechanism,
-         requested_root_pid=proc.pid, actual_target_set=None)
+    emit(
+        "stop_request",
+        reason=reason,
+        mechanism=mechanism,
+        requested_root_pid=proc.pid,
+        actual_target_set=None,
+    )
     try:
         if os.name == "nt":
             result = subprocess.run(
@@ -55,21 +60,33 @@ def stop(proc, observe=None, reason="unspecified"):
                 check=False,
             )
             backend_exit = result.returncode if observe is not None else None
-            backend_output = {
-                "stdout": result.stdout[:4096].decode("utf-8", errors="replace"),
-                "stderr": result.stderr[:4096].decode("utf-8", errors="replace"),
-                "truncated": len(result.stdout) > 4096 or len(result.stderr) > 4096,
-            } if observe is not None else None
+            backend_output = (
+                {
+                    "stdout": result.stdout[:4096].decode("utf-8", errors="replace"),
+                    "stderr": result.stderr[:4096].decode("utf-8", errors="replace"),
+                    "truncated": len(result.stdout) > 4096 or len(result.stderr) > 4096,
+                }
+                if observe is not None
+                else None
+            )
         else:
             os.killpg(proc.pid, signal.SIGKILL)
             backend_exit = None
             backend_output = None
-        emit("stop_backend_return", mechanism=mechanism,
-             backend_exit_code=backend_exit, backend_output=backend_output,
-             actual_target_set=None)
+        emit(
+            "stop_backend_return",
+            mechanism=mechanism,
+            backend_exit_code=backend_exit,
+            backend_output=backend_output,
+            actual_target_set=None,
+        )
     except BaseException as exc:
-        emit("stop_backend_error", mechanism=mechanism,
-             error_type=type(exc).__name__, actual_target_set=None)
+        emit(
+            "stop_backend_error",
+            mechanism=mechanism,
+            error_type=type(exc).__name__,
+            actual_target_set=None,
+        )
         annotate(exc)
         raise
     try:
@@ -80,8 +97,11 @@ def stop(proc, observe=None, reason="unspecified"):
         raise
     emit("stop_wait_return", exit_code=proc.returncode)
     if observe is not None:
-        return {"observer_errors": observer_errors, "backend_exit_code": backend_exit,
-                "exhaustive_signal_capture": False}
+        return {
+            "observer_errors": observer_errors,
+            "backend_exit_code": backend_exit,
+            "exhaustive_signal_capture": False,
+        }
 
 
 class Processes:
@@ -100,10 +120,14 @@ class Processes:
     def _observe(self, event, proc, **details):
         if self.observer is None:
             return
-        record = {"sequence": len(self.observation_events) + 1,
-                  "monotonic_ns": time.monotonic_ns(), "event": event,
-                  "requested_root_pid": proc.pid, "details": details,
-                  "exhaustive_signal_capture": False}
+        record = {
+            "sequence": len(self.observation_events) + 1,
+            "monotonic_ns": time.monotonic_ns(),
+            "event": event,
+            "requested_root_pid": proc.pid,
+            "details": details,
+            "exhaustive_signal_capture": False,
+        }
         self.observation_events.append(record)
         try:
             observation = self.observer(event, proc, details)

@@ -45,10 +45,12 @@ class ControllerProcessObserver:
                 except ObservationError:
                     result["unavailable_known_descendants"].append(asdict(identity))
                 else:
-                    result["known_descendants_observed_now"].append({
-                        "identity": asdict(identity),
-                        "ancestry": [asdict(item) for item in ancestry],
-                    })
+                    result["known_descendants_observed_now"].append(
+                        {
+                            "identity": asdict(identity),
+                            "ancestry": [asdict(item) for item in ancestry],
+                        }
+                    )
         # Backend return codes prove only command outcomes. They are never
         # promoted to a process target list or a fresh parent observation.
         return result

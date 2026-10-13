@@ -12,11 +12,17 @@ import pytest
 SIMKIT_ROOT = Path("C:/Users/neilha/.agentbus/simkit-v2_7-closure-20261011")
 sys.path.insert(0, str(SIMKIT_ROOT))
 
-from simkit.adapter import Adapter
-from simkit.runner import run
+from simkit.adapter import Adapter  # noqa: E402 - explicit pinned test/package bootstrap
+from simkit.runner import run  # noqa: E402 - explicit pinned test/package bootstrap
 
-from adapter_support.weather_adapter import EvidenceMappingError, WeatherAdapter
-from tools.workflow.tests.test_review_evidence import ReviewReached, make_controller
+from adapter_support.weather_adapter import (  # noqa: E402 - explicit pinned test/package bootstrap
+    EvidenceMappingError,
+    WeatherAdapter,
+)
+from tools.workflow.tests.test_review_evidence import (  # noqa: E402 - explicit pinned test/package bootstrap
+    ReviewReached,
+    make_controller,
+)
 
 
 def accepted_controller(tmp_path, monkeypatch, change=None):
@@ -34,10 +40,22 @@ def test_direct_accepted_stub_preserves_observed_review_input(tmp_path, monkeypa
     assert diagnostic["kind"] == "DIRECT_DIAGNOSTIC_NOT_ADMITTED_SIMKIT_CASE"
     actual = process.calls[-1]["payload"]["review_evidence"]
     snapshots = diagnostic["evidence"]["harness_observations"]["review_snapshots"]
-    snapshot, = snapshots
-    assert snapshot == {"reviewer_occurrence": 1, **{
-        key: actual[key] for key in ("request_hash", "goal_hash", "plan_hash", "manifest_hash",
-                                    "source_hash", "plan_claims", "sources")}}
+    (snapshot,) = snapshots
+    assert snapshot == {
+        "reviewer_occurrence": 1,
+        **{
+            key: actual[key]
+            for key in (
+                "request_hash",
+                "goal_hash",
+                "plan_hash",
+                "manifest_hash",
+                "source_hash",
+                "plan_claims",
+                "sources",
+            )
+        },
+    }
     assert diagnostic["provenance"][0]["accepted_review"] is True
     assert diagnostic["provenance"][0]["native_receipt"] == controller.roles.receipts[-1]
     assert diagnostic["evidence"]["controller_trace"]["final_state"] == "REVIEW_APPROVED"
@@ -110,7 +128,7 @@ def test_real_simkit_blocks_required_caps_before_run_case():
     required = ["CAP-BOUND-SOURCES", "CAP-RECEIPTS", "CAP-HARNESS-OBS"]
     # Fresh structural local request, not a frozen case or a claimed case pass.
     case = {"id": "LOCAL-CAPABILITY-ADMISSION-NEGATIVE", "adapter_requirements": required}
-    record, = run([case], adapter, profile={})
+    (record,) = run([case], adapter, profile={})
     assert record["status"] == "NOT_IMPLEMENTED"
     assert record["missing_capabilities"] == sorted(required)
     assert record["evidence"] is None and adapter.calls == 0

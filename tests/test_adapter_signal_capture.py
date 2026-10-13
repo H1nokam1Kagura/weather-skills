@@ -26,12 +26,18 @@ def test_owned_child_and_unrelated_decoy():
         "print(p.pid,flush=True); print(p.wait(),flush=True)"
     )
     # Every launched process naturally exits within a few seconds even on failure.
-    with subprocess.Popen(
-        [ACTOR_PYTHON, "-c", parent_code], stdout=subprocess.PIPE, text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    ) as parent, subprocess.Popen(
-        [ACTOR_PYTHON, "-c", child_code], creationflags=subprocess.CREATE_NO_WINDOW,
-    ) as decoy:
+    with (
+        subprocess.Popen(
+            [ACTOR_PYTHON, "-c", parent_code],
+            stdout=subprocess.PIPE,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        ) as parent,
+        subprocess.Popen(
+            [ACTOR_PYTHON, "-c", child_code],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        ) as decoy,
+    ):
         child_pid = int(parent.stdout.readline())
         capture = OwnedTreeCapture(parent)
         child = capture.register_descendant(child_pid)
@@ -57,9 +63,18 @@ def test_owned_child_and_unrelated_decoy():
         assert parent.wait(timeout=5) == 0
         assert decoy.poll() is None
         assert decoy.wait(timeout=6) == 0  # Natural exit, never targeted.
-        print(json.dumps({"canary": "owned_child_and_unrelated_decoy", "event": record,
-                          "decoy": asdict(decoy_identity), "decoy_exit": 0,
-                          "child_exit": 97, "exhaustive_controller_capture": False}))
+        print(
+            json.dumps(
+                {
+                    "canary": "owned_child_and_unrelated_decoy",
+                    "event": record,
+                    "decoy": asdict(decoy_identity),
+                    "decoy_exit": 0,
+                    "child_exit": 97,
+                    "exhaustive_controller_capture": False,
+                }
+            )
+        )
 
 
 def test_missing_observation_never_asserts_capture(monkeypatch):
@@ -67,7 +82,9 @@ def test_missing_observation_never_asserts_capture(monkeypatch):
         raise ObservationError("Observation unavailable")
 
     monkeypatch.setattr("adapter_support.signal_capture.observe", unavailable)
-    with subprocess.Popen([ACTOR_PYTHON, "-c", "import time; time.sleep(0.2)"],
-                          creationflags=subprocess.CREATE_NO_WINDOW) as root:
+    with subprocess.Popen(
+        [ACTOR_PYTHON, "-c", "import time; time.sleep(0.2)"],
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    ) as root:
         with pytest.raises(ObservationError, match="unavailable"):
             OwnedTreeCapture(root)

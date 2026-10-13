@@ -22,8 +22,9 @@ ACTOR_PYTHON = getattr(sys, "_base_executable", sys.executable)
 def test_default_path_retains_legacy_receipt(tmp_path, monkeypatch):
     monkeypatch.setattr(processes, "free_gib", lambda: 10.0)
     controller = processes.Processes(tmp_path, ram_floor=0)
-    result = controller.run([ACTOR_PYTHON, "-c", "print('owned control')"],
-                            tmp_path, os.environ.copy())
+    result = controller.run(
+        [ACTOR_PYTHON, "-c", "print('owned control')"], tmp_path, os.environ.copy()
+    )
     assert result["exit_code"] == 0
     assert "process_observations" not in result
     assert controller.observation_events == []
@@ -33,29 +34,43 @@ def test_direct_stop_observer_errors_cannot_prevent_owned_cleanup():
     def broken_observer(*args, **kwargs):
         raise RuntimeError("Injected direct observer failure")
 
-    with subprocess.Popen(
-        [ACTOR_PYTHON, "-c", "import time; time.sleep(3)"],
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    ) as root, subprocess.Popen(
-        [ACTOR_PYTHON, "-c", "import time; time.sleep(4)"],
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    ) as decoy:
+    with (
+        subprocess.Popen(
+            [ACTOR_PYTHON, "-c", "import time; time.sleep(3)"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        ) as root,
+        subprocess.Popen(
+            [ACTOR_PYTHON, "-c", "import time; time.sleep(4)"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        ) as decoy,
+    ):
         identity = OwnedTreeCapture(root).root
         decoy_identity = observe(decoy.pid)
         receipt = processes.stop(root, observe=broken_observer, reason="owned direct canary")
         assert receipt["backend_exit_code"] == 0
         assert root.returncode is not None
         assert [e["event"] for e in receipt["observer_errors"]] == [
-            "stop_request", "stop_backend_return", "stop_wait_return",
+            "stop_request",
+            "stop_backend_return",
+            "stop_wait_return",
         ]
         assert receipt["exhaustive_signal_capture"] is False
         assert decoy.poll() is None
         assert observe(decoy.pid) == decoy_identity
         assert decoy.wait(timeout=5) == 0
-        print(json.dumps({"mode": "direct_observer_error", "root_pid": identity.pid,
-                          "root_creation_100ns": identity.created_100ns,
-                          "root_exit": root.returncode, "receipt": receipt,
-                          "decoy_pid": decoy.pid, "decoy_exit": 0}))
+        print(
+            json.dumps(
+                {
+                    "mode": "direct_observer_error",
+                    "root_pid": identity.pid,
+                    "root_creation_100ns": identity.created_100ns,
+                    "root_exit": root.returncode,
+                    "receipt": receipt,
+                    "decoy_pid": decoy.pid,
+                    "decoy_exit": 0,
+                }
+            )
+        )
 
 
 def test_direct_observer_cannot_mask_original_backend_failure(monkeypatch):
@@ -91,10 +106,12 @@ def test_actual_stop_with_owned_child_and_decoy(tmp_path, monkeypatch, mode):
     observer = ControllerProcessObserver()
     real_sleep = time.sleep
     with ExitStack() as stack:
-        decoy = stack.enter_context(subprocess.Popen(
-            [ACTOR_PYTHON, "-c", "import time; time.sleep(6)"],
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        ))
+        decoy = stack.enter_context(
+            subprocess.Popen(
+                [ACTOR_PYTHON, "-c", "import time; time.sleep(6)"],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        )
         decoy_identity = observe(decoy.pid)
         child_receipt = {}
 
@@ -119,13 +136,18 @@ def test_actual_stop_with_owned_child_and_decoy(tmp_path, monkeypatch, mode):
             return result
 
         if mode == "exception_unregistered":
+
             def interrupted_sleep(_seconds):
                 raise RuntimeError("Injected monitor interruption")
+
             monkeypatch.setattr(processes.time, "sleep", interrupted_sleep)
 
         controller = processes.Processes(
-            tmp_path, timeout=10 if mode == "exception_unregistered" else 0,
-            ram_floor=0, total_seconds=15, observer=callback,
+            tmp_path,
+            timeout=10 if mode == "exception_unregistered" else 0,
+            ram_floor=0,
+            total_seconds=15,
+            observer=callback,
         )
         expected = RuntimeError if mode == "exception_unregistered" else Refused
         with pytest.raises(expected):
@@ -151,14 +173,20 @@ def test_actual_stop_with_owned_child_and_decoy(tmp_path, monkeypatch, mode):
         assert returned["details"]["actual_target_set"] is None
         assert any(e["event"] == "stop_wait_return" for e in events)
         code = wintypes.DWORD()
-        assert child_receipt["kernel"].GetExitCodeProcess(
-            child_receipt["handle"], byref(code)
-        )
+        assert child_receipt["kernel"].GetExitCodeProcess(child_receipt["handle"], byref(code))
         assert code.value != 259  # Independent retained handle confirms child exited.
         assert decoy.poll() is None
         assert observe(decoy.pid) == decoy_identity
         assert decoy.wait(timeout=7) == 0
-        print(json.dumps({"mode": mode, "events": events,
-                          "child_pid": child_receipt["identity"].pid,
-                          "child_exit": code.value, "decoy_pid": decoy.pid,
-                          "decoy_exit": 0}))
+        print(
+            json.dumps(
+                {
+                    "mode": mode,
+                    "events": events,
+                    "child_pid": child_receipt["identity"].pid,
+                    "child_exit": code.value,
+                    "decoy_pid": decoy.pid,
+                    "decoy_exit": 0,
+                }
+            )
+        )
