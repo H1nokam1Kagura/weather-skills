@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 from conftest import load_skill, make_gridded, run_skill, write_zarr
@@ -71,3 +72,73 @@ def test_rejects_unknown_dim_or_variable(tmp_path, summarize_dim, flag):
             *flag,
         )
     assert exc.value.code == 2
+
+
+def test_nan_conventions(tmp_path, summarize_dim):
+    """std over one sample is NaN (ddof=1); an all-NaN sum is NaN, not 0."""
+    one = write_zarr(make_gridded(n_time=1), tmp_path / "one.zarr")
+    run_skill(
+        summarize_dim,
+        "-i",
+        str(one),
+        "-o",
+        str(tmp_path / "std.zarr"),
+        "--dim",
+        "time",
+        "--method",
+        "std",
+    )
+    assert xr.open_zarr(tmp_path / "std.zarr")["precip"].isnull().all()
+
+    empty = make_gridded()
+    empty["precip"].values[:] = float("nan")
+    src = write_zarr(empty, tmp_path / "nan.zarr")
+    run_skill(
+        summarize_dim,
+        "-i",
+        str(src),
+        "-o",
+        str(tmp_path / "sum.zarr"),
+        "--dim",
+        "time",
+        "--method",
+        "sum",
+    )
+    assert xr.open_zarr(tmp_path / "sum.zarr")["precip"].isnull().all()
+
+
+def test_median_and_lat_weighted_mean(tmp_path, summarize_dim):
+    ds = make_gridded(n_time=4)
+    ds["precip"].values[:] = np.arange(4)[:, None, None]
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    run_skill(
+        summarize_dim,
+        "-i",
+        str(src),
+        "-o",
+        str(tmp_path / "med.zarr"),
+        "--dim",
+        "time",
+        "--method",
+        "median",
+    )
+    assert xr.open_zarr(tmp_path / "med.zarr")["precip"].values == pytest.approx(1.5)
+
+    # cos(0) = 1, cos(60) = 0.5 -> (0 * 1 + 1 * 0.5) / 1.5
+    ds = make_gridded(n_time=1, lats=(0.0, 60.0))
+    ds["precip"].values[0, 0, :] = 0.0
+    ds["precip"].values[0, 1, :] = 1.0
+    src = write_zarr(ds, tmp_path / "lat.zarr")
+    run_skill(
+        summarize_dim,
+        "-i",
+        str(src),
+        "-o",
+        str(tmp_path / "latw.zarr"),
+        "--dim",
+        "latitude",
+        "--method",
+        "mean",
+        "--lat-weighted",
+    )
+    assert xr.open_zarr(tmp_path / "latw.zarr")["precip"].values == pytest.approx(1 / 3)
