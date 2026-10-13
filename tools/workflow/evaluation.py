@@ -85,6 +85,28 @@ class FixtureRoles:
         ident = self.case["id"]
         if not (ident == "DEV-F09-INJECT-01" and role == "verifier"):
             self.receipts.append({"role": role, "session_id": str(uuid.uuid4()), "mode": "fixture"})
+        if role == "evidence_checker":
+            # Deterministic substitute: the reference verdict SUPPORTED for every judged claim
+            # unless the case schedules one (a substitute is never authority, never live).
+            scheduled = self.case.get("evidence_checker_verdicts", {})
+            verdicts = [
+                {
+                    "claim_id": claim["claim_id"],
+                    "verdict": scheduled.get(claim["claim_id"], "SUPPORTED"),
+                    "reasoning": "substituted verdict; verbatim citation checked against the "
+                    "bound source",
+                }
+                for claim in payload["claims"]
+            ]
+            # A scheduled verdict may also name a carried claim the checker was not asked
+            # about (for example a derivable claim); the controller never lets it rule.
+            judged = {claim["claim_id"] for claim in payload["claims"]}
+            verdicts += [
+                {"claim_id": k, "verdict": v, "reasoning": "substituted verdict"}
+                for k, v in scheduled.items()
+                if k not in judged
+            ]
+            return {"plan_hash": payload["plan_hash"], "verdicts": verdicts}
         stimulus = self.case["stimulus"]["payload"]
         if role == "compiler":
             if ident == "DEV-F01-INJECT-01":

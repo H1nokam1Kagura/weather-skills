@@ -8,7 +8,7 @@ import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import policy, review_evidence
+from . import claim_gates, policy, review_evidence
 from .admission import identity as admission_identity
 from .admission import record_for
 from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
@@ -150,6 +150,7 @@ class Controller:
         admission=None,
         review_evidence_mode=False,
         dispatch_evidence_mode=False,
+        definition_source=None,
     ):
         self.repo = safe_path(repo)
         self.request = json.loads(json.dumps(request))
@@ -197,6 +198,14 @@ class Controller:
                 "run_id": str(uuid.uuid4()),
                 "reviewer_occurrence": 0,
             }
+            if definition_source is not None:
+                # D1/D10: an explicitly supplied reference definition enables claim gates.
+                self.context["review_evidence"]["definition_source"] = (
+                    claim_gates.bind_definition_source(definition_source)
+                )
+                self.context["review_evidence"]["claim_checks"] = []
+        elif definition_source is not None:
+            raise Refused("claim gates require review evidence mode", gate="claim_evidence")
         self.bind_process_events()
         self.hooks = hooks
         if hooks is not None:
@@ -912,16 +921,127 @@ class Controller:
                 "plan_claims": evidence["plan_claims"],
                 "sources": evidence["sources"],
             }
+            if "rationale" in evidence:
+                bound["review_evidence"]["rationale"] = evidence["rationale"]
         return digest(bound)
+
+    def claim_gates_enabled(self):
+        return "claim_checks" in self.context.get("review_evidence", {})
+
+    def claim_check(self):
+        """Gate 1, derivable computation, then gate 2; one durable record per plan version.
+
+        The record is written (and a dispatch event emitted) before any reviewer receipt.
+        A resumed run reuses the record for the identical binding instead of re-gating.
+        """
+        evidence = self.context["review_evidence"]
+        records = evidence["claim_checks"]
+        plan_hash = digest(self.plan)
+        if records and evidence.get("claim_check_binding") == self.binding:
+            record = records[-1]
+            if record["decision"] == "ROUTE_TO_REPAIR" or (
+                record["reviewer_occurrence"] == evidence["reviewer_occurrence"] + 1
+            ):
+                return record
+        if claim_gates.presentations(records, plan_hash) >= claim_gates.MAX_PRESENTATIONS_PER_PLAN:
+            # Refused before gating, so no checker session is spent on a 4th presentation.
+            self.checkpoint()
+            raise Refused("re-review cap reached: plan already presented 3 times", gate="review")
+        claims, sources = evidence["plan_claims"], evidence["sources"]
+        contract = self.date_contract()
+        index = len(records)
+        args = (index, plan_hash, self.build_hash, self.source_hash, claims, sources, contract)
+        gate = claim_gates.build_record(*args)
+        occurrence, ruled = None, {}
+        judged = [c["claim_id"] for c in claims if not c["derivable"]]
+        if gate["citation_gate"] == "PASS" and judged:
+            output = self.ask(
+                "evidence_checker",
+                claim_gates.checker_payload(plan_hash, self.binding, claims, sources),
+            )
+            ruled = claim_gates.validate_checker_output(
+                output, plan_hash, judged, {c["claim_id"] for c in claims}
+            )
+            occurrence = sum(1 for r in self.roles.receipts if r["role"] == "evidence_checker")
+            receipt = self.roles.receipts[-1]
+            receipt["verdict"] = claim_gates.worst(ruled.values())
+            receipt["occurrence"] = occurrence
+        record = claim_gates.build_record(*args, occurrence, ruled)
+        if record["decision"] == "PRESENT_FOR_REVIEW":
+            record["reviewer_occurrence"] = evidence["reviewer_occurrence"] + 1
+        records.append(record)
+        evidence["claim_check_binding"] = self.binding
+        self.save(f"claim-check-{index:03}.json", record)
+        self.dispatch_event(
+            "claim_check",
+            index=index,
+            plan_hash=plan_hash,
+            decision=record["decision"],
+            record_hash=claim_gates.record_hash(record),
+        )
+        self.checkpoint()
+        return record
+
+    def accept_review_output(self, review):
+        """Exact legacy shape, or the frozen UC-03 shape bound by a review capture.
+
+        Returns the transition evidence. A frozen-shape output is normalized to the
+        controller's binding, with the reviewer's own output kept verbatim beside it.
+        """
+        if isinstance(review, dict) and set(review) == {"verdict", "binding_hash", "findings"}:
+            if review["binding_hash"] != self.binding or not isinstance(review["findings"], list):
+                raise Refused("review binding or findings invalid", gate="review_binding")
+            return review
+        frozen = {"verdict", "approved_binding", "findings", "reason", "verification_waiver"}
+        if (
+            "review_evidence" not in self.context
+            or not isinstance(review, dict)
+            or "verdict" not in review
+            or not set(review) <= frozen
+        ):
+            keys(review, {"verdict", "binding_hash", "findings"}, "review")
+        if (
+            review["verdict"] not in {"APPROVE", "REJECT"}
+            or not isinstance(review.get("findings", []), list)
+            or not isinstance(review.get("reason", ""), str)
+            or not isinstance(review.get("verification_waiver", {}), dict)
+        ):
+            raise Refused("review output outside the frozen reviewer schema", gate="review")
+        if "approved_binding" in review:
+            approved = review["approved_binding"]
+            presented = review_evidence.presented_binding(self)
+            if (
+                not isinstance(approved, dict)
+                or not {"plan_hash", "source_hash"} <= set(approved)
+                or any(k not in presented or presented[k] != v for k, v in approved.items())
+            ):
+                # review_binding: an approval of anything but the presented binding is void.
+                raise Refused(
+                    "review_binding: approved_binding differs from presented binding",
+                    gate="review_binding",
+                )
+        # A verification waiver is recorded verbatim but never relaxes a controller gate.
+        return {
+            "verdict": review["verdict"],
+            "binding_hash": self.binding,
+            "findings": review.get("findings", []),
+            "reviewer_output": json.loads(json.dumps(review)),
+        }
 
     def accept_plan(self, value):
         if "review_evidence" not in self.context:
             self.plan = value
             return
         evidence = self.context["review_evidence"]
-        parsed = review_evidence.unpack_plan(value, self.goal, evidence["sources"])
+        parsed = review_evidence.unpack_plan(
+            value, self.goal, evidence["sources"], claim_gates="claim_checks" in evidence
+        )
         self.plan = parsed["plan"]
         evidence["plan_claims"] = parsed["plan_claims"]
+        # A plan version's rationale is its own; never inherit a previous version's.
+        evidence.pop("rationale", None)
+        if "rationale" in parsed:
+            evidence["rationale"] = parsed["rationale"]
 
     def tool(self, skill, argv, allowed_state, argv_gate="plan_validation"):
         if self.state != allowed_state:
@@ -1057,7 +1177,18 @@ class Controller:
             )
             for name in ("onset-date", "plot-onset", "check-artifact", "verify-run")
         }
-        if "review_evidence" in self.context:
+        evidence = self.context.get("review_evidence", {})
+        if "definition_source" in evidence:
+            bound = evidence["definition_source"]
+            text = claim_gates.read_definition_text(bound["path"])
+            if review_evidence.text_hash(text) != bound["source_hash"]:
+                raise Refused(
+                    "bound definition source changed since admission", gate="claim_evidence"
+                )
+            if "definition-source.json" not in self.evidence:
+                self.save("definition-source.json", bound)
+            docs[bound["source_id"]] = text
+        elif "review_evidence" in self.context:
             path = self.repo / "skills/onset-date/references/onset_definitions.toml"
             try:
                 # Preserve the whole authoritative document, including newlines.
@@ -1273,12 +1404,19 @@ class Controller:
                     self.save("plan.json", {"plan": self.plan, "binding_hash": self.binding})
                     self.checkpoint()
                     continue
+                if self.claim_gates_enabled():
+                    record = self.claim_check()
+                    if record["decision"] == "ROUTE_TO_REPAIR":
+                        # Never presented: repair within max_repairs, then gate the new version.
+                        self.repair(plan_payload, claim_gates.repair_failure(record))
+                        self.binding = self.current_binding()
+                        self.save("plan.json", {"plan": self.plan, "binding_hash": self.binding})
+                        self.checkpoint()
+                        continue
+                    # A detached copy: a hook editing the payload can never edit the record.
+                    review_payload["claim_check"] = json.loads(json.dumps(record))
                 review = self.ask("reviewer", review_payload)
-                keys(review, {"verdict", "binding_hash", "findings"}, "review")
-                if review["binding_hash"] != self.binding or not isinstance(
-                    review["findings"], list
-                ):
-                    raise Refused("review binding or findings invalid")
+                review = self.accept_review_output(review)
                 self.save(f"review-{self.repairs_used}.json", review)
                 if review["verdict"] == "APPROVE":
                     self.context["review"] = review
@@ -1286,7 +1424,10 @@ class Controller:
                 if review["verdict"] != "REJECT":
                     self.context["clarification_required"] = review
                     self.checkpoint()
-                    raise Refused("review requires user clarification; no automatic scope change")
+                    raise Refused(
+                        "review requires user clarification; no automatic scope change",
+                        gate="review",
+                    )
                 self.context["rejected_review"] = review
                 self.context["review_retry_required"] = True
                 self.checkpoint()

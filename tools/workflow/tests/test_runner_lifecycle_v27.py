@@ -37,10 +37,7 @@ DECLARED = {"runner", "contracts", "__main__"}
 # The PLAN_VALIDATED reviewer loop is owned by a parallel change and was deliberately not
 # edited. Its two raises reach the terminal through the review state's fallback mapping
 # (terminal_mapping.source == "state_fallback"). This set may only SHRINK.
-PENDING_PROTECTED = {
-    ("runner", "review binding or findings invalid"),
-    ("runner", "review requires user clarification; no automatic scope change"),
-}
+PENDING_PROTECTED: set = set()  # reviewer-loop raises are tagged since the claim-pipeline merge
 # Untagged raises in modules outside the declared set at this revision (agents.py is declared
 # for prompt text only). The controller tags them at its call site; counts may only shrink.
 OUTSIDE_INVENTORY = {
@@ -296,7 +293,7 @@ def test_runtime_failure_is_incomplete_with_documented_fallback(tmp_path, monkey
     }
 
 
-def test_untagged_protected_review_refusal_is_state_mapped_not_silent(tmp_path, monkeypatch):
+def test_stale_review_binding_refusal_is_tagged_at_raise_site(tmp_path, monkeypatch):
     roles = ReceiptRoles(
         answers={"reviewer": {"verdict": "APPROVE", "binding_hash": "stale", "findings": []}}
     )
@@ -304,9 +301,9 @@ def test_untagged_protected_review_refusal_is_state_mapped_not_silent(tmp_path, 
     with pytest.raises(Refused, match="review binding or findings invalid"):
         c.run()
     stored = result_json(c)
-    assert stored["terminal"]["failed_gate"] == "review"
+    assert stored["terminal"]["failed_gate"] == "review_binding"
     assert stored["terminal"]["outcome"] == "BLOCKED"
-    assert stored["terminal_mapping"] == {"source": "state_fallback"}
+    assert stored["terminal_mapping"]["source"] == "raise_site"
 
 
 def test_reviewer_needs_info_verdict_is_a_needs_info_terminal(tmp_path, monkeypatch):

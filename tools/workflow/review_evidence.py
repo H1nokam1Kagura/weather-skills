@@ -1,4 +1,8 @@
-"""Opt-in citation identity binding, not a claim-support or entailment gate."""
+"""Opt-in citation identity binding. Claim gates (claim_gates.py) are a separate, opt-in layer.
+
+Without a supplied reference definition source this module keeps its original behaviour:
+identity and verbatim checks that refuse, never a recorded gate verdict.
+"""
 
 import hashlib
 import json
@@ -7,7 +11,14 @@ from .contracts import Refused, digest, keys, validate_plan
 
 SCHEMA = "workflow.review-envelope/1"
 DEFINITION_SOURCE_ID = "definition.agrhymet-sos-rolling"
+# Owner ruling D1 (CR-01): the reference definition text is bound under the colon id, and
+# the dot-form symbol resolves to that source's hash. The dot id stays the legacy binding
+# of the definitions TOML when no reference definition source is supplied.
+REFERENCE_DEFINITION_SOURCE_ID = "definition:agrhymet-sos-rolling"
+SYMBOL_ALIASES = {DEFINITION_SOURCE_ID: REFERENCE_DEFINITION_SOURCE_ID}
 UNSUPPORTED = ["claim_entailment", "derivable_claim_computation", "claim_gate_verdict"]
+CLAIM_GATE_UNSUPPORTED = ["claim_entailment"]
+DEFINITION_IDS = (DEFINITION_SOURCE_ID, REFERENCE_DEFINITION_SOURCE_ID)
 
 
 def text_hash(text):
@@ -17,15 +28,16 @@ def text_hash(text):
 def sources_from_docs(docs):
     if not isinstance(docs, dict) or not docs:
         raise Refused("review sources missing")
-    if DEFINITION_SOURCE_ID not in docs:
+    # Exactly one definition binding: never the TOML and the reference text side by side.
+    if sum(identity in docs for identity in DEFINITION_IDS) != 1:
         raise Refused("required definition source missing")
     sources = []
     for name, text in sorted(docs.items()):
         if not isinstance(name, str) or not isinstance(text, str) or not text:
             raise Refused("review source text missing")
-        # This logical ID denotes the ENTIRE authoritative UTF-8 registry,
+        # This logical ID denotes the ENTIRE authoritative UTF-8 document,
         # not an extracted entry or a semantic-support assertion.
-        source_id = name if name == DEFINITION_SOURCE_ID else "documentation:" + name
+        source_id = name if name in DEFINITION_IDS else "documentation:" + name
         sources.append({"source_id": source_id, "source_hash": text_hash(text), "text": text})
     return sources
 
@@ -85,35 +97,94 @@ def validate_claims(claims, sources):
                 raise Refused("review citation source/hash/quote mismatch")
 
 
-def unpack_plan(value, goal, sources):
-    keys(value, {"schema", "plan", "plan_claims"}, "review plan envelope")
-    if value["schema"] != SCHEMA:
-        raise Refused("unsupported review plan envelope")
+def unpack_plan(value, goal, sources, claim_gates=False):
+    """Accept the versioned envelope; rationale (D19) is optional and bound when present.
+
+    With claim gates the frozen planner key 'claims' is also accepted (CAP-ROLE-OUTPUT-
+    SCHEMA), and citation resolution is NOT checked here: gate 1 records it instead.
+    """
+    if not isinstance(value, dict):
+        raise Refused("review plan envelope must be an object", gate="plan_validation")
+    fields = set(value) - {"rationale"}
+    if fields == {"schema", "plan", "plan_claims"}:
+        if value["schema"] != SCHEMA:
+            raise Refused("unsupported review plan envelope", gate="plan_validation")
+        claims = value["plan_claims"]
+    elif claim_gates and fields == {"plan", "claims"}:
+        claims = value["claims"]
+    else:
+        raise Refused("review plan envelope: unexpected or missing fields", gate="plan_validation")
+    if "rationale" in value and (
+        not isinstance(value["rationale"], str) or len(value["rationale"]) > 4000
+    ):
+        raise Refused("invalid bounded planner rationale", gate="plan_validation")
     validate_plan(value["plan"], goal)
-    validate_claims(value["plan_claims"], sources)
-    return json.loads(json.dumps(value))
+    if claim_gates:
+        from .claim_gates import validate_claim_shape
+
+        validate_claim_shape(claims)
+    else:
+        validate_claims(claims, sources)
+    parsed = {"schema": SCHEMA, "plan": value["plan"], "plan_claims": claims}
+    if "rationale" in value:
+        parsed["rationale"] = value["rationale"]
+    return json.loads(json.dumps(parsed))
 
 
 def envelope(controller):
     evidence = controller.context["review_evidence"]
-    validate_claims(evidence["plan_claims"], evidence["sources"])
-    return json.loads(
-        json.dumps(
-            {
-                "schema": SCHEMA,
-                "request_hash": controller.request_hash,
-                "goal_hash": digest(controller.goal),
-                "plan_hash": digest(controller.plan),
-                "manifest_hash": controller.build_hash,
-                "source_hash": controller.source_hash,
-                "binding_hash": controller.binding,
-                "plan_claims": evidence["plan_claims"],
-                "sources": evidence["sources"],
-                "unsupported": UNSUPPORTED,
-                "capability": "PARTIAL_IDENTITY_CAPTURE_ONLY",
-            }
+    gated = "claim_checks" in evidence
+    if not gated:
+        validate_claims(evidence["plan_claims"], evidence["sources"])
+    value = {
+        "schema": SCHEMA,
+        "request_hash": controller.request_hash,
+        "goal_hash": digest(controller.goal),
+        "plan_hash": digest(controller.plan),
+        "manifest_hash": controller.build_hash,
+        "source_hash": controller.source_hash,
+        "binding_hash": controller.binding,
+        "plan_claims": evidence["plan_claims"],
+        "sources": evidence["sources"],
+        "unsupported": CLAIM_GATE_UNSUPPORTED if gated else UNSUPPORTED,
+        "capability": "PRE_REVIEW_CLAIM_GATES" if gated else "PARTIAL_IDENTITY_CAPTURE_ONLY",
+    }
+    if "rationale" in evidence:
+        # The reviewer sees exactly the planner rationale that the binding hash covers.
+        value["rationale"] = evidence["rationale"]
+    return json.loads(json.dumps(value))
+
+
+def presented_binding(controller):
+    """The binding a frozen-shape reviewer's approved_binding must agree with (UC-03)."""
+    value = envelope(controller)
+    return {
+        k: value[k]
+        for k in (
+            "request_hash",
+            "goal_hash",
+            "plan_hash",
+            "manifest_hash",
+            "source_hash",
+            "binding_hash",
         )
-    )
+    }
+
+
+def presented_claim_check(evidence):
+    """The claim-check record presented with this review, or None without claim gates."""
+    records = evidence.get("claim_checks")
+    if not records:
+        return None
+    record = records[-1]
+    if (
+        record["decision"] != "PRESENT_FOR_REVIEW"
+        or record["reviewer_occurrence"] != evidence["reviewer_occurrence"] + 1
+    ):
+        raise Refused(
+            "no claim check presents this plan version to the reviewer", gate="claim_evidence"
+        )
+    return record
 
 
 def capture(controller, payload):
@@ -125,6 +196,7 @@ def capture(controller, payload):
         or payload.get("plan") != controller.plan
         or payload.get("request") != controller.request
         or sources_from_docs(payload.get("documentation")) != evidence["sources"]
+        or payload.get("claim_check") != presented_claim_check(evidence)
     ):
         raise Refused("review payload binding/source mismatch")
     evidence["reviewer_occurrence"] += 1

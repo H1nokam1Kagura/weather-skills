@@ -155,7 +155,10 @@ class Processes:
         # time, so a patch of this module's free_gib still reaches it.
         self.memory_reader = None if memory_reader is free_gib else memory_reader
         if signal_capture and os.name != "nt":
-            raise Refused("signal_capture needs the Windows census job and per-PID stop")
+            raise Refused(
+                "signal_capture needs the Windows census job and per-PID stop",
+                gate="resource_guard",
+            )
         self.signal_capture = bool(signal_capture)
         # A start receipt shares the serial of its final record; both reserve it.
         self.serial = max(
