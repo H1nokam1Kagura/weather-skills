@@ -6,9 +6,11 @@
 # ///
 """Standardized anomaly: (ds[var] - clim[var_avg]) / clim[var_std]."""
 
+import pint
 import pint_xarray
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.standard_dataset import detect_spatial_dims
+from weather_skills_core.units import ureg
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.1"
@@ -21,32 +23,19 @@ _SKILL_VERSION = "0.0.1"
 @weather_skill.argument("-i", "--input", type=Dataset("any"), required=True)
 @weather_skill.argument("--climatology", type=Dataset("any"), required=True)
 @weather_skill.argument("--variable", "-v", action="append", required=True)
-@weather_skill.argument(
-    "--epsilon", type=float, default=0.1, help="Normalization to avoid divide-by-zero."
-)
-def standardize_anomaly(ds, climatology, variable, epsilon, **kwargs):
+def standardize_anomaly(ds, climatology, variable, **kwargs):
     """Standardized anomaly: (ds[var] - clim[var_avg]) / clim[var_std] per --variable."""
     import xarray as xr
 
-    # Harmonize names and values on spatial dims.
-    # TODO: this should be standardized in some core function.
+    # Put both sides' spatial dims on one name (core rounds their values on open).
     try:
         ds_lat, ds_lon = detect_spatial_dims(ds)
         clim_lat, clim_lon = detect_spatial_dims(climatology)
     except UsageError:
         ds_lat = clim_lat = None
-
     if ds_lat and clim_lat:
-        for src_name, other_name, target in (
-            (ds_lat, clim_lat, "latitude"),
-            (ds_lon, clim_lon, "longitude"),
-        ):
-            ds = ds.rename({src_name: target})
-            climatology = climatology.rename({other_name: target})
-            ds = ds.assign_coords({target: ds[target].astype("float64").round(4)})
-            climatology = climatology.assign_coords(
-                {target: climatology[target].astype("float64").round(4)}
-            )
+        ds = ds.rename({ds_lat: "latitude", ds_lon: "longitude"})
+        climatology = climatology.rename({clim_lat: "latitude", clim_lon: "longitude"})
 
     vars_ = list(dict.fromkeys(variable))
     missing_input = [v for v in vars_ if v not in ds.data_vars]
@@ -69,35 +58,33 @@ def standardize_anomaly(ds, climatology, variable, epsilon, **kwargs):
     out = {}
     for v in vars_:
         avg_name, std_name = f"{v}_avg", f"{v}_std"
-        field = ds[v]
-        avg, std = climatology[avg_name], climatology[std_name]
-
-        # regularize the denominator to avoid divide-by-zero. An offset
-        # unit (e.g. degree_Celsius) can't add a plain quantity in that
-        # unit — add it as a delta instead, which is what a magnitude
-        # bump means.
-        std_units = std.pint.units if getattr(std, "pint", None) is not None else None
-        if std_units is None:
-            denom = std + epsilon
-        else:
+        field, avg, std = ds[v], climatology[avg_name], climatology[std_name]
+        units = [da.pint.units for da in (field, avg, std)]
+        if all(u is not None for u in units):
             try:
-                denom = std + epsilon * std_units
-            except pint_xarray.pint.OffsetUnitCalculusError:
-                denom = std + std.pint.registry.Quantity(epsilon, f"delta_{std_units}")
+                avg = avg.pint.to(units[0])
+                # std is a spread: convert by the scale only, never an offset
+                # (a 1 degree_Celsius std is 1 K, not 274.15 K).
+                to_field = [ureg.Quantity(x, units[2]).to(units[0]).magnitude for x in (0, 1)]
+                scale = to_field[1] - to_field[0]
+            except (pint.DimensionalityError, pint_xarray.errors.PintExceptionGroup) as exc:
+                raise UsageError(
+                    f"cannot standardize {v!r} against {avg_name!r}/{std_name!r}: {exc}. "
+                    "Run unit-convert first."
+                ) from None
+            field, avg = field.pint.dequantify(), avg.pint.dequantify()
+            std = std.pint.dequantify() * scale
+        elif any(u is not None for u in units):
+            raise UsageError(f"{v!r}, {avg_name!r} and {std_name!r} must all carry units or none")
 
-        # Pint checks unit compatibility itself and auto-converts compatible
-        # units; unlike `difference`, we refuse outright on a real mismatch.
-        try:
-            anomaly = (field - avg) / denom
-        except (pint_xarray.pint.DimensionalityError, pint_xarray.errors.PintExceptionGroup) as exc:
+        anomaly = (field - avg) / std
+        # No spread (e.g. a never-wet window): the z-score is undefined.
+        anomaly = anomaly.where(std > 0)
+        empty = [d for d in anomaly.dims if anomaly.sizes[d] == 0]
+        if empty:
             raise UsageError(
-                f"cannot standardize {v!r} against {avg_name!r}/{std_name!r}: {exc}. "
-                "standardize-anomaly refuses to combine dimensionally incompatible "
-                "units. Run unit-convert first."
-            ) from None
-
-        if getattr(anomaly, "pint", None) is not None and anomaly.pint.units is not None:
-            anomaly = anomaly.pint.dequantify()
+                f"{v!r}: no overlapping {empty} labels between --input and --climatology"
+            )
         anomaly.attrs = {"units": "1", "long_name": f"{v} standardized anomaly"}
         out[f"{v}_anomaly"] = anomaly
 
