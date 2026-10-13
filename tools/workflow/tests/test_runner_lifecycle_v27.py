@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -39,19 +40,79 @@ DECLARED = {"runner", "contracts", "__main__"}
 # (terminal_mapping.source == "state_fallback"). This set may only SHRINK.
 PENDING_PROTECTED: set = set()  # reviewer-loop raises are tagged since the claim-pipeline merge
 # Untagged raises in modules outside the declared set at this revision (agents.py is declared
-# for prompt text only). The controller tags them at its call site; counts may only shrink.
-OUTSIDE_INVENTORY = {
-    "admission": 10,
-    "agents": 4,
-    "catalog": 11,
-    "evaluation": 8,
-    "kong_roles": 9,
-    "persistence": 2,
-    "policy": 3,
-    "processes": 4,
-    "review_evidence": 12,
-    "simulation": 2,
-}
+# for prompt text only), pinned by (module, message) so that swapping one untagged raise for
+# another in the same module still fails the census (W2 review test_runner_lifecycle_v27:198).
+# The controller tags them at its call site. This multiset may only SHRINK.
+OUTSIDE_INVENTORY = Counter(
+    [
+        ("admission", "'registered synthetic ' + name + ' changed'"),
+        ("admission", "invalid synthetic admission policy"),
+        ("admission", "registered synthetic source changed"),
+        ("admission", "synthetic admission requires a trusted harness registration"),
+        ("admission", "synthetic fixture manifest content hash differs"),
+        ("admission", "synthetic fixture manifest disagrees with source"),
+        ("admission", "synthetic fixture manifest lineage differs"),
+        ("admission", "synthetic fixture manifest requires an integer seed"),
+        ("admission", "synthetic fixture manifest source hash differs"),
+        ("admission", "synthetic fixture must have honest generator lineage, not fetch history"),
+        ("agents", "Claude CLI unavailable"),
+        ("agents", "f\"{role} CLI failed: {result['stderr'][-500:]}\""),
+        ("agents", "f'invalid {role} envelope: {exc}'"),
+        ("agents", "role unavailable or aggregate model budget exhausted"),
+        ("catalog", "definition changed; cached-onset/v1 must be reviewed"),
+        ("catalog", "empty artifact"),
+        ("catalog", "f'invalid CLI contract for {skill}'"),
+        ("catalog", "f'links/reparse points are not permitted: {part}'"),
+        ("catalog", "f'missing artifact: {path}'"),
+        ("catalog", "f'tool is not allowlisted: {skill}'"),
+        ("catalog", "network/device paths are outside this profile"),
+        ("catalog", "non-execution flag or unresolved placeholder"),
+        ("catalog", "only regular artifact files are supported"),
+        ("catalog", "runtime core revision differs from the admitted profile"),
+        ("catalog", "tool arguments must be a string array"),
+        ("evaluation", "build changed during evaluation"),
+        ("evaluation", "duplicate case IDs"),
+        ("evaluation", "heldout cases must not enter the development harness"),
+        (
+            "evaluation",
+            "implementation harness accepts DEV-ONLY files; heldout custody is external",
+        ),
+        ("evaluation", "invalid case identifier"),
+        ("evaluation", "model evaluation budget must be between zero and five dollars"),
+        ("evaluation", "root replacement not supported by this adapter"),
+        ("evaluation", "unsupported JSON Patch operation"),
+        ("kong_roles", "Kong kit interpreter unavailable"),
+        ("kong_roles", "Kong transport requires acknowledging the Not Sensitive data policy"),
+        ("kong_roles", "f\"{role} Kong worker failed before sending: {evidence['error_type']}\""),
+        ("kong_roles", "f'invalid {role} Kong response: {exc}'"),
+        ("kong_roles", "f'price for {name!r} needs finite rates and a cited source'"),
+        ("kong_roles", "max_tokens must be an integer in 1..64000"),
+        ("kong_roles", "role unavailable or aggregate model budget exhausted"),
+        ("kong_roles", "temperature must be null or in 0..1"),
+        ("persistence", "run is already owned by another process"),
+        ("persistence", "unsupported or damaged checkpoint"),
+        ("policy", "invalid action mask"),
+        ("policy", "invalid bounded decision scores"),
+        ("policy", "stale or masked policy action"),
+        ("processes", "aggregate time budget exhausted"),
+        ("processes", "available RAM cannot be measured"),
+        ("processes", "insufficient free RAM to start a child"),
+        ("processes", "reason"),
+        ("review_evidence", "invalid review claim fields"),
+        ("review_evidence", "invalid review claim identity/text/declaration"),
+        ("review_evidence", "required definition source missing"),
+        ("review_evidence", "review citation source/hash/quote mismatch"),
+        ("review_evidence", "review claim citations missing"),
+        ("review_evidence", "review claims missing"),
+        ("review_evidence", "review payload binding/source mismatch"),
+        ("review_evidence", "review source identity/hash mismatch"),
+        ("review_evidence", "review source text missing"),
+        ("review_evidence", "review sources missing"),
+        ("review_evidence", "review sources missing"),
+        ("simulation", "invalid simulation model budget"),
+        ("simulation", "unknown simulation scenario"),
+    ]
+)
 
 
 # ------------------------------------------------------------------ helpers
@@ -178,7 +239,7 @@ def test_gate_vocabulary_is_the_frozen_failed_gate_vocabulary():
 
 
 def test_static_census_every_refused_raise_carries_a_declared_gate():
-    untagged_declared, outside = set(), {}
+    untagged_declared, outside = set(), Counter()
     for path in sorted(WORKFLOW.glob("*.py")):
         module = path.stem
         for call in refused_raises(path):
@@ -192,10 +253,11 @@ def test_static_census_every_refused_raise_carries_a_declared_gate():
             if module in DECLARED:
                 untagged_declared.add((module, message(call)))
             else:
-                outside[module] = outside.get(module, 0) + 1
+                outside[(module, message(call))] += 1
     assert untagged_declared == PENDING_PROTECTED
-    for module, count in outside.items():
-        assert count <= OUTSIDE_INVENTORY.get(module, 0), f"new untagged raise in {module}"
+    unexpected = outside - OUTSIDE_INVENTORY
+    assert not unexpected, f"new untagged raise(s): {sorted(unexpected)}"
+    for module in {module for module, _ in outside}:
         assert module in runner.CALL_SITE_GATES, f"no call-site gate documented for {module}"
 
 
