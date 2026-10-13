@@ -18,6 +18,8 @@ Branch: feat/simkit-w3-review-shadow-snowyowl. WIP file requested by the coordin
 - catalog: runtime manifest gains build_id (from a disposable runtime-manifest file).
 - metric monitor for budget readings (non-RAM), harness-only injected_reading records.
 
+- Coordinator note handled: return_to_review consults getattr(self, 'consult_operator_ledger') at boundary 're_review' (allowed=('replan',)); an accepted replan (dict accepted True, action replan) rewinds to GOAL_CHECKED, clears plan/binding, planner runs again, same budgets. Return shape of consult_operator_ledger assumed; verify at merge.
+
 ## Next steps
 1. Write shadow.py, write_boundary.py, policy/agents/catalog edits.
 2. runner.py hunks (integrity, shadow call in advance, tool() commit path, run() re-entry).

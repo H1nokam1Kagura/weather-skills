@@ -1010,8 +1010,18 @@ class Controller:
         changed = self.context["material_changes"][-len(change.changes) :]
         indexes = [r["index"] for r in changed]
         plan_hash = digest(self.plan)
+        # Re-review wait boundary: an accepted attributed operator replan (operator channel,
+        # when this controller has one) returns to planning instead; a new plan starts its
+        # own re-reviews (UC-05). Same repair and resume budgets either way.
+        consult = getattr(self, "consult_operator_ledger", None)
+        decision = consult("re_review", allowed=("replan",)) if callable(consult) else None
+        replan = (
+            isinstance(decision, dict)
+            and decision.get("accepted") is True
+            and decision.get("action") == "replan"
+        )
         done = [r for r in self.context.get("rereviews", []) if r["plan_hash"] == plan_hash]
-        if len(done) >= MAX_REREVIEWS_PER_PLAN:
+        if not replan and len(done) >= MAX_REREVIEWS_PER_PLAN:
             # UC-05: a third re-review of one plan is not allowed. No re-plan is invented
             # here: stop at the binding check, still at the approved state.
             raise Refused(
@@ -1019,12 +1029,13 @@ class Controller:
                 gate="review_binding",
                 reason="approval_invalidated",
             )
-        withdrawn = []
-        while self.events and self.events[-1]["to"] in APPROVED_STATES:
+        withdrawn, target = [], "GOAL_CHECKED" if replan else "PLAN_VALIDATED"
+        withdraw = APPROVED_STATES + (("PLAN_VALIDATED",) if replan else ())
+        while self.events and self.events[-1]["to"] in withdraw:
             withdrawn.append(self.events.pop())
-        if not self.events or self.events[-1]["to"] != "PLAN_VALIDATED":
-            raise Refused("re-review cannot return to PLAN_VALIDATED", gate="review_binding")
-        self.state = "PLAN_VALIDATED"
+        if not self.events or self.events[-1]["to"] != target:
+            raise Refused("re-review cannot return to " + target, gate="review_binding")
+        self.state = target
         approval = self.context.pop("active_approval", None)
         if approval is not None:
             approval["invalidated_by"] = indexes
@@ -1038,7 +1049,10 @@ class Controller:
                 self.source_hash = self.artifacts["source"] = item["to_hash"]
             elif item["object"] == "request":
                 self.request_hash = item["to_hash"]
-        self.binding = self.current_binding()
+        if replan:
+            self.plan, self.binding = None, None  # GOAL_CHECKED asks the planner again
+        else:
+            self.binding = self.current_binding()
         rereviews = self.context.setdefault("rereviews", [])
         rereview = {
             "index": len(rereviews),
@@ -1046,12 +1060,17 @@ class Controller:
             "material_changes": indexes,
             "withdrawn_states": [e["to"] for e in reversed(withdrawn)],
             "binding_hash": self.binding,
+            "returned_to": target,
+            "operator_decision": decision if replan else None,
         }
         rereviews.append(rereview)
         self.dispatch_event("return_to_review", rereview=rereview)
         self.checkpoint()
         if any(item["object"] == "source" for item in change.changes):
             self.recheck_source()
+        if replan:
+            self.checkpoint()
+            return
         self.preflight_plan()  # revalidate the plan against the current manifest
         self.save("plan.json", {"plan": self.plan, "binding_hash": self.binding})
         self.checkpoint()
