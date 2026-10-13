@@ -1,50 +1,312 @@
-"""Observed review projection, deliberately not an admitted full-case adapter."""
+"""Observed evidence projection and a gated run_case lifecycle (P8).
 
+A capability is declared only when its method exists AND, for the capabilities this package
+adds, CAPABILITY-PRODUCERS.json holds a reviewed capability-to-producer record (owner ruling
+D4). run_case is opt-in and refuses any case needing an undeclared capability.
+"""
+
+import copy
 import json
 import re
 from pathlib import Path
 
 from simkit.adapter import Adapter
 
+from adapter_support import evidence_projection
 from adapter_support.fixture_staging import stage_fixture
 from tools.workflow import review_evidence
 from tools.workflow.catalog import safe_path, tree_hash
-from tools.workflow.contracts import digest, request_goal
+from tools.workflow.contracts import FIELDS, digest, request_goal
 from tools.workflow.e2e_injections import InjectionHooks
-from tools.workflow.persistence import read_checkpoint
+from tools.workflow.persistence import atomic_json, read_checkpoint
+from tools.workflow.profiles import PROFILES, stages
 from tools.workflow.runner import Controller
 
 SOURCE_HASH_ALGORITHM = "tools.workflow.catalog.tree_hash"
 REPORT_HASH_ALGORITHM = "tools.workflow.review_evidence.text_hash"
 SUPPORTED_REPAIR_LIMITS = (0, 1)
+PRODUCERS_FILE = Path(__file__).with_name("CAPABILITY-PRODUCERS.json")
+# CAP-LEDGER-SEED quote rule (harness-authored, flagged for review): every non-null goal value
+# is attributed to the whole scenario message; a null value is attributed to it only for a
+# field the scenario states as a prohibition, else seeded explicitly unattributed (CR-02).
+PROHIBITION_FIELDS = ("baseline",)
+# CAP-SYMBOLS closed table: exact tokens, or a prefix whose suffix is resolved natively.
+SYMBOL_TABLE = (
+    "HARNESS_RUN_DIR",
+    "HARNESS_REQUEST_HASH",
+    "HARNESS_REQUEST_HASH:current",
+    "HARNESS_MANIFEST_HASH:current",
+    "HARNESS_GOAL_HASH:current",
+    "HARNESS_GOAL_HASH:authorized",
+    "HARNESS_PLAN_HASH:current",
+    "HARNESS_HASH:source",
+    "HARNESS_HASH:source_pre",
+    "HARNESS_HASH:source_expected_after",
+    "HARNESS_CONTROLLER_PID",
+    "HARNESS_RESOLVED_ARTIFACT_PATH:onset",
+    "HARNESS_RESOLVED_ARTIFACT_PATH:map",
+    "HARNESS_SOURCE_HASH:" + review_evidence.DEFINITION_SOURCE_ID,
+)
+SYMBOL_PATTERNS = (re.compile(r"HARNESS_PLAN_HASH:v[1-9][0-9]*"), re.compile(r"HARNESS_PID:[a-z-]+"))
 
 
-class EvidenceMappingError(ValueError):
-    pass
+EvidenceMappingError = evidence_projection.EvidenceMappingError
 
 
 class AdapterRefusal(ValueError):
     """A case input this adapter cannot faithfully apply; never guessed or filled."""
 
 
+def load_producers(path=PRODUCERS_FILE):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
 class WeatherAdapter(Adapter):
     name = "weather-observed-review-diagnostic"
 
-    # Extend introspection for the frozen capability absent from base Simkit's
-    # method table. A manifest string is never an implementation. No placeholder
-    # method is provided: this capability remains unavailable in this adapter.
+    # Extend introspection for frozen capabilities absent from base Simkit's method table.
+    # A manifest string is never an implementation; D4-gated ones also need a reviewed record.
     extension_methods = {
         "CAP-BOUND-SOURCES": "capture_bound_sources",
+        "CAP-RUN-PROVENANCE": "tag_run_provenance",
         "CAP-SCHEDULE-DEPENDENCIES": "dispatch_dependent_schedule",
         "CAP-REVIEW-APPROVAL-HOOK": "dispatch_after_accepted_review",
     }
+
+    def __init__(self, enable_run_case=False, producers=None):
+        # run_case is opt-in: constructing the adapter never makes cases runnable.
+        self.enable_run_case = enable_run_case is True
+        self.producers = load_producers() if producers is None else producers
+
+    def d4_declared(self, capability):
+        """Owner ruling D4: a reviewed capability-to-producer record, status PRODUCER_MAPPED."""
+        record = self.producers["capabilities"].get(capability)
+        return (
+            isinstance(record, dict)
+            and record.get("status") == "PRODUCER_MAPPED"
+            and isinstance(record.get("reviewer"), str)
+            and bool(record["reviewer"].strip())
+        )
 
     def implemented_capabilities(self):
         implemented = super().implemented_capabilities()
         for capability, method_name in self.extension_methods.items():
             if callable(getattr(type(self), method_name, None)):
                 implemented.add(capability)
-        return implemented
+        gated = {c for c, r in self.producers["capabilities"].items() if r.get("d4_gated") is True}
+        return {c for c in implemented if c not in gated or self.d4_declared(c)}
+
+    def can_run(self):
+        if type(self).run_case is not WeatherAdapter.run_case:
+            return super().can_run()  # a subclass's own run_case is its own declaration
+        return self.enable_run_case
+
+    # ---- P8: evidence projection (CAP-RECEIPTS and the capabilities it carries)
+
+    def capture_evidence(self, run_dir, harness=None):
+        """CAP-RECEIPTS: the full projection {evidence, missing, notes} of a finished run."""
+        return evidence_projection.project_run(run_dir, harness)
+
+    def resolve_symbol(self, symbol, projection):
+        """CAP-SYMBOLS: closed-table resolution from a projection's native symbol values.
+
+        An unknown token is refused; a known token the run did not observe is unresolved
+        (refused), never defaulted, and never read from role output.
+        """
+        known = symbol in SYMBOL_TABLE or any(p.fullmatch(symbol) for p in SYMBOL_PATTERNS)
+        if not isinstance(symbol, str) or not known:
+            raise EvidenceMappingError(f"symbol outside the closed table: {symbol!r}")
+        symbols = projection["evidence"]["symbols"]
+        if symbol not in symbols:
+            raise EvidenceMappingError(f"symbol not observed in this run: {symbol}")
+        return symbols[symbol]
+
+    def map_terminal_reason(self, terminal):
+        """CAP-REASON-MAP: the controller terminal; an unmapped gate is left out, not guessed."""
+        notes = []
+        mapped = evidence_projection.map_terminal(terminal, notes)
+        return {"terminal": mapped, "notes": notes}
+
+    def map_role_output(self, run_dir, harness=None):
+        """CAP-ROLE-OUTPUT-SCHEMA: role_output in the contract shape (plan.steps -> plan,
+        plan_claims -> claims, compiler occurrence -> compiler_N, verifier D8 verdict)."""
+        return self.capture_evidence(run_dir, harness)["evidence"]["role_output"]
+
+    def capture_bound_sources(self, run_dir, harness=None):
+        """CAP-BOUND-SOURCES (D1): one review snapshot per reviewer receipt; failed dispatches
+        are reported separately and never become snapshots or receipts."""
+        projection = self.capture_evidence(run_dir, harness)
+        observations = projection["evidence"]["harness_observations"]
+        if "review_snapshots" not in observations:
+            raise EvidenceMappingError("review evidence mode was not observed")
+        return {
+            "review_snapshots": observations["review_snapshots"],
+            "review_dispatch_failures": observations["review_dispatch_failures"],
+        }
+
+    def observe_harness(self, run_dir, harness=None):
+        """CAP-HARNESS-OBS (partial): observed launch checks only; whole-tree fields MISSING."""
+        projection = self.capture_evidence(run_dir, harness)
+        return {
+            "launch_checks": projection["evidence"]["budget_ledger"]["launch_checks"],
+            "missing": [m for m in projection["missing"] if m["capability"] == "CAP-HARNESS-OBS"],
+        }
+
+    def capture_signal_targets(self, run_dir, harness=None):
+        """CAP-SIGNAL-CAPTURE (partial): signal_stop records projected; none is never []."""
+        projection = self.capture_evidence(run_dir, harness)
+        evidence = projection["evidence"]
+        if "signalled_pids" not in evidence["controller_trace"]:
+            return {"status": "MISSING", "reason": "no signal_stop record (D4)"}
+        return {
+            "signalled_pids": evidence["controller_trace"]["signalled_pids"],
+            "signal_capture_exhaustive": evidence["harness_observations"][
+                "signal_capture_exhaustive"
+            ],
+            "process_tree": evidence["process_tree"],
+        }
+
+    def tag_run_provenance(self, run_dir, harness_dir, markers):
+        """CAP-RUN-PROVENANCE (D3): harness tags plus a scan of what the system read."""
+        return evidence_projection.run_provenance(run_dir, harness_dir, markers)
+
+    def select_profile(self, case, profile_document):
+        """CAP-PROFILE: the case's profile variant, checked against the controller's own."""
+        variants = (profile_document or {}).get("variants", {})
+        variant = variants.get(case.get("profile")) if isinstance(case, dict) else None
+        if not isinstance(variant, dict):
+            raise AdapterRefusal("case profile is not a variant of the supplied profile")
+        task = variant["goal"].get("task")
+        if PROFILES.get(task, {}).get("id") != case["profile"] or stages(task) != variant["states"]:
+            raise AdapterRefusal("profile variant differs from the controller's registered profile")
+        return copy.deepcopy(variant)
+
+    def seed_ledger(self, case, variant, source_ledger):
+        """CAP-LEDGER-SEED: workflow.request/1 from the source ledger plus case.request_delta.
+
+        The constraint values come from the variant goal; quotes follow PROHIBITION_FIELDS and
+        are harness-authored (recorded in the derivation, flagged for review). The controller's
+        own request_goal validates the result; nothing is coerced (a null title stays null).
+        """
+        ledger = copy.deepcopy(source_ledger)
+        for op in case.get("request_delta") or []:
+            if op.get("op") != "replace" or op.get("path") != "/scenario_text":
+                raise AdapterRefusal("only a replace of /scenario_text is a supported request delta")
+            ledger["scenario_text"] = op["value"]
+        if ledger.get("authorization_speaker") != "user":
+            raise AdapterRefusal("only a user-speaker authorization can be seeded")
+        goal, text = variant["goal"], ledger["scenario_text"]
+        if set(goal) != FIELDS:
+            raise AdapterRefusal("variant goal does not carry the controller goal fields")
+        constraints, unattributed = {}, []
+        for field in sorted(FIELDS):
+            value = goal[field]
+            if value is None and field not in PROHIBITION_FIELDS:
+                constraints[field] = {"value": None, "message_id": None, "quote": None}
+                unattributed.append(field)
+            else:
+                constraints[field] = {"value": value, "message_id": "scenario", "quote": text}
+        request = {
+            "schema": "workflow.request/1",
+            "messages": [
+                {"id": "scenario", "speaker": ledger["scenario_speaker"], "text": text},
+                {"id": "user", "speaker": "user", "text": ledger["authorization_text"]},
+            ],
+            "constraints": constraints,
+            "authorization": {
+                "message_id": "user",
+                "quote": ledger["authorization_text"],
+                "goal_hash": digest(goal),
+                "actions": [PROFILES[goal["task"]]["action"]],
+            },
+        }
+        if request_goal(request) != goal:
+            raise AdapterRefusal("seeded request does not compile to the variant goal")
+        return {
+            "request": request,
+            "derivation": {
+                "quote_rule": "whole scenario message per attributed field; "
+                f"prohibition fields {list(PROHIBITION_FIELDS)}",
+                "unattributed_null_fields": unattributed,
+                "request_delta_applied": len(case.get("request_delta") or []),
+                "flagged_for_review": True,
+            },
+            "ledger_records": [
+                {"id": m["id"], "speaker": m["speaker"], "content_hash": digest(m["text"])}
+                for m in request["messages"]
+            ],
+        }
+
+    def run_case(self, case, profile):
+        """CAP-NOT-IMPLEMENTED lifecycle (opt-in). Refuses before any side effect unless every
+        capability the case requires is declared; then stages the owned fixture, seeds the
+        ledger, runs the real controller in dispatch + review evidence mode, and returns the
+        projected evidence. The projection report is persisted beside the harness manifest.
+
+        ``profile`` is the harness mapping: profile_document, source_ledger, case_root,
+        source, generator_provenance, presented_fetch_version, definition_source, repo,
+        roles_factory(run_dir), processes_factory(run_dir), input_supplement.
+        """
+        if not self.enable_run_case:
+            raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
+        if not isinstance(case, dict) or not isinstance(case.get("adapter_requirements"), list):
+            raise AdapterRefusal("a case with adapter_requirements is required")
+        missing = sorted(set(case["adapter_requirements"]) - self.implemented_capabilities())
+        if missing:
+            raise AdapterRefusal(f"case requires undeclared capabilities: {missing}")
+        variant = self.select_profile(case, profile["profile_document"])
+        max_repairs = self.configure_repair(case)
+        seeded = self.seed_ledger(case, variant, profile["source_ledger"])
+        prepared = self.prepare_fixture(
+            case,
+            profile["case_root"],
+            source=profile["source"],
+            generator_provenance=profile["generator_provenance"],
+            presented_fetch_version=profile["presented_fetch_version"],
+        )
+        run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
+        atomic_json(harness_dir / "seeded-ledger.json", seeded)
+        observer = evidence_projection.HarnessLaunchObserver()
+        processes = profile["processes_factory"](run_dir)
+        controller = Controller(
+            profile["repo"],
+            seeded["request"],
+            prepared["source"],
+            run_dir,
+            processes,
+            profile["roles_factory"](run_dir),
+            max_repairs=max_repairs,
+            hooks=observer,
+            review_evidence_mode=True,
+            dispatch_evidence_mode=True,
+            definition_source=profile["definition_source"],
+        )
+        try:
+            controller.run()
+        except Exception:  # noqa: BLE001 - the controller recorded its own terminal
+            pass
+        artifacts = [v for k, v in controller.paths.items() if k != "source"]
+        evidence_projection.tag_outputs(run_dir, harness_dir, artifacts)
+        provenance_record = prepared["manifest"]["generator_provenance"]
+        markers = [provenance_record["generator"], provenance_record["generator_sha256"]]
+        projection = self.capture_evidence(
+            run_dir,
+            {
+                "launch_observations": observer.records,
+                "processes_root": getattr(processes, "root", None),
+                "source_pre": prepared["source_pre"]["value"],
+                "authorized_goal": variant["goal"],
+                "run_provenance": self.tag_run_provenance(run_dir, harness_dir, markers),
+            },
+        )
+        projection["harness"] = {
+            "case_id": case["id"],
+            "input_supplement": profile.get("input_supplement"),
+            "source_pre": prepared["source_pre"],
+            "seeded_ledger": seeded["derivation"],
+        }
+        atomic_json(harness_dir / "evidence-projection.json", projection)
+        return projection["evidence"]
 
     def diagnostic_capability_status(self):
         return {

@@ -83,7 +83,8 @@ def test_implemented_capabilities_gain_exactly_the_p2_set():
         "CAP-SCHEDULE-DEPENDENCIES",
         "CAP-REVIEW-APPROVAL-HOOK",
     }
-    assert not hasattr(WeatherAdapter, "capture_bound_sources")
+    # P8 adds the method; owner ruling D4 keeps it undeclared until its record is reviewed.
+    assert WeatherAdapter().d4_declared("CAP-BOUND-SOURCES") is False
     assert WeatherAdapter().can_run() is False
 
 
