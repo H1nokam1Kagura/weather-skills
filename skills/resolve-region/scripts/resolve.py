@@ -32,7 +32,7 @@ _SKILL_VERSION = "0.0.2"
     "code",
     help=(
         "ISO3 country code (uppercase, e.g. KEN), named region (East Africa), "
-        "custom forecast box (Kenya OND region, Indian Ocean basin), "
+        "custom box (Indian Ocean basin), "
         "sub-national region (kenya-nairobi), or leftover place name "
         "(Mount Kenya, Kenya)"
     ),
@@ -47,7 +47,7 @@ def resolve_region(code, geojson, **kwargs):
     if not text:
         raise UsageError(
             "pass an ISO3 code (e.g. KEN), a named region (e.g. East Africa), "
-            "a custom forecast box (e.g. 'Kenya OND region', 'Indian Ocean'), "
+            "a custom box (e.g. 'Indian Ocean'), "
             "a sub-national region (e.g. kenya-nairobi), "
             "or a landmark (e.g. 'Mount Kenya, Kenya')."
         )

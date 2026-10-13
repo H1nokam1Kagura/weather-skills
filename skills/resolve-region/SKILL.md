@@ -1,6 +1,6 @@
 ---
 name: resolve-region
-description: "Resolve an ISO 3166-1 alpha-3 country code, a Natural Earth multi-country region (East Africa, Western Africa), a custom forecast box (Kenya OND region, Indian Ocean basin), a sub-national region (state, province, county), or a leftover landmark name to a lat/lon bbox and optionally a boundary polygon GeoJSON. Use when you need to turn a country, county, or named place into a bbox (or a polygon mask) for clip-region, ecmwf-fetch, or plot. Prefer ISO3 / country-admin1 / Natural Earth region names / custom forecast boxes; Nominatim is the fallback for landmarks. Do not send Indian Ocean to Nominatim — it is the basin box 30/20/-40/120. Not for river basins or catchments (e.g. Tana River basin): Nominatim returns an unrelated basin. For basins, catchments, or official national/local boundaries, first check whether another installed skill provides more specific regions for that use case."
+description: "Resolve an ISO 3166-1 alpha-3 country code, a Natural Earth multi-country region (East Africa, Western Africa), a custom box (Indian Ocean basin), a sub-national region (state, province, county), or a leftover landmark name to a lat/lon bbox and optionally a boundary polygon GeoJSON. Use when you need to turn a country, county, or named place into a bbox (or a polygon mask) for clip-region, ecmwf-fetch, or plot. Prefer ISO3 / country-admin1 / Natural Earth region names / custom boxes; Nominatim is the fallback for landmarks. Do not send Indian Ocean to Nominatim — it is the basin box 30/20/-40/120. Not for river basins or catchments (e.g. Tana River basin): Nominatim returns an unrelated basin. For basins, catchments, or official national/local boundaries, first check whether another installed skill provides more specific regions for that use case."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py *)
@@ -12,7 +12,7 @@ metadata:
 # resolve-region
 
 Look up a bounding box and boundary polygon for a country, a named
-multi-country region, a custom forecast box, a sub-national administrative
+multi-country region, a custom box, a sub-national administrative
 unit, or a leftover place name (landmark, city that is not an admin key). The
 script prints a `N/W/S/E` bbox suitable for the `--bbox` flag of the other
 skills, and can optionally write the boundary polygon as a GeoJSON file for
@@ -23,8 +23,8 @@ ISO 3166-1 alpha-3 (`iso3`). Multi-country names dissolve those countries by
 Natural Earth's continent / UN subregion / World Bank region labels. States,
 provinces, and counties come from
 [geoBoundaries](https://www.geoboundaries.org) `gbOpen` (ADM1 / ADM2), fetched
-on demand per country via the public API. A few briefing boxes that are not
-Natural Earth labels (e.g. `Kenya OND region`) are bundled as rectangles.
+on demand per country via the public API. A few boxes that are not
+Natural Earth labels (e.g. `Indian Ocean basin`) are bundled as rectangles.
 Queries that are not an ISO3 code, Natural Earth region, custom box, or admin
 key fall through to
 [OSM Nominatim](https://nominatim.org) (`limit=1`).
@@ -33,7 +33,7 @@ key fall through to
 
 - Turning a country into a bbox for `clip-region`, `ecmwf-fetch`, or `plot`.
 - Turning a Natural Earth multi-country region (East Africa, Western Africa)
-  or a custom forecast box (Kenya OND region) into a bbox without hitting
+  or a custom box (Indian Ocean basin) into a bbox without hitting
   Nominatim.
 - Turning a county / state / province into a bbox or a boundary polygon.
 - Turning a landmark (Mount Kenya, a lake, a city that is not an admin unit)
@@ -70,14 +70,14 @@ belong here.
 ## Division of labor
 
 The agent maps a country to uppercase ISO3, a multi-country domain to a named
-region (`East Africa`), a briefing box to a custom forecast name
-(`Kenya OND region`), and a county to a hierarchical admin key. This
+region (`East Africa`), an ocean basin to a custom box name
+(`Indian Ocean basin`), and a county to a hierarchical admin key. This
 script does that deterministic geometry lookup first. Leftover free text that
 is **not** an ISO3-shaped token, **not** a named region or custom box, and
 **not** a `country-admin…` key is sent to Nominatim (one search, first hit).
 Misspelled admin keys (`kenya-nairbi`) error instead of guessing via OSM.
 Disambiguate landmarks by passing a more specific string
-(`Mount Kenya, Kenya`), not extra flags. Do **not** send "East Africa", "Kenya OND region", or "Indian Ocean" to
+(`Mount Kenya, Kenya`), not extra flags. Do **not** send "East Africa" or "Indian Ocean" to
 Nominatim — OSM's first hit is a POI or a point centroid, not the
 briefing domain.
 
@@ -136,21 +136,16 @@ Mozambique, Zambia). **`East Africa`** is that same grouping **clipped at
 15°S** so maps stop at the Greater Horn / ICPAC latitude; pass
 `Eastern Africa` for the full UN box.
 
-### Custom forecast boxes
+### Custom boxes
 
-A few briefing regions that are not Natural Earth groupings or admin units
+A few regions that are not Natural Earth groupings or admin units
 are bundled as rectangles (`level` is `custom`). They never hit Nominatim.
 
-- `Kenya OND region` (also `Kenya OND`, `OND Kenya`,
-  `Central-Eastern Kenya`, `CE Kenya`) — analog box
-  `5.0/36.5/-5.0/42.0` (5°N–5°S, 36.5°E–42°E), east of the Rift.
 - `Indian Ocean basin` (also `Indian Ocean`, `IOB`) — conventional
   basin box `30.0/20.0/-40.0/120.0` (30°N–40°S, 20°E–120°E). Not the
   Nominatim ocean centroid.
 
 ```bash
-uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "Kenya OND region"
-# -> 5.0/36.5/-5.0/42.0
 uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "Indian Ocean"
 # -> 30.0/20.0/-40.0/120.0
 ```
@@ -186,7 +181,6 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py KEN
 uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py kenya-nairobi
 uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py KEN-nairobi
 uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "East Africa"
-uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "Kenya OND region"
 uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "Indian Ocean"
 uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "Mount Kenya, Kenya"
 ```
@@ -201,7 +195,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py kenya-nairobi --geojson /tmp/nairo
 ### Arguments
 
 - `code` (positional) — uppercase ISO3 (`KEN`), a named region (`East Africa`),
-  a custom forecast box (`Kenya OND region`), a sub-national region
+  a custom box (`Indian Ocean basin`), a sub-national region
   (`kenya-nairobi`, `KEN-nairobi`, `kenya-nairobi-westlands`), or a leftover
   landmark (`Mount Kenya, Kenya`).
 - `--geojson` — optional path; writes the boundary polygon as a
@@ -250,9 +244,6 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py kenya-nairobi --geojson /tmp/nairo
 # Named multi-country region (Natural Earth Eastern Africa; not Nominatim):
 BBOX=$(uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "East Africa")
 
-# Custom forecast box (Kenya OND region; not Nominatim):
-BBOX=$(uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "Kenya OND region")
-
 # Indian Ocean basin (not Nominatim):
 BBOX=$(uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py "Indian Ocean")
 
@@ -281,9 +272,8 @@ labels, joined to the bundled countries (offline). `East Africa` is the
 `Eastern Africa` subregion clipped at 15°S, not a Nominatim POI.
 `Eastern Africa` keeps the full UN box (Madagascar, Mozambique, Zambia).
 
-**Custom forecast boxes.** Rectangles listed in weather-skills-core
-`region.py` (offline). `Kenya OND region` is `5.0/36.5/-5.0/42.0`, not
-a geoBoundaries county union and not Nominatim. `Indian Ocean` /
+**Custom boxes.** Rectangles listed in weather-skills-core
+`region.py` (offline). `Indian Ocean` /
 `Indian Ocean basin` is `30.0/20.0/-40.0/120.0`, not a Nominatim centroid.
 
 **Sub-national.** [geoBoundaries](https://www.geoboundaries.org) `gbOpen` ADM1
