@@ -466,6 +466,10 @@ def test_verifier_fail_is_recorded_natively(tmp_path, monkeypatch, returned, ver
 def test_verifier_pass_is_recorded_and_releases(tmp_path, monkeypatch):
     c = controller(tmp_path, monkeypatch)
     assert c.run()["terminal"]["outcome"] == "RELEASED"
+    # Updated to follow an intentional change: the record now also keeps the returned
+    # binding_hash and scope (W2 review runner.py:1586).
+    returned_binding = c.context["verifier_verdicts"][0]["returned_binding_hash"]
+    assert isinstance(returned_binding, str) and returned_binding
     assert c.context["verifier_verdicts"] == [
         {
             "occurrence": 1,
@@ -474,6 +478,8 @@ def test_verifier_pass_is_recorded_and_releases(tmp_path, monkeypatch):
             "returned_verdict": "PASS",
             "binding_valid": True,
             "scope_valid": True,
+            "returned_binding_hash": returned_binding,
+            "returned_scope": "data-replay",
         }
     ]
 
@@ -513,6 +519,18 @@ def test_verifier_pass_with_wrong_binding_does_not_release(tmp_path, monkeypatch
     with pytest.raises(Refused, match="did not confirm"):
         c.run()
     assert c.context["verifier_verdicts"][0]["binding_valid"] is False
+
+
+def test_verifier_record_keeps_the_returned_binding_and_scope(tmp_path, monkeypatch):
+    """W2 review runner.py:1586: a FAIL leaves a durable copy of what was returned."""
+    returned = {"verdict": "FAIL", "binding_hash": "sha256:" + "0" * 64, "scope": ["odd"]}
+    c = controller(tmp_path, monkeypatch, roles=ReceiptRoles(answers={"verifier": returned}))
+    with pytest.raises(Refused, match="did not confirm"):
+        c.run()
+    (record,) = read_checkpoint(c.root)["context"]["verifier_verdicts"]
+    assert record["returned_binding_hash"] == "sha256:" + "0" * 64
+    assert record["returned_scope"] == ["odd"]
+    assert record["binding_valid"] is False and record["scope_valid"] is False
 
 
 # ------------------------------------------------------------------ item 5: plan records

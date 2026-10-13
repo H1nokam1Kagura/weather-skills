@@ -1803,6 +1803,10 @@ class Controller:
             "returned_verdict": raw,
             "binding_valid": value["binding_hash"] == binding,
             "scope_valid": value["scope"] == "data-replay",
+            # What the verifier actually returned, kept durably (W2 review runner.py:1586):
+            # a FAIL refusal otherwise leaves only the booleans behind.
+            "returned_binding_hash": json.loads(json.dumps(value["binding_hash"])),
+            "returned_scope": json.loads(json.dumps(value["scope"])),
         }
         records.append(record)
         self.checkpoint()
