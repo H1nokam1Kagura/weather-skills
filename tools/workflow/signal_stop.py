@@ -30,6 +30,18 @@ intermediates while they are alive, so their orphaned descendants stay provable.
 residual race window is one poll gap plus the snapshot latency. A process that spawns
 a child and exits inside that window leaves an unprovable orphan. The census detects
 it, but the run cannot be exhaustive.
+
+Signalled means "a running process the controller signalled". A target found exited
+right before its signal (handle already signalled: the WaitForSingleObject form of
+GetExitCodeProcess != STILL_ACTIVE, immune to a real exit code of 259) is recorded as
+``already_exited``. A target whose TerminateProcess call fails while its handle then
+reports exited (Windows fails TerminateProcess on an exited process with
+ERROR_ACCESS_DENIED) exited on its own between that check and the call, and is recorded
+as ``exited_before_signal``. Neither is in ``signalled_pids``/``signalled``; both stay
+in ``signal_attempts`` and ``exited_before_signal``. Residual race, not closable from
+user mode: a process already inside ExitProcess when TerminateProcess succeeds is
+listed as signalled although it was ending, so its own end time may precede the
+signal by a few microseconds. An empty signal list is never exhaustive evidence (D4).
 """
 
 from __future__ import annotations
@@ -298,7 +310,7 @@ class Win32Backend:
             raise SignalStopError(f"SetInformationJobObject failed: {err}")
         return job
 
-    def assign_suspended_and_resume(self, job, pid):
+    def assign_suspended_and_resume(self, job, pid, before_resume=None):
         access = PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_SUSPEND_RESUME
         handle = self.k.OpenProcess(access, False, pid)
         if not handle:
@@ -306,6 +318,8 @@ class Win32Backend:
         try:
             if not self.k.AssignProcessToJobObject(job, handle):
                 raise SignalStopError(f"AssignProcessToJobObject failed: {ctypes.get_last_error()}")
+            if before_resume is not None:
+                before_resume()  # the root is a job member and has not run an instruction
             status = self.n.NtResumeProcess(handle)
             if status < 0:
                 raise SignalStopError(f"NtResumeProcess failed: {status & 0xFFFFFFFF:#x}")
@@ -360,11 +374,13 @@ class CensusJob:
             self.handle = None
 
 
-def launch_in_census_job(argv, backend=None, **popen_kwargs):
+def launch_in_census_job(argv, backend=None, on_suspended=None, **popen_kwargs):
     """Start ``argv`` suspended, assign it to a fresh job, then resume it.
 
     Returns ``(popen, CensusJob)``. Because assignment happens before the root runs,
-    every descendant that does not break away is a job member.
+    every descendant that does not break away is a job member. ``on_suspended(popen)``,
+    if given, runs after assignment and before resume (e.g. to pin the root in an
+    ``AncestryJournal`` with no gap); if it raises, the root is killed unresumed.
     """
     backend = backend or Win32Backend()
     flags = popen_kwargs.pop("creationflags", 0) | CREATE_SUSPENDED
@@ -375,7 +391,12 @@ def launch_in_census_job(argv, backend=None, **popen_kwargs):
         backend.close_job(job)
         raise
     try:
-        backend.assign_suspended_and_resume(job, proc.pid)
+        if on_suspended is None:
+            backend.assign_suspended_and_resume(job, proc.pid)
+        else:
+            backend.assign_suspended_and_resume(
+                job, proc.pid, before_resume=lambda: on_suspended(proc)
+            )
     except BaseException:
         proc.kill()
         proc.wait()
@@ -634,6 +655,8 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
     reasons = []
     attempts = [] if attempts is None else attempts
     signalled = []
+    signalled_entries = []
+    exited_before = []
     unproven_found = []
     rounds = 0
     deadline = time.monotonic() + timeout_s
@@ -674,18 +697,21 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
                 attempts.append(entry)  # appended before the signal is issued
                 if backend.is_exited(member.handle):
                     entry["result"] = "already_exited"  # not signalled
+                    exited_before.append(entry)
                     continue
                 journal.stopping = True  # from here on, a newly seen process is churn
                 ok, err = backend.terminate(member.handle, TERMINATE_EXIT_CODE)
                 entry["returned_at_ns"] = time.monotonic_ns()
                 entry["winerror"] = err
+                if not ok and backend.is_exited(member.handle):
+                    # TerminateProcess fails on an exited process: it ended on its own
+                    # between the check above and the call, so it was not signalled.
+                    entry["result"] = "exited_before_signal"
+                    exited_before.append(entry)
+                    continue
+                entry["result"] = "ok" if ok else "denied"
                 signalled.append(member.pid)
-                if ok:
-                    entry["result"] = "ok"
-                elif backend.is_exited(member.handle):
-                    entry["result"] = "exited_during_signal"
-                else:
-                    entry["result"] = "denied"
+                signalled_entries.append(entry)
             for member in live:
                 if member.handle is not None:
                     backend.wait(member.handle, settle_ms)
@@ -707,6 +733,8 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
         _finish_job(journal, job, reasons, job_info)
     for pid in unproven_found:
         reasons.append(f"owned process {pid} has unprovable ancestry (parent exited unobserved)")
+    if not signalled:
+        reasons.append("empty signal list: never exhaustive evidence (D4)")
     if journal.rejections:
         job_info["note_rejections"] = len(journal.rejections)
 
@@ -719,10 +747,19 @@ def stop_tree(journal, job=None, timeout_s=10.0, settle_ms=200, attempts=None):
         "controller_pid": journal.controller_pid,
         "root_pid": journal.root.pid,
         "signalled_pids": signalled,
+        "signalled": [
+            {k: e[k] for k in ("pid", "parent_pid", "created_100ns", "result")}
+            for e in signalled_entries
+        ],
+        "exited_before_signal": [
+            {k: e[k] for k in ("pid", "parent_pid", "created_100ns", "result")}
+            for e in exited_before
+        ],
         "signal_attempts": attempts,
         "process_tree": tree,
         "exhaustive": not reasons,
         "exhaustive_reasons": reasons,
+        "reasons": reasons,
         "rounds": rounds,
         "churn_pids": churn,
         "unproven_pids": sorted(journal.unproven),
