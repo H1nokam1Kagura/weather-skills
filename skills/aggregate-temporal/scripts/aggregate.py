@@ -21,7 +21,6 @@ from weather_skills_core.units import (
     AGGREGATION_COVERAGE_COORD,
     AGGREGATION_PERIOD_ATTR,
     DATA_INTERVAL_ATTR,
-    PERIOD_TO_AGGREGATION,
     data_interval_of,
     expected_samples_in_period,
     format_cell_methods,
@@ -34,6 +33,13 @@ from weather_skills_core.units import (
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
 
+# Named --period → the aggregation_period string stamped for that window.
+PERIOD_TO_AGGREGATION = {
+    "daily": "1 day",
+    "weekly": "7 day",
+    "dekadal": "1 dekad",
+    "monthly": "1 month",
+}
 PERIOD_DAYS = {"daily": 1, "weekly": 7, "dekadal": 10}
 RESAMPLE_FREQ = {"daily": "1D", "weekly": "7D", "dekadal": "10D", "monthly": "MS"}
 ANCHOR_PERIOD_DAYS = {"daily": 1, "weekly": 7, "dekadal": 10, "monthly": 30}
