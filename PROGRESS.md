@@ -4,7 +4,9 @@
 - Read WAVE3-BRIEF, Kong SKILL.md, kit models.md / probe-log / probe-results.jsonl, kong_roles.py,
   agents.py, __main__.py, runner.py role dispatch + checkpoint/resume budget logic, the static
   Refused census test, existing test_kong_roles.py / test_agents.py, prior probe RESULT.json.
-- No code changed yet.
+- Code implemented and committed: f16e564 (declared files), 310ab9b (follow-up edits to
+  test_agents.py / test_kong_roles.py, outside declared set, flagged).
+- Live smoke script written: completion-evidence/kong-live-probe/wiring_smoke.py (3 calls).
 
 ## Findings driving the design
 - Prior live probe: sonnet-4-6 returned text that is not a bare JSON object (45 tokens; almost
@@ -38,10 +40,11 @@
 - Live smoke (one call per changed role shape, synthetic) -> completion-evidence/kong-live-probe/WIRING-RESULT.json.
 
 ## Test status
-- Not yet run on this branch.
+- Kong/agents/lifecycle tests: 126 passed (test_kong_wiring, test_kong_roles, test_agents,
+  test_runner_lifecycle_v27). Full suite run pending.
 
 ## Live Kong smoke
-- NOT run yet.
+- About to run (3 shapes, one call each, no retry).
 
 ## Open questions
 - Approval for the one-line out-of-set update to tools/workflow/tests/test_agents.py.
