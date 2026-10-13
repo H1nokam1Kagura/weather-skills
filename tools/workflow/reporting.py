@@ -15,6 +15,7 @@ def report(root):
     processes = [
         json.loads(p.read_text(encoding="utf-8"))
         for p in sorted((root / "processes").glob("process-*.json"))
+        if not p.name.endswith(".start.json")  # start receipts are not final records
     ]
     roles = checkpoint.get("role_receipts", [])
     fixture = any(r.get("mode") == "fixture" for r in roles)

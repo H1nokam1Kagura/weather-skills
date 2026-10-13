@@ -220,6 +220,7 @@ def simulate(repo, root, scenario="clean", task="onset_map", model_budget=0, reg
             "scientific_tools": [
                 json.loads(p.read_text(encoding="utf-8"))["argv"][1]
                 for p in sorted((run / "processes").glob("process-*.json"))
+                if not p.name.endswith(".start.json")
             ],
             "strict_replay_completed": bool(c.context.get("gates")) and c.state == "RELEASED",
             "is_observational_data": False,
