@@ -322,6 +322,55 @@ class Controller:
             self.save(name, snapshot)
             self.checkpoint()
         self.emit("after_transition", {"state": self.state})
+        if target == "REVIEW_APPROVED" and self.hooks is not None:
+            approval = self.accepted_approval(evidence)
+            if approval is not None:
+                self.emit("after_review_approval", approval)
+
+    def accepted_approval(self, review):
+        """Normalized accepted-approval boundary, confirmed against the durable checkpoint.
+
+        Only a committed APPROVE bound to the current plan consumes an occurrence; raw
+        reviewer returns and repeated state entries are never counted.
+        """
+        value = read_checkpoint(self.root)
+        events = value["events"]
+        if (
+            value["state"] != "REVIEW_APPROVED"
+            or not events
+            or events[-1]["to"] != "REVIEW_APPROVED"
+            or events[-1]["evidence"] != review
+            or events[-1]["evidence_hash"] != digest(review)
+            or value["binding"] != self.binding
+            or not isinstance(review, dict)
+            or review.get("verdict") != "APPROVE"
+            or review.get("binding_hash") != self.binding
+        ):
+            return None
+        counter = self.context.setdefault(
+            "accepted_approvals", {"occurrence": 0, "initial_binding_hash": None}
+        )
+        counter["occurrence"] += 1
+        if counter["occurrence"] == 1:
+            counter["initial_binding_hash"] = self.binding
+        self.checkpoint()
+        initial = counter["initial_binding_hash"]
+        return {
+            "role": "reviewer",
+            "target": "reviewer",
+            "occurrence": counter["occurrence"],
+            "verdict": "APPROVE",
+            "schema_valid": True,
+            "binding_valid": True,
+            "controller_accepted": True,
+            "approval_committed": True,
+            # No parent-plan binding exists in this controller, so never child_of_initial.
+            "plan_scope": "initial" if self.binding == initial else None,
+            "binding_hash": self.binding,
+            "initial_binding_hash": initial,
+            "parent_binding_hash": None,
+            "transition_index": len(events) - 1,
+        }
 
     def emit(self, point, event):
         """Trusted Python harness hook, never exposed as an agent tool or CLI permission."""
