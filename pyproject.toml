@@ -41,7 +41,7 @@ skills-runner = { git = "https://github.com/tescalada/skills-runner" }
 weather-skills-core = { git = "https://github.com/rhiza-research/weather-skills-core", rev = "a4110e30c8637ea99d79f752499d00e4cd65fafb" }
 
 [tool.pytest.ini_options]
-testpaths = ["skills", "registry", "tools/workflow/tests"]
+testpaths = ["skills", "registry", "tools/workflow/tests", "tests"]
 python_files = ["test_*.py"]
 pythonpath = ["tests", "."]
 filterwarnings = [

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from frozen_v27 import frozen_root
 
 from tools.workflow import __main__ as cli
 from tools.workflow import contracts, runner
@@ -27,9 +28,7 @@ from tools.workflow.persistence import read_checkpoint
 from tools.workflow.tests.test_workflow import GOAL, FakeProcesses, FakeRoles, controller, request
 
 WORKFLOW = Path(runner.__file__).resolve().parent
-FROZEN = Path(
-    "C:/Users/neilha/.agentbus/simkit-controller-snowyowl/completion-evidence/frozen-baseline"
-)
+FROZEN = frozen_root()  # verified against FINAL-PINS by tests/frozen_v27.py
 CONTRACT = FROZEN / "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json"
 
 # Modules in this change's declared file set: every Refused raise must carry a gate here.

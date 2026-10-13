@@ -11,9 +11,9 @@ import hashlib
 import importlib.util
 import json
 import sys
-from pathlib import Path
 
 import pytest
+from frozen_v27 import frozen_root
 
 from tools.workflow import runner
 from tools.workflow.contracts import Refused
@@ -27,9 +27,7 @@ from tools.workflow.tests import test_review_evidence as review_tests
 from tools.workflow.tests.test_review_evidence import ProcessStub, make_controller
 
 # Explicit, test-only frozen location, verified against its own FINAL-PINS before use.
-FROZEN = Path(
-    "C:/Users/neilha/.agentbus/simkit-controller-snowyowl/completion-evidence/frozen-baseline"
-)
+FROZEN = frozen_root()  # verified against FINAL-PINS by tests/frozen_v27.py
 CASESET = FROZEN / "casesets/cached-onset-e2e-v2_7"
 SCHEDULE_FIXES = CASESET / "schedule_fixes.py"
 DEV_ONLY = CASESET / "frozen/agentic-e2e-injections.DEV-ONLY.json"

@@ -4,12 +4,12 @@ import copy
 import hashlib
 import json
 import sys
-from pathlib import Path
 
 import pytest
+from frozen_v27 import frozen_root
 
 # Explicit, test-only import location; no package bridge or Simkit modification.
-SIMKIT_ROOT = Path("C:/Users/neilha/.agentbus/simkit-v2_7-closure-20261011")
+SIMKIT_ROOT = frozen_root()  # verified against FINAL-PINS by tests/frozen_v27.py
 sys.path.insert(0, str(SIMKIT_ROOT))
 
 from simkit.adapter import Adapter  # noqa: E402 - explicit pinned test/package bootstrap
