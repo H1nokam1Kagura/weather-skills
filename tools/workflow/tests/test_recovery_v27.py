@@ -11,10 +11,10 @@ import functools
 import hashlib
 import json
 import uuid
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from frozen_v27 import frozen_root
 
 from tools.workflow import agents, kong_roles, recovery, runner
 from tools.workflow.contracts import Refused
@@ -32,9 +32,7 @@ from tools.workflow.tests.test_runner_lifecycle_v27 import (
 )
 from tools.workflow.tests.test_workflow import GOAL, controller
 
-FROZEN = Path(
-    "C:/Users/neilha/.agentbus/simkit-controller-snowyowl/completion-evidence/frozen-baseline"
-)
+FROZEN = frozen_root()  # verified against FINAL-PINS by tests/frozen_v27.py
 DEV_ONLY = FROZEN / "casesets/cached-onset-e2e-v2_7/frozen/agentic-e2e-injections.DEV-ONLY.json"
 SYMBOLS = {"HARNESS_RUN_ID": "run-recovery", "HARNESS_RUN_DIR": "C:/disposable/run-recovery"}
 
