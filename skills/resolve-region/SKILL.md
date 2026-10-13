@@ -131,10 +131,10 @@ collide with a primary name: `East Africa` → `Eastern Africa`,
 Country names still win (`South Africa` is ZAF, not Southern Africa).
 
 `--geojson` writes the member-country MultiPolygon. `level` is `region`.
-This is the Natural Earth / UN-style Eastern Africa (includes Madagascar,
-Mozambique, Zambia). **`East Africa`** is that same grouping **clipped at
-15°S** so maps stop at the Greater Horn / ICPAC latitude; pass
-`Eastern Africa` for the full UN box.
+`East Africa` and `Eastern Africa` are the same Natural Earth / UN-style
+grouping, which includes Madagascar, Mozambique, and Zambia. For a
+narrower briefing view, first check whether another installed skill
+provides one.
 
 ### Custom boxes
 
@@ -269,8 +269,7 @@ with a fixed patch: France → `FRA`, Norway → `NOR`, Kosovo → `XKX`, N. Cyp
 
 **Named regions.** Natural Earth continent / UN subregion / World Bank region
 labels, joined to the bundled countries (offline). `East Africa` is the
-`Eastern Africa` subregion clipped at 15°S, not a Nominatim POI.
-`Eastern Africa` keeps the full UN box (Madagascar, Mozambique, Zambia).
+full `Eastern Africa` subregion, not a Nominatim POI.
 
 **Custom boxes.** Rectangles listed in weather-skills-core
 `region.py` (offline). `Indian Ocean` /
