@@ -24,10 +24,14 @@ Branch: feat/simkit-w3-review-shadow-snowyowl. WIP file requested by the coordin
 1. Write shadow.py, write_boundary.py, policy/agents/catalog edits.
 2. runner.py hunks (integrity, shadow call in advance, tool() commit path, run() re-entry).
 3. e2e_injections fixture ops + mapping + deny_write + inject_metric.
-4. tests/test_rereview_shadow_v27.py; run full suites + ruff.
+4. DONE: tests file. Remaining: targeted suites, final commit, report.
 
 ## Test status
-Existing tools/workflow/tests all pass after code changes; new test file not yet written.
+- tests/test_rereview_shadow_v27.py written (38 tests): 38 passed (but ~640s wall; durations being measured).
+- Resumed session (2026-10-13): kept uncommitted integrity() hunk (records request material change before
+  re-raising when the goal no longer parses); ruff format applied to policy.py/e2e_injections.py/new tests.
+- Coordinator: no full suite; targeted suites only (e2e_injections, runner_lifecycle, workflow, agents,
+  admission, schedule_dispatch, recovery, review_evidence, dispatch_evidence).
 
 ## Open questions
 - Re-entering _run after return-to-review needs a one-line change in run(); reported as outside strict region.
