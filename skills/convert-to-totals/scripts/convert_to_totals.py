@@ -4,7 +4,7 @@
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
 # ]
 # ///
-"""Convert rate variables to period totals using stamped aggregation_period."""
+"""Convert precipitation rates to period totals using stamped aggregation_period."""
 
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.units import (
@@ -71,12 +71,28 @@ def _sum_cell_methods_dim(da, dim: str | None) -> str:
 )
 @weather_skill.argument("--time-dim")
 def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
-    """Multiply rates by stamped aggregation_period → amounts. Terminal before plot."""
+    """Multiply precip rates by stamped aggregation_period → amounts. Terminal before plot."""
     dim = _resolve_dim(ds, time_dim)
-    names = list(dict.fromkeys(variable)) if variable is not None else list(ds.data_vars)
-    for name in names:
-        if name not in ds.data_vars:
-            raise UsageError(f"variable {name!r} not in dataset (have {list(ds.data_vars)})")
+    kinds = {
+        name: classify_variable(
+            name, units=variable_units(da), standard_name=da.attrs.get("standard_name")
+        )
+        for name, da in ds.data_vars.items()
+    }
+    if variable is None:
+        names = [name for name, kind in kinds.items() if kind == "precip"]
+        if not names:
+            raise UsageError(f"no precipitation rate variables in dataset (have {list(kinds)})")
+    else:
+        names = list(dict.fromkeys(variable))
+        for name in names:
+            if name not in kinds:
+                raise UsageError(f"variable {name!r} not in dataset (have {list(kinds)})")
+            if kinds[name] not in ("precip", "precip_amount"):
+                raise UsageError(
+                    f"variable {name!r} is not a precipitation rate; convert-to-totals "
+                    "only converts precipitation"
+                )
 
     # After select collapses the only time/step sample, dims are spatial-only.
     # aggregation_period on the variable is enough for the multiply; skip the
@@ -94,20 +110,14 @@ def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
             )
         if dim is not None:
             assert_nonoverlapping_intervals(ds, dim, period)
-        total = rate_to_total(da, period)
-        plain = total.pint.dequantify() if total.pint.units is not None else total
+        total = rate_to_total(da, period, dim=dim if dim in da.dims else None)
+        plain = total.pint.dequantify()
         attrs = {**da.attrs, **plain.attrs}
-        attrs["units"] = plain.attrs.get("units", STANDARD["precip_amount"]["units"])
-        units = variable_units(da) or da.attrs.get("units")
-        kind = classify_variable(name, units=units, standard_name=da.attrs.get("standard_name"))
-        if kind in ("precip", "precip_amount") or (
-            isinstance(name, str) and any(h in name.lower() for h in ("precip", "rain", "tp", "pr"))
-        ):
-            attrs["units"] = STANDARD["precip_amount"]["units"]
-            attrs["standard_name"] = STANDARD["precip_amount"]["standard_name"]
-            attrs["long_name"] = PRECIP_AMOUNT_LONG_NAME
-            if looks_like_rate_display_name(attrs.get("GRIB_name")):
-                attrs["GRIB_name"] = PRECIP_AMOUNT_LONG_NAME
+        attrs["units"] = STANDARD["precip_amount"]["units"]
+        attrs["standard_name"] = STANDARD["precip_amount"]["standard_name"]
+        attrs["long_name"] = PRECIP_AMOUNT_LONG_NAME
+        if looks_like_rate_display_name(attrs.get("GRIB_name")):
+            attrs["GRIB_name"] = PRECIP_AMOUNT_LONG_NAME
         attrs["cell_methods"] = format_cell_methods(_sum_cell_methods_dim(da, dim), "sum")
         # Keep aggregation_period so plotters can crop the nested precip palette.
         out[name] = plain

@@ -223,7 +223,7 @@ total"), compose with `select` and `convert-to-totals`: `clim-fetch --window
 each row's mean/std rate into a total — this is correct for both `_avg` and
 `_std` since totaling is linear (`Std(sum) = window × Std(mean)`, the same
 relationship `convert-to-totals`'s `rate_to_total` already applies uniformly
-to every variable, mean or std alike):
+to every precipitation variable, mean or std alike):
 
 ```bash
 uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py \

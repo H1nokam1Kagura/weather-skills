@@ -246,3 +246,92 @@ def test_convert_to_totals_refuses_precip_totals(tmp_path, convert_to_totals):
     with pytest.raises(SystemExit) as exc:
         run_skill(convert_to_totals, "-i", str(src), "-o", str(out))
     assert exc.value.code == 2
+
+
+def _daily(variables, n_days):
+    times = np.arange(np.datetime64("2026-01-01"), np.datetime64("2026-01-01") + n_days)
+    return xr.Dataset(
+        {
+            name: (("time", "latitude", "longitude"), np.full((n_days, 2, 2), value), attrs)
+            for name, (value, attrs) in variables.items()
+        },
+        coords={
+            "time": times.astype("datetime64[ns]"),
+            "latitude": [1.0, 2.0],
+            "longitude": [10.0, 11.0],
+        },
+    )
+
+
+PRECIP_RATE = {"units": "mm day-1", "standard_name": "lwe_precipitation_rate"}
+
+
+def _aggregate_then_convert(tmp_path, aggregate, convert_to_totals, ds, period, *args):
+    src = write_zarr(ds, tmp_path / "daily.zarr")
+    run_skill(aggregate, "-i", str(src), "-o", str(tmp_path / "agg.zarr"), "--period", period)
+    out = tmp_path / "totals.zarr"
+    run_skill(convert_to_totals, "-i", str(tmp_path / "agg.zarr"), "-o", str(out), *args)
+    return xr.open_zarr(out, consolidated=True)
+
+
+def test_converts_only_precip_and_passes_other_variables_through(
+    tmp_path, aggregate, convert_to_totals
+):
+    ds = _daily(
+        {
+            "precip": (2.0, PRECIP_RATE),
+            "t2m": (25.0, {"units": "degree_Celsius", "standard_name": "air_temperature"}),
+            "surface_pressure": (1000.0, {"units": "hPa"}),
+            "ws": (3.0, {"units": "m s-1"}),
+        },
+        n_days=14,
+    )
+    result = _aggregate_then_convert(tmp_path, aggregate, convert_to_totals, ds, "weekly")
+    assert result["precip"].values == pytest.approx(14.0)
+    assert result["precip"].attrs["units"] == "mm"
+    for name, value, units in (
+        ("t2m", 25.0, "degree_Celsius"),
+        ("surface_pressure", 1000.0, "hPa"),
+        ("ws", 3.0, "m s-1"),
+    ):
+        assert result[name].values == pytest.approx(value)
+        assert result[name].attrs["units"] == units
+        assert result[name].attrs.get("long_name") != PRECIP_AMOUNT_LONG_NAME
+
+
+def test_refuses_named_non_precip_variable(tmp_path, convert_to_totals):
+    ds = make_gridded(n_time=1, name="ws")
+    ds["ws"].attrs = {"units": "m s-1", AGGREGATION_PERIOD_ATTR: "7 day"}
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    for args in ((), ("-v", "ws")):
+        with pytest.raises(SystemExit) as exc:
+            run_skill(convert_to_totals, "-i", str(src), "-o", str(tmp_path / "out.zarr"), *args)
+        assert exc.value.code == 2
+
+
+def test_monthly_totals_use_each_months_length(tmp_path, aggregate, convert_to_totals):
+    ds = _daily({"precip": (2.0, PRECIP_RATE)}, n_days=59)  # Jan + Feb 2026
+    result = _aggregate_then_convert(tmp_path, aggregate, convert_to_totals, ds, "monthly")
+    totals = result["precip"].isel(latitude=0, longitude=0).values
+    assert totals.tolist() == pytest.approx([62.0, 56.0])
+
+
+def test_refuses_one_overlapping_pair_among_clean_bins(tmp_path, convert_to_totals):
+    times = np.array(
+        ["2026-01-01", "2026-01-08", "2026-01-15", "2026-01-22", "2026-01-23"],
+        dtype="datetime64[ns]",
+    )
+    ds = xr.Dataset(
+        {
+            "precip": (
+                ("time", "latitude", "longitude"),
+                np.ones((5, 2, 2)),
+                {**PRECIP_RATE, AGGREGATION_PERIOD_ATTR: "7 day"},
+            )
+        },
+        coords={"time": times, "latitude": [1.0, 2.0], "longitude": [10.0, 11.0]},
+    )
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(convert_to_totals, "-i", str(src), "-o", str(tmp_path / "out.zarr"))
+    assert exc.value.code == 2
