@@ -17,8 +17,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import xarray as xr
+from frozen_v27 import frozen_root
 
-SIMKIT_ROOT = Path("C:/Users/neilha/.agentbus/simkit-v2_7-closure-20261011")
+SIMKIT_ROOT = frozen_root()  # verified against FINAL-PINS by tests/frozen_v27.py
 sys.path.insert(0, str(SIMKIT_ROOT))
 
 from simkit import score  # noqa: E402 - explicit pinned test bootstrap
