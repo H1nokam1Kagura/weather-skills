@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -220,7 +221,121 @@ def test_injected_reader_triggers_ram_guard_at_1_8(tmp_path):
         p.run([PY, "-c", SLEEP_60], tmp_path, None)
     exit_ = events.one("process_exit")
     assert exit_["stop_reason"] == "RAM guard" and exit_["exit_code"] is None
+    # EVIDENCE_CONTRACT.md v2_5.process_reconciliation: null/null only on a stopped run,
+    # with null wall_seconds (W2 review side observation, processes.py:273).
+    assert exit_["wall_seconds"] is None
     assert not alive(exit_["pid"])
+
+
+# A child that writes known non-UTF-8 bytes, flushes, drops a sentinel, then sleeps.
+WRITE_THEN_SLEEP = (
+    "import sys, time, pathlib; sys.stdout.buffer.write(b'\\xff\\xfe\\x80abc'); "
+    "sys.stdout.flush(); sys.stderr.buffer.write(b'\\x80' * 7); sys.stderr.flush(); "
+    "pathlib.Path(sys.argv[1]).write_text('x'); time.sleep(60)"
+)
+
+
+def sentinel_reader(sentinel, then):
+    """4.0 GiB until the child's sentinel exists, then ``then()`` (a value or a raise)."""
+    return lambda: then() if sentinel.exists() else 4.0
+
+
+def test_ram_guard_stop_counts_exact_bytes(tmp_path):
+    sentinel = tmp_path / "written"
+    events = Events()
+    p = Processes(
+        tmp_path, ram_floor=2, on_event=events, memory_reader=sentinel_reader(sentinel, lambda: 1.8)
+    )
+    with pytest.raises(Refused, match="RAM guard"):
+        p.run([PY, "-c", WRITE_THEN_SLEEP, str(sentinel)], tmp_path, None)
+    exit_ = events.one("process_exit")
+    assert exit_["stop_reason"] == "RAM guard"
+    assert exit_["stdout_bytes"] == 6 and exit_["stderr_bytes"] == 7
+
+
+def test_exception_stop_counts_exact_bytes(tmp_path):
+    sentinel = tmp_path / "written"
+
+    def boom():
+        raise RuntimeError("reader failed (injected)")
+
+    events = Events()
+    p = Processes(tmp_path, on_event=events, memory_reader=sentinel_reader(sentinel, boom))
+    with pytest.raises(RuntimeError, match="injected"):
+        p.run([PY, "-c", WRITE_THEN_SLEEP, str(sentinel)], tmp_path, None)
+    exit_ = events.one("process_exit")
+    assert exit_["stop_reason"] == "exception:RuntimeError"
+    assert exit_["stdout_bytes"] == 6 and exit_["stderr_bytes"] == 7
+    assert not alive(exit_["pid"])
+
+
+def test_start_receipt_failure_still_emits_process_launch(tmp_path, monkeypatch):
+    """W2 review processes.py:352: a launched PID always has process_launch before exit."""
+
+    def boom(*a, **k):
+        raise OSError("disk full (injected)")
+
+    monkeypatch.setattr(processes_module, "atomic_json", boom)
+    events = Events()
+    p = Processes(tmp_path, on_event=events, memory_reader=readings(4.0))
+    with pytest.raises(OSError, match="disk full") as caught:
+        p.run([PY, "-c", SLEEP_60], tmp_path, None)
+    assert events.names() == ["launch_check", "process_launch", "process_exit"]
+    launch, exit_ = events.one("process_launch"), events.one("process_exit")
+    assert launch["pid"] == exit_["pid"] and launch["serial"] == exit_["serial"] == 1
+    assert exit_["stop_reason"] == "exception:OSError" and exit_["exit_code"] is None
+    assert not alive(launch["pid"])
+    assert any("start receipt" in n for n in caught.value.__notes__)
+
+
+def test_double_stop_failure_falls_back_and_still_emits_exit(tmp_path, monkeypatch):
+    """W2 review processes.py:375: a failing stop backend never leaks the child."""
+
+    def failing_stop(proc, *a, **k):
+        raise OSError("stop backend failed (injected)")
+
+    monkeypatch.setattr(processes_module, "stop", failing_stop)
+    events = Events(fail_on="process_launch")
+    p = Processes(tmp_path, on_event=events, memory_reader=readings(4.0))
+    try:
+        with pytest.raises(RuntimeError, match="process_launch") as caught:
+            p.run([PY, "-c", SLEEP_60], tmp_path, None)
+        assert events.names() == ["launch_check", "process_launch", "process_exit"]
+        exit_ = events.one("process_exit")
+        assert exit_["exit_code"] is None and exit_["wall_seconds"] is None
+        assert exit_["stop_reason"] == "exception:RuntimeError+stop_failed"
+        assert not alive(exit_["pid"])
+        assert any("stop failed" in n for n in caught.value.__notes__)
+    finally:
+        pid = events.one("process_launch")["pid"]
+        if alive(pid):  # never leave a stray child behind, even if the test fails
+            os.kill(pid, 9)
+
+
+def test_post_exit_memory_read_is_not_reported_as_a_minimum(tmp_path, monkeypatch):
+    """W2 review processes.py:405: no samples -> min_free_gib None, process_exit emitted."""
+    calls = []
+
+    def reader():
+        calls.append(1)
+        if len(calls) > 1:
+            raise RuntimeError("reader failed after the launch check (injected)")
+        return 4.0
+
+    real_launch = Processes._launch
+
+    def launch_and_reap(self, argv, popen_kwargs):
+        proc, capture = real_launch(self, argv, popen_kwargs)
+        proc.wait()  # exits before the first poll: the loop takes no sample
+        return proc, capture
+
+    monkeypatch.setattr(Processes, "_launch", launch_and_reap)
+    events = Events()
+    result = Processes(tmp_path, on_event=events, memory_reader=reader).run(
+        [PY, "-c", "pass"], tmp_path, None
+    )
+    assert events.names() == ["launch_check", "process_launch", "process_exit"]
+    assert result["min_free_gib"] is None and len(calls) == 1
 
 
 def test_injected_reader_at_2_4_does_not_trigger_ram_guard(tmp_path):
@@ -255,13 +370,35 @@ def test_on_event_failure_after_exit_is_raised_after_the_record(tmp_path):
 
 @windows
 def test_on_event_failure_still_cleans_up_tree_signal_path(tmp_path):
-    events = Events(fail_on="process_launch")
+    # The handler raises only once the grandchild exists (it writes a sentinel), so the
+    # cleanup is proven on a real tree, not on the root alone (W2 review :261).
+    sentinel = tmp_path / "grandchild-up"
+    grandchild = (
+        f"import pathlib, time; pathlib.Path({str(sentinel)!r}).write_text('x'); time.sleep(60)"
+    )
+    child = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}]); time.sleep(60)"
+    )
+
+    class WaitThenFail(Events):
+        def __call__(self, name, payload):
+            if name == "process_launch":
+                deadline = time.monotonic() + 30
+                while not sentinel.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+            super().__call__(name, payload)
+
+    events = WaitThenFail(fail_on="process_launch")
     p = Processes(tmp_path, on_event=events, memory_reader=readings(4.0), signal_capture=True)
     with pytest.raises(RuntimeError, match="process_launch"):
-        p.run([PY, "-c", spawn_child("import time; time.sleep(60)")], tmp_path, None)
+        p.run([PY, "-c", child], tmp_path, None)
+    assert sentinel.exists(), "the grandchild never started"
     record = events.one("signal_stop")["record"]
     assert record["trigger"] == "exception:RuntimeError"
     assert events.names() == ["launch_check", "process_launch", "process_exit", "signal_stop"]
+    assert len(record["signalled"]) >= 2
+    assert any(e["parent_pid"] != os.getpid() for e in record["signalled"])  # a descendant
     assert not any(alive(int(pid)) for pid in record["process_tree"] if int(pid) != os.getpid())
 
 

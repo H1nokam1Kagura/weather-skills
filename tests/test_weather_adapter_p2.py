@@ -367,6 +367,8 @@ def test_gate_report_patch_delivers_only_selected_report(frozen, tmp_path):
     assert onset["process"]["stdout"] == untouched
     assert result["records"] == []
     assert result["delivered"] is False and result["delivered_report_hash"] is None
+    # The unpatched branch still binds the raw hash to the observed stdout (W2 review :367).
+    assert result["raw_report_hash"] == "sha256:" + hashlib.sha256(untouched.encode()).hexdigest()
     read_gate(onset["process"], "verify-run.gate/1", controller.paths["onset"], replay=True)
 
     selected = verify_event(controller, "map")

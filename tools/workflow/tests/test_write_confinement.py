@@ -94,7 +94,8 @@ def test_writes_outside_run_dir_fail_and_nothing_appears(dirs):
     r = launch(run, out, PROBE, *targets)
     assert r["exit_code"] == 0, r["stderr"]
     verdicts = last_json(r["stdout"])
-    assert set(verdicts.values()) == {"PermissionError"}, verdicts
+    # Every target has its own verdict: a missing key is not a denial (W2 review :97).
+    assert verdicts == {str(t): "PermissionError" for t in targets}, verdicts
     assert r["created_paths"] == []
 
 
@@ -207,7 +208,13 @@ print(json.dumps(res))
     r = launch(run, out, code, out, os.getpid())
     assert r["exit_code"] == 0, r["stderr"]
     res = last_json(r["stdout"])
-    assert res.get("write_through", "PermissionError") == "PermissionError"
+    # One explicit branch, no default (W2 review :210): either the junction exists and the
+    # write through it was denied, or its creation failed with an observed error name and
+    # no write was attempted.
+    if res["junction_created"] is True:
+        assert res["write_through"] == "PermissionError", res
+    else:
+        assert isinstance(res["junction_created"], str) and "write_through" not in res, res
     assert res["open_harness_for_write"] is False
     assert not (out / "through.txt").exists()
 
@@ -287,6 +294,8 @@ def test_fresh_restricting_sid_grants_nothing(dirs):
         mode="fresh_sid_write_restricted",
     )
     assert r["confinement"]["token_matches_expected"] is True
+    # An observed launch, even if DLL init failed (W2 review :290): exit code and tree seen.
+    assert r["exit_code"] is not None and r["tree_pids"], r
     assert r["created_paths"] == []  # either DLL init fails or the write is denied
     assert not (run / "a.txt").exists()
     assert r["exhaustive"] is False

@@ -300,10 +300,69 @@ def test_denied_signal_is_recorded_and_not_exhaustive():
     j = make(b)
     b.add(2001, 2000, deny=True)
     rec = ss.stop_tree(j, job=job(b), timeout_s=0.05, settle_ms=0)
-    assert 2001 in rec["signalled_pids"]  # terminated or not, it was signalled
+    # Intentional change (W2 review signal_stop.py:713): a denied TerminateProcess is an
+    # attempt, not a signal. It was asserted IN signalled_pids here before; it now lives in
+    # signal_attempts and signal_denied only, once per PID across stop rounds.
+    assert 2001 not in rec["signalled_pids"]
+    assert 2001 not in {e["pid"] for e in rec["signalled"]}
+    assert [e["pid"] for e in rec["signal_denied"]] == [2001]
+    assert rec["signal_denied"][0]["result"] == "denied"
+    assert len(rec["signalled_pids"]) == len(set(rec["signalled_pids"]))
     assert "denied" in {a["result"] for a in rec["signal_attempts"] if a["pid"] == 2001}
     assert rec["exhaustive"] is False
     assert any("deadline" in r for r in rec["exhaustive_reasons"])
+    assert any("denied" in r for r in rec["exhaustive_reasons"])
+
+
+def test_pid_signalled_in_two_rounds_is_listed_once():
+    b = FakeBackend()
+    j = make(b)
+    slow = b.add(2001, 2000)
+    rounds = []
+
+    def survives_first_signal(backend, handle):
+        if handle.pid == 2001:
+            rounds.append(1)
+            handle.immortal = len(rounds) < 2  # TerminateProcess succeeds, exit lags a round
+
+    b.on_terminate.append(survives_first_signal)
+    rec = ss.stop_tree(j, job=job(b), timeout_s=2, settle_ms=0)
+    assert len([a for a in rec["signal_attempts"] if a["pid"] == 2001]) == 2
+    assert rec["signalled_pids"].count(2001) == 1 and not slow.alive
+    assert rec["signalled_pids"] == [e["pid"] for e in rec["signalled"]]
+    assert rec["signal_denied"] == []
+
+
+def test_launch_failure_cleanup_closes_job_when_wait_raises(monkeypatch):
+    """W2 review signal_stop.py:401: close_job runs even if kill/wait raises."""
+    closed = []
+
+    class Backend(FakeBackend):
+        def create_job(self):
+            return "job"
+
+        def assign_suspended_and_resume(self, job, pid, before_resume=None):
+            raise OSError("assign failed (injected)")
+
+        def close_job(self, job):
+            closed.append(job)
+
+    class FailingWait:
+        pid = 4242
+
+        def __init__(self, *a, **k):
+            pass
+
+        def kill(self):
+            pass
+
+        def wait(self, timeout=None):
+            raise ss.subprocess.TimeoutExpired("x", timeout)
+
+    monkeypatch.setattr(ss.subprocess, "Popen", FailingWait)
+    with pytest.raises(OSError, match="assign failed"):
+        ss.launch_in_census_job(["x"], backend=Backend())
+    assert closed == ["job"]
 
 
 def test_already_exited_target_is_recorded_but_not_signalled():

@@ -34,7 +34,8 @@ def report(root):
         "process_count": len(processes),
         "role_count": len(roles),
         "minimum_free_gib": min(
-            (p["min_free_gib"] for p in processes if "min_free_gib" in p), default=None
+            (p["min_free_gib"] for p in processes if p.get("min_free_gib") is not None),
+            default=None,
         ),
         "repairs_used": checkpoint.get("repairs_used", 0),
         "resumes": checkpoint.get("resumes", 0),

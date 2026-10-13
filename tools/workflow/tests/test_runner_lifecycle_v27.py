@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ from tools.workflow.contracts import (
     request_goal,
     validate_goal,
 )
-from tools.workflow.persistence import read_checkpoint
+from tools.workflow.persistence import read_checkpoint, run_lock, write_checkpoint
 from tools.workflow.tests.test_workflow import GOAL, FakeProcesses, FakeRoles, controller, request
 
 WORKFLOW = Path(runner.__file__).resolve().parent
@@ -38,19 +39,79 @@ DECLARED = {"runner", "contracts", "__main__"}
 # (terminal_mapping.source == "state_fallback"). This set may only SHRINK.
 PENDING_PROTECTED: set = set()  # reviewer-loop raises are tagged since the claim-pipeline merge
 # Untagged raises in modules outside the declared set at this revision (agents.py is declared
-# for prompt text only). The controller tags them at its call site; counts may only shrink.
-OUTSIDE_INVENTORY = {
-    "admission": 10,
-    "agents": 4,
-    "catalog": 11,
-    "evaluation": 8,
-    "kong_roles": 9,
-    "persistence": 2,
-    "policy": 3,
-    "processes": 4,
-    "review_evidence": 12,
-    "simulation": 2,
-}
+# for prompt text only), pinned by (module, message) so that swapping one untagged raise for
+# another in the same module still fails the census (W2 review test_runner_lifecycle_v27:198).
+# The controller tags them at its call site. This multiset may only SHRINK.
+OUTSIDE_INVENTORY = Counter(
+    [
+        ("admission", "'registered synthetic ' + name + ' changed'"),
+        ("admission", "invalid synthetic admission policy"),
+        ("admission", "registered synthetic source changed"),
+        ("admission", "synthetic admission requires a trusted harness registration"),
+        ("admission", "synthetic fixture manifest content hash differs"),
+        ("admission", "synthetic fixture manifest disagrees with source"),
+        ("admission", "synthetic fixture manifest lineage differs"),
+        ("admission", "synthetic fixture manifest requires an integer seed"),
+        ("admission", "synthetic fixture manifest source hash differs"),
+        ("admission", "synthetic fixture must have honest generator lineage, not fetch history"),
+        ("agents", "Claude CLI unavailable"),
+        ("agents", "f\"{role} CLI failed: {result['stderr'][-500:]}\""),
+        ("agents", "f'invalid {role} envelope: {exc}'"),
+        ("agents", "role unavailable or aggregate model budget exhausted"),
+        ("catalog", "definition changed; cached-onset/v1 must be reviewed"),
+        ("catalog", "empty artifact"),
+        ("catalog", "f'invalid CLI contract for {skill}'"),
+        ("catalog", "f'links/reparse points are not permitted: {part}'"),
+        ("catalog", "f'missing artifact: {path}'"),
+        ("catalog", "f'tool is not allowlisted: {skill}'"),
+        ("catalog", "network/device paths are outside this profile"),
+        ("catalog", "non-execution flag or unresolved placeholder"),
+        ("catalog", "only regular artifact files are supported"),
+        ("catalog", "runtime core revision differs from the admitted profile"),
+        ("catalog", "tool arguments must be a string array"),
+        ("evaluation", "build changed during evaluation"),
+        ("evaluation", "duplicate case IDs"),
+        ("evaluation", "heldout cases must not enter the development harness"),
+        (
+            "evaluation",
+            "implementation harness accepts DEV-ONLY files; heldout custody is external",
+        ),
+        ("evaluation", "invalid case identifier"),
+        ("evaluation", "model evaluation budget must be between zero and five dollars"),
+        ("evaluation", "root replacement not supported by this adapter"),
+        ("evaluation", "unsupported JSON Patch operation"),
+        ("kong_roles", "Kong kit interpreter unavailable"),
+        ("kong_roles", "Kong transport requires acknowledging the Not Sensitive data policy"),
+        ("kong_roles", "f\"{role} Kong worker failed before sending: {evidence['error_type']}\""),
+        ("kong_roles", "f'invalid {role} Kong response: {exc}'"),
+        ("kong_roles", "f'price for {name!r} needs finite rates and a cited source'"),
+        ("kong_roles", "max_tokens must be an integer in 1..64000"),
+        ("kong_roles", "role unavailable or aggregate model budget exhausted"),
+        ("kong_roles", "temperature must be null or in 0..1"),
+        ("persistence", "run is already owned by another process"),
+        ("persistence", "unsupported or damaged checkpoint"),
+        ("policy", "invalid action mask"),
+        ("policy", "invalid bounded decision scores"),
+        ("policy", "stale or masked policy action"),
+        ("processes", "aggregate time budget exhausted"),
+        ("processes", "available RAM cannot be measured"),
+        ("processes", "insufficient free RAM to start a child"),
+        ("processes", "reason"),
+        ("review_evidence", "invalid review claim fields"),
+        ("review_evidence", "invalid review claim identity/text/declaration"),
+        ("review_evidence", "required definition source missing"),
+        ("review_evidence", "review citation source/hash/quote mismatch"),
+        ("review_evidence", "review claim citations missing"),
+        ("review_evidence", "review claims missing"),
+        ("review_evidence", "review payload binding/source mismatch"),
+        ("review_evidence", "review source identity/hash mismatch"),
+        ("review_evidence", "review source text missing"),
+        ("review_evidence", "review sources missing"),
+        ("review_evidence", "review sources missing"),
+        ("simulation", "invalid simulation model budget"),
+        ("simulation", "unknown simulation scenario"),
+    ]
+)
 
 
 # ------------------------------------------------------------------ helpers
@@ -177,7 +238,7 @@ def test_gate_vocabulary_is_the_frozen_failed_gate_vocabulary():
 
 
 def test_static_census_every_refused_raise_carries_a_declared_gate():
-    untagged_declared, outside = set(), {}
+    untagged_declared, outside = set(), Counter()
     for path in sorted(WORKFLOW.glob("*.py")):
         module = path.stem
         for call in refused_raises(path):
@@ -191,10 +252,11 @@ def test_static_census_every_refused_raise_carries_a_declared_gate():
             if module in DECLARED:
                 untagged_declared.add((module, message(call)))
             else:
-                outside[module] = outside.get(module, 0) + 1
+                outside[(module, message(call))] += 1
     assert untagged_declared == PENDING_PROTECTED
-    for module, count in outside.items():
-        assert count <= OUTSIDE_INVENTORY.get(module, 0), f"new untagged raise in {module}"
+    unexpected = outside - OUTSIDE_INVENTORY
+    assert not unexpected, f"new untagged raise(s): {sorted(unexpected)}"
+    for module in {module for module, _ in outside}:
         assert module in runner.CALL_SITE_GATES, f"no call-site gate documented for {module}"
 
 
@@ -465,6 +527,10 @@ def test_verifier_fail_is_recorded_natively(tmp_path, monkeypatch, returned, ver
 def test_verifier_pass_is_recorded_and_releases(tmp_path, monkeypatch):
     c = controller(tmp_path, monkeypatch)
     assert c.run()["terminal"]["outcome"] == "RELEASED"
+    # Updated to follow an intentional change: the record now also keeps the returned
+    # binding_hash and scope (W2 review runner.py:1586).
+    returned_binding = c.context["verifier_verdicts"][0]["returned_binding_hash"]
+    assert isinstance(returned_binding, str) and returned_binding
     assert c.context["verifier_verdicts"] == [
         {
             "occurrence": 1,
@@ -473,6 +539,8 @@ def test_verifier_pass_is_recorded_and_releases(tmp_path, monkeypatch):
             "returned_verdict": "PASS",
             "binding_valid": True,
             "scope_valid": True,
+            "returned_binding_hash": returned_binding,
+            "returned_scope": "data-replay",
         }
     ]
 
@@ -512,6 +580,18 @@ def test_verifier_pass_with_wrong_binding_does_not_release(tmp_path, monkeypatch
     with pytest.raises(Refused, match="did not confirm"):
         c.run()
     assert c.context["verifier_verdicts"][0]["binding_valid"] is False
+
+
+def test_verifier_record_keeps_the_returned_binding_and_scope(tmp_path, monkeypatch):
+    """W2 review runner.py:1586: a FAIL leaves a durable copy of what was returned."""
+    returned = {"verdict": "FAIL", "binding_hash": "sha256:" + "0" * 64, "scope": ["odd"]}
+    c = controller(tmp_path, monkeypatch, roles=ReceiptRoles(answers={"verifier": returned}))
+    with pytest.raises(Refused, match="did not confirm"):
+        c.run()
+    (record,) = read_checkpoint(c.root)["context"]["verifier_verdicts"]
+    assert record["returned_binding_hash"] == "sha256:" + "0" * 64
+    assert record["returned_scope"] == ["odd"]
+    assert record["binding_valid"] is False and record["scope_valid"] is False
 
 
 # ------------------------------------------------------------------ item 5: plan records
@@ -709,6 +789,51 @@ def test_cli_exposes_evidence_modes(tmp_path, monkeypatch, capsys, flags):
     assert captured["review_evidence_mode"] is ("--review-evidence" in flags)
 
 
+def exhausted_checkpoint(tmp_path, monkeypatch):
+    c = controller(tmp_path, monkeypatch)
+    value = read_checkpoint(c.root)
+    value["elapsed_s"] = value["total_seconds"] + 1
+    write_checkpoint(c.root, value)
+    monkeypatch.setattr(sys, "argv", ["wf", "resume", "--run-dir", str(c.root)])
+    return c
+
+
+def test_cli_resume_budget_refusal_records_a_terminal(tmp_path, monkeypatch, capsys):
+    """W2 review __main__.py:130: the refusal reaches result.json and the status line."""
+    c = exhausted_checkpoint(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 1
+    assert isinstance(stopped.value.__cause__, Refused)
+    assert stopped.value.__cause__.gate == "budget"
+    terminal = result_json(c)["terminal"]
+    assert terminal["failed_gate"] == "budget" and terminal["reason"] == "resume_refused"
+    assert terminal["outcome"] in {"BLOCKED", "INCOMPLETE"}
+    assert read_checkpoint(c.root)["context"]["terminal"]["failed_gate"] == "budget"
+    status = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert status["status"] == "INCOMPLETE" and status["terminal"] == terminal
+
+
+def test_cli_resume_reads_the_checkpoint_under_the_run_lock(tmp_path, monkeypatch, capsys):
+    """W2 review __main__.py:127: limits are read from the checkpoint the resume owns."""
+    c = exhausted_checkpoint(tmp_path, monkeypatch)
+    held, real = [], cli.read_checkpoint
+
+    def spy(root):
+        try:
+            with run_lock(root):
+                held.append(False)  # nobody held the lock: read outside it
+        except Refused:
+            held.append(True)
+        return real(root)
+
+    monkeypatch.setattr(cli, "read_checkpoint", spy)
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert held == [True]
+    assert c.root.joinpath("result.json").exists()
+
+
 # ------------------------------------------------------------------ item 4: process receipts
 
 
@@ -742,6 +867,53 @@ def test_process_events_join_the_controller_sequence(tmp_path, monkeypatch):
     assert records[-1]["terminal"]["failed_gate"] is None
     validations = [r for r in records if r["kind"] == "plan_validation"]
     assert validations[0]["validation"]["verdict"] == "PASS"
+
+
+class SilentProcesses(EventProcesses):
+    """Satisfies supports_process_receipts but never calls on_event."""
+
+    def run(self, argv, cwd, env, tool=None):
+        self.tools.append(tool)
+        return FakeProcesses.run(self, argv, cwd, env)
+
+
+class NoExitProcesses(EventProcesses):
+    """Emits launch_check and process_launch, then drops process_exit."""
+
+    def run(self, argv, cwd, env, tool=None):
+        real, kept = self.on_event, []
+        self.on_event = lambda kind, details: (
+            kept.append(kind) or (real(kind, details) if kind != "process_exit" else None)
+        )
+        try:
+            return super().run(argv, cwd, env, tool=tool)
+        finally:
+            self.on_event = real
+
+
+@pytest.mark.parametrize("manager", [SilentProcesses, NoExitProcesses])
+def test_process_record_without_receipts_is_refused(tmp_path, monkeypatch, manager):
+    """W2 review runner.py:89: the interface check alone let a silent manager release."""
+    base = controller(tmp_path, monkeypatch)
+    (tmp_path / "ev").mkdir()
+    c = runner.Controller(
+        base.repo,
+        base.request,
+        base.source,
+        tmp_path / "ev",
+        manager(),
+        ReceiptRoles(),
+        dispatch_evidence_mode=True,
+    )
+    monkeypatch.setattr(c, "inspect_source", lambda: {"test": "metadata fixture"})
+    with pytest.raises(Refused) as caught:
+        c.run()
+    assert caught.value.gate == "gate_evidence"
+    result = result_json(c)
+    assert result["terminal"]["outcome"] != "RELEASED"
+    assert result["terminal"]["failed_gate"] == "gate_evidence"
+    assert result["terminal"]["reason"] == "process_receipts_missing"
+    assert dispatch_events(c.root)[-1]["terminal"]["failed_gate"] == "gate_evidence"
 
 
 def test_signal_stop_event_is_recorded(tmp_path, monkeypatch):

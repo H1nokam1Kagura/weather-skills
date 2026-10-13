@@ -251,10 +251,8 @@ def scenario_suite(base, released, shared_roots):
         read_delay=0.4,
         precondition=wc.audit_for_mode("confined", run, [base / "confined-overflow"]),
     )
-    r["created_count"] = len(r["created_paths"] or [])
     r.pop("events", None)
-    r["created_paths"] = f"<{r['created_count']} paths elided>"
-    out["confined_overflow"] = r
+    out["confined_overflow"] = elide_created_paths(r)
     release_all(released, run)
 
     # 5. observer failure: the watcher cannot arm => missing evidence (None), tree never launched
@@ -278,7 +276,7 @@ def scenario_suite(base, released, shared_roots):
     try:
         r = launch("none", run, logs, [py, "-c", f"open(r'{target}','w').write('x')"])
         r["outside_file_written"] = target.exists()
-        r["outside_file_recorded"] = str(target) in (r["created_paths"] or [])
+        r["outside_file_recorded"] = outside_recorded(target, r["created_paths"])
     finally:
         target.unlink(missing_ok=True)
     out["unconfined_control"] = r
@@ -385,12 +383,49 @@ def breakage(base, released):
                 "created_paths": r["created_paths"][:20]
                 if r["created_paths"]
                 else r["created_paths"],
-                "created_count": len(r["created_paths"] or []),
+                "created_count": created_count(r["created_paths"]),
                 "repo_pycache_changed": pyc_state() != before,
                 "error": r["error"],
             }
             release_all(released, run)
     return out
+
+
+# Missing capture (created_paths None) stays missing: never 0, False or [] (W2 review).
+def created_count(paths):
+    return None if paths is None else len(paths)
+
+
+def elide_created_paths(r):
+    paths = r["created_paths"]
+    r["created_count"] = created_count(paths)
+    r["created_paths"] = None if paths is None else f"<{len(paths)} paths elided>"
+    return r
+
+
+def outside_recorded(target, paths):
+    return None if paths is None else str(target) in paths
+
+
+def _overflow_forces_non_exhaustive(case):
+    exhaustive = case["exhaustive"]
+    if exhaustive is None:
+        return None
+    return bool(case["watcher"]["overflow"]) and exhaustive is False
+
+
+def _outside_write_unrecorded(case):
+    recorded = case["outside_file_recorded"]
+    if recorded is None:
+        return None
+    return bool(case["outside_file_written"]) and recorded is False
+
+
+def _escaped_paths(case):
+    paths = case["created_paths"]
+    if paths is None:
+        return None
+    return [p for p in paths if not wc._is_under(p, case["run_dir"])]
 
 
 def summarize(result):
@@ -414,11 +449,9 @@ def summarize(result):
         and set(verdicts.values()) == {"PermissionError"},
         "confined_scenario_created_paths": conf["created_paths"],
         "confined_scenario_exhaustive_in_scoped_audit": conf["exhaustive"],
-        "overflow_forces_non_exhaustive": sc["confined_overflow"]["watcher"]["overflow"]
-        and not sc["confined_overflow"]["exhaustive"],
+        "overflow_forces_non_exhaustive": _overflow_forces_non_exhaustive(sc["confined_overflow"]),
         "observer_failure_is_missing": sc["observer_failure"]["created_paths"] is None,
-        "unconfined_outside_write_unrecorded": sc["unconfined_control"]["outside_file_written"]
-        and not sc["unconfined_control"]["outside_file_recorded"],
+        "unconfined_outside_write_unrecorded": _outside_write_unrecorded(sc["unconfined_control"]),
         "low_integrity_locallow_writable": (sc["low_integrity_alone"]["verdicts"] or {}).get(
             str(PROFILE / "AppData" / "LocalLow")
         )
@@ -439,11 +472,7 @@ def summarize(result):
         ),
         "shared_root_escape": {
             "verdicts": sc["confined_shared_roots"]["verdicts"],
-            "recorded": [
-                p
-                for p in sc["confined_shared_roots"]["created_paths"] or []
-                if not wc._is_under(p, sc["confined_shared_roots"]["run_dir"])
-            ],
+            "recorded": _escaped_paths(sc["confined_shared_roots"]),
             "attribution_exact": sc["confined_shared_roots"]["attribution_exact"],
             "exhaustive": sc["confined_shared_roots"]["exhaustive"],
             "not_exhaustive_because": sc["confined_shared_roots"]["not_exhaustive_because"],

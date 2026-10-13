@@ -13,6 +13,7 @@ from . import (
     claim_gates,
     operator_ledger,
     policy,
+    process_receipts,
     recovery,
     review_evidence,
     shadow,
@@ -586,7 +587,11 @@ class Controller:
             raise Refused(
                 f"process event overrides controller fields: {sorted(clash)}", gate="gate_evidence"
             )
-        return self.dispatch_event(kind, **json.loads(json.dumps(details)))
+        record = self.dispatch_event(kind, **json.loads(json.dumps(details)))
+        window = getattr(self, "process_window", None)
+        if window is not None:  # Controller.tool verifies these at process completion
+            window.append((kind, json.loads(json.dumps(details))))
+        return record
 
     def capture_invocation(self, observation):
         if observation["attempt_id"] != self.pending["attempt_id"]:
@@ -1450,6 +1455,7 @@ class Controller:
         self.pending = {"kind": "tool", "skill": skill, "argv": argv}
         self.checkpoint()
         receipts = {"tool": skill} if "dispatch_evidence" in self.context else {}
+        self.process_window = [] if receipts else None
         try:
             # Process-manager refusals are its RAM / wall-time / output guards.
             with gated("resource_guard"):
@@ -1459,9 +1465,13 @@ class Controller:
         except Exception:
             # The process manager stops owned children before raising. A hard crash leaves pending set.
             self.pending = None
+            self.process_window = None
             self.checkpoint()
             raise
         self.pending = None
+        window, self.process_window = self.process_window, None
+        if window is not None:
+            process_receipts.verify(window, result)  # gate_evidence: receipts, not interface
         self.emit("after_tool", {"skill": skill, "argv": argv, "process": result})
         self.integrity()
         self.save(f"tool-{self.state}-{skill}.json", {"parsed": parsed, "process": result})
@@ -2082,6 +2092,10 @@ class Controller:
             "returned_verdict": raw,
             "binding_valid": value["binding_hash"] == binding,
             "scope_valid": value["scope"] == "data-replay",
+            # What the verifier actually returned, kept durably (W2 review runner.py:1586):
+            # a FAIL refusal otherwise leaves only the booleans behind.
+            "returned_binding_hash": json.loads(json.dumps(value["binding_hash"])),
+            "returned_scope": json.loads(json.dumps(value["scope"])),
         }
         records.append(record)
         self.checkpoint()
