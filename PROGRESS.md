@@ -73,3 +73,27 @@ Role modes: 32 substituted-only, 20 live+substituted, 14 live-only; no case need
 
 ## Log
 - 2026-10-13: merged integration (ff to 39d127c); built M1-M4 locally.
+- 2026-10-13 GHA push smoke run 38465559689 (first push of this branch): success; admission
+  in-container (frozen_root /opt/frozen-v27, FINAL-PINS 153f207e...; image sha256:63179befae8d...),
+  0/66 admitted, case job skipped, report produced RESULTS (66 NOT_IMPLEMENTED, 33 pairs).
+- 2026-10-13 GHA dispatch selector=admission run 38465652610: success; same result (admitted 0,
+  NOT_IMPLEMENTED 66). Artifacts downloaded to %TEMP%/simkit-gh-cases/<run-id>/.
+  https://github.com/H1nokam1Kagura/weather-skills/actions/runs/38465652610
+
+## Next steps (new session)
+1. Coordinator: fill reviewer/reviewed_at in adapter_support/CAPABILITY-PRODUCERS.json for the
+   six PRODUCER_MAPPED D4-gated caps (BOUND-SOURCES, LEDGER-SEED, PROFILE, REASON-MAP,
+   ROLE-OUTPUT-SCHEMA, RUN-PROVENANCE) once reviewed; that alone admits nothing (other caps
+   are needed by all 66) but shrinks every case's missing list by 6.
+2. Adapter track: upgrade PARTIAL -> PRODUCER_MAPPED for RECEIPTS, SYMBOLS, HARNESS-OBS,
+   SIGNAL-CAPTURE (container trace now supplies the observations), add methods + records for
+   EXHAUSTIVE-WRITES (container route), EVIDENCE-CHECKER, OPERATOR-ACTIONS, PRE-REVIEW-GATES,
+   ROLE-SUBSTITUTE, and the per-case caps (FIXTURE-OP, INTERRUPT/RESUME, TRANSITION-REQUEST...).
+3. Add `WeatherAdapter.substituted_roles_factory(case, goal, run_dir)` (driver contract), else
+   admitted substituted cases are BLOCKED_SUBSTITUTED_ROLE_WIRING.
+4. Persist run_case's harness inputs for the post-trace re-projection (see Design decisions).
+5. When the first case is admitted: merge the latest integration branch, push (smoke = E02-P1
+   pair), then `gh workflow run simkit-cases.yml -R H1nokam1Kagura/weather-skills --ref
+   feat/simkit-gh-cases-snowyowl -f selector=<ids>`; expect to fix first-run infra issues in the
+   case job (never exercised yet). Never retry a failed case automatically.
+6. Live roles: host-side Kong relay (key never in the container) before BLOCKED_LIVE cases run.
