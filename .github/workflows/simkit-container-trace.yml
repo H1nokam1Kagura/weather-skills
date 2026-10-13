@@ -1,0 +1,98 @@
+name: simkit-container-trace
+
+# Traced Linux container harness (owner ruling container_route_ruling_2026-10-13).
+# Runs ONLY on manual dispatch or a push to the harness branch. No secrets, no Kong, no network
+# inside the run containers (fixture roles).
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/simkit-w3-container-snowyowl]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: simkit-container-trace-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EV: ${{ github.workspace }}/harness-evidence
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Analyzer unit tests (synthetic strace fixtures, no docker)
+        run: |
+          python -m pip install --quiet pytest==9.1.1
+          python -B -m pytest -q -p no:cacheprovider container_harness/tests
+
+      - name: Host and engine facts
+        run: |
+          mkdir -p "$EV"
+          {
+            echo "uname=$(uname -a)"
+            echo "nproc=$(nproc)"
+            grep -E 'MemTotal|MemAvailable' /proc/meminfo
+            echo "ptrace_scope=$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null)"
+            echo "io_uring_disabled=$(cat /proc/sys/kernel/io_uring_disabled 2>/dev/null || echo absent)"
+            docker version --format 'docker client={{.Client.Version}} server={{.Server.Version}}'
+            docker info --format 'security={{json .SecurityOptions}} cgroup={{.CgroupVersion}} runtime={{.DefaultRuntime}}'
+          } | tee "$EV/host-facts.txt"
+
+      - name: Build harness image
+        run: |
+          python container_harness/launch.py build --tag "simkit-harness-ctl:${GITHUB_SHA::12}" \
+            --context "$RUNNER_TEMP/harness-ctx" --record "$EV/build.json"
+
+      - name: Regression scenarios (synthetic owned tree through the analyzer)
+        run: |
+          IMG="simkit-harness-ctl:${GITHUB_SHA::12}"
+          python container_harness/launch.py run tree --image "$IMG" --out "$EV/tree"
+          python container_harness/launch.py run tree --image "$IMG" --out "$EV/tree-untraced" --no-trace
+          python container_harness/launch.py run kill-tracer --image "$IMG" --out "$EV/kill-tracer"
+          python container_harness/launch.py run tree --image "$IMG" --out "$EV/tracer-death" --kill-tracer-after 3
+
+      - name: Canary (real controller, fixture roles, staged synthetic fixture, cached-onset/v1)
+        run: |
+          IMG="simkit-harness-ctl:${GITHUB_SHA::12}"
+          python container_harness/launch.py run canary --image "$IMG" --out "$EV/canary"
+          python container_harness/launch.py run canary --image "$IMG" --out "$EV/canary-untraced" --no-trace
+
+      - name: Report (expected vs observed)
+        if: always()
+        run: |
+          python container_harness/report.py "$EV" --out "$EV/SUMMARY.json" --markdown "$EV/SUMMARY.md" \
+            && rc=0 || rc=$?
+          cat "$EV/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY" || true
+          exit $rc
+
+      - name: Pack raw traces separately
+        if: always()
+        run: |
+          cd "$EV"
+          tar -czf "$RUNNER_TEMP/raw-traces.tgz" */harness-out/trace 2>/dev/null || true
+          find . -path '*/harness-out/trace' -prune -exec rm -rf {} + || true
+
+      - name: Upload evidence JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-container-evidence
+          path: harness-evidence
+          retention-days: 30
+
+      - name: Upload raw traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-container-raw-traces
+          path: ${{ runner.temp }}/raw-traces.tgz
+          retention-days: 7
+          if-no-files-found: warn

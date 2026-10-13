@@ -31,6 +31,10 @@ from tools.workflow.tests.test_workflow import GOAL, FakeProcesses, FakeRoles, c
 WORKFLOW = Path(runner.__file__).resolve().parent
 FROZEN = frozen_root()  # verified against FINAL-PINS by tests/frozen_v27.py
 CONTRACT = FROZEN / "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json"
+# Identity of FINAL-PINS.json itself, as recorded in the input supplement
+# (cached-onset-e2e-v2_7-inputs/1, supplements.final_pins_sha256), so a relocated package must
+# be byte-identical to the frozen one.
+FINAL_PINS_SHA256 = "153f207e89c6ac7786d8203413eeef1e1fce219aef7252d63aced1b5b33d0402"
 
 # Modules in this change's declared file set: every Refused raise must carry a gate here.
 DECLARED = {"runner", "contracts", "__main__"}
@@ -224,7 +228,9 @@ def message(call):
 
 
 def test_gate_vocabulary_is_the_frozen_failed_gate_vocabulary():
-    pins = json.loads((FROZEN / "FINAL-PINS.json").read_text(encoding="utf-8"))["files"]
+    pins_bytes = (FROZEN / "FINAL-PINS.json").read_bytes()
+    assert hashlib.sha256(pins_bytes).hexdigest() == FINAL_PINS_SHA256
+    pins = json.loads(pins_bytes.decode("utf-8"))["files"]
     assert (
         hashlib.sha256(CONTRACT.read_bytes()).hexdigest()
         == pins[CONTRACT.relative_to(FROZEN).as_posix()]
