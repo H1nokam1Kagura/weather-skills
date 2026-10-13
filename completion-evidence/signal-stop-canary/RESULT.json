@@ -1,0 +1,4893 @@
+{
+ "schema": "signal-stop-canary/1",
+ "generated_utc": "2026-10-13T04:20:45.419357+00:00",
+ "host": {
+  "platform": "Windows-11-10.0.26100-SP0",
+  "python": "3.12.13"
+ },
+ "not_evidence_for": "SIMKIT scoring; synthetic owned trees only",
+ "decoy_alive_at_end": true,
+ "decoy_never_attempted": true,
+ "summary": {
+  "normal_job_journal": {
+   "runs": 1,
+   "exhaustive_true": 1
+  },
+  "normal_job_stoptime": {
+   "runs": 1,
+   "exhaustive_true": 1
+  },
+  "normal_no_job_journal": {
+   "runs": 1,
+   "exhaustive_true": 0
+  },
+  "orphan_job_journal": {
+   "runs": 1,
+   "exhaustive_true": 1
+  },
+  "orphan_job_stoptime": {
+   "runs": 1,
+   "exhaustive_true": 0
+  },
+  "orphan_no_job_stoptime": {
+   "runs": 1,
+   "exhaustive_true": 0
+  },
+  "fast_orphan_job_journal": {
+   "runs": 10,
+   "exhaustive_true": 10
+  },
+  "fast_orphan_job_slow_journal": {
+   "runs": 5,
+   "exhaustive_true": 0
+  },
+  "churn_job_journal": {
+   "runs": 3,
+   "exhaustive_true": 3
+  }
+ },
+ "runs": [
+  {
+   "scenario": "normal_job_journal",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 6,
+   "results": {
+    "ok": 6
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    34068,
+    37528
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 15,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 78.0,
+    "max_snapshot_ms": 47.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 6,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 6,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": [],
+    "note_rejections": 7
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 38900,
+    "signalled_pids": [
+     34068,
+     37528,
+     27852,
+     32924,
+     21280,
+     38900
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 34068,
+      "parent_pid": 27852,
+      "created_100ns": 134363388029306087,
+      "observed_at_ns": 192224031000000,
+      "observed_at_utc": "2026-10-13T04:20:03.283918+00:00",
+      "first_observed_utc": "2026-10-13T04:20:02.981199+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       34068,
+       27852,
+       38900,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192224031000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 37528,
+      "parent_pid": 32924,
+      "created_100ns": 134363388029124209,
+      "observed_at_ns": 192224031000000,
+      "observed_at_utc": "2026-10-13T04:20:03.284919+00:00",
+      "first_observed_utc": "2026-10-13T04:20:02.981199+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       37528,
+       32924,
+       38900,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192224031000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 27852,
+      "parent_pid": 38900,
+      "created_100ns": 134363388026957046,
+      "observed_at_ns": 192224031000000,
+      "observed_at_utc": "2026-10-13T04:20:03.284919+00:00",
+      "first_observed_utc": "2026-10-13T04:20:02.713308+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       27852,
+       38900,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192224031000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 4,
+      "round": 1,
+      "pid": 32924,
+      "parent_pid": 38900,
+      "created_100ns": 134363388026457691,
+      "observed_at_ns": 192224031000000,
+      "observed_at_utc": "2026-10-13T04:20:03.284919+00:00",
+      "first_observed_utc": "2026-10-13T04:20:02.713308+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       32924,
+       38900,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192224031000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 5,
+      "round": 1,
+      "pid": 21280,
+      "parent_pid": 38900,
+      "created_100ns": 134363388023578505,
+      "observed_at_ns": 192224031000000,
+      "observed_at_utc": "2026-10-13T04:20:03.284919+00:00",
+      "first_observed_utc": "2026-10-13T04:20:02.476687+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       21280,
+       38900,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192224031000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 6,
+      "round": 1,
+      "pid": 38900,
+      "parent_pid": 25372,
+      "created_100ns": 134363388023086331,
+      "observed_at_ns": 192224031000000,
+      "observed_at_utc": "2026-10-13T04:20:03.285916+00:00",
+      "first_observed_utc": "2026-10-13T04:20:02.350295+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38900,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192224031000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "38900": 25372,
+     "21280": 38900,
+     "32924": 38900,
+     "27852": 38900,
+     "37528": 32924,
+     "34068": 27852,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [
+     {
+      "pid": 21524,
+      "snapshot_parent_pid": 34068,
+      "handle_parent_pid": 34068,
+      "created_100ns": 134363015012839458,
+      "parent_created_100ns": 134363388029306087,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 21524,
+      "snapshot_parent_pid": 34068,
+      "handle_parent_pid": 34068,
+      "created_100ns": 134363015012839458,
+      "parent_created_100ns": 134363388029306087,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 21524,
+      "snapshot_parent_pid": 34068,
+      "handle_parent_pid": 34068,
+      "created_100ns": 134363015012839458,
+      "parent_created_100ns": 134363388029306087,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 21524,
+      "snapshot_parent_pid": 34068,
+      "handle_parent_pid": 34068,
+      "created_100ns": 134363015012839458,
+      "parent_created_100ns": 134363388029306087,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 21524,
+      "snapshot_parent_pid": 34068,
+      "handle_parent_pid": 34068,
+      "created_100ns": 134363015012839458,
+      "parent_created_100ns": 134363388029306087,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 21524,
+      "snapshot_parent_pid": 34068,
+      "handle_parent_pid": 34068,
+      "created_100ns": 134363015012839458,
+      "parent_created_100ns": 134363388029306087,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 21524,
+      "snapshot_parent_pid": 34068,
+      "handle_parent_pid": 34068,
+      "created_100ns": 134363015012839458,
+      "parent_created_100ns": 134363388029306087,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     }
+    ],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 15,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 78.0,
+     "max_snapshot_ms": 47.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 6,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 6,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": [],
+     "note_rejections": 7
+    }
+   }
+  },
+  {
+   "scenario": "normal_job_stoptime",
+   "job": true,
+   "journal_poll_s": null,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 6,
+   "results": {
+    "ok": 6
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    39448,
+    41556
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "stop_time_only",
+    "polls": 2,
+    "poll_interval_s": null,
+    "max_poll_gap_ms": 78.0,
+    "max_snapshot_ms": 31.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 6,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 6,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 33736,
+    "signalled_pids": [
+     39448,
+     41556,
+     28828,
+     760,
+     4272,
+     33736
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 39448,
+      "parent_pid": 28828,
+      "created_100ns": 134363388039796027,
+      "observed_at_ns": 192225093000000,
+      "observed_at_utc": "2026-10-13T04:20:04.355136+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.326815+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       39448,
+       28828,
+       33736,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192225093000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 41556,
+      "parent_pid": 760,
+      "created_100ns": 134363388039624795,
+      "observed_at_ns": 192225093000000,
+      "observed_at_utc": "2026-10-13T04:20:04.356163+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.326815+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       41556,
+       760,
+       33736,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192225093000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 28828,
+      "parent_pid": 33736,
+      "created_100ns": 134363388037331781,
+      "observed_at_ns": 192225093000000,
+      "observed_at_utc": "2026-10-13T04:20:04.356163+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.325816+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       28828,
+       33736,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192225093000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 4,
+      "round": 1,
+      "pid": 760,
+      "parent_pid": 33736,
+      "created_100ns": 134363388036785231,
+      "observed_at_ns": 192225093000000,
+      "observed_at_utc": "2026-10-13T04:20:04.356163+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.325816+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       760,
+       33736,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192225093000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 5,
+      "round": 1,
+      "pid": 4272,
+      "parent_pid": 33736,
+      "created_100ns": 134363388034125124,
+      "observed_at_ns": 192225093000000,
+      "observed_at_utc": "2026-10-13T04:20:04.356163+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.325816+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       4272,
+       33736,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192225093000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 6,
+      "round": 1,
+      "pid": 33736,
+      "parent_pid": 25372,
+      "created_100ns": 134363388033602541,
+      "observed_at_ns": 192225093000000,
+      "observed_at_utc": "2026-10-13T04:20:04.357160+00:00",
+      "first_observed_utc": "2026-10-13T04:20:03.405503+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       33736,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192225093000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "33736": 25372,
+     "4272": 33736,
+     "760": 33736,
+     "28828": 33736,
+     "41556": 760,
+     "39448": 28828,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "stop_time_only",
+     "polls": 2,
+     "poll_interval_s": null,
+     "max_poll_gap_ms": 78.0,
+     "max_snapshot_ms": 31.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 6,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 6,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "normal_no_job_journal",
+   "job": false,
+   "journal_poll_s": 0.02,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "no completeness census: without a job (or kernel callbacks) an owned process whose parent exited unobserved is invisible, so its absence cannot be shown"
+   ],
+   "signalled": 6,
+   "results": {
+    "ok": 6
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    14480,
+    17204
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 7,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 141.0,
+    "max_snapshot_ms": 110.0
+   },
+   "job_info": {
+    "used": false
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 788,
+    "signalled_pids": [
+     14480,
+     17204,
+     6812,
+     36796,
+     3504,
+     788
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 14480,
+      "parent_pid": 6812,
+      "created_100ns": 134363388050422719,
+      "observed_at_ns": 192226078000000,
+      "observed_at_utc": "2026-10-13T04:20:05.340287+00:00",
+      "first_observed_utc": "2026-10-13T04:20:05.154700+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       14480,
+       6812,
+       788,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192226078000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 17204,
+      "parent_pid": 36796,
+      "created_100ns": 134363388050139098,
+      "observed_at_ns": 192226078000000,
+      "observed_at_utc": "2026-10-13T04:20:05.341288+00:00",
+      "first_observed_utc": "2026-10-13T04:20:05.154700+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       17204,
+       36796,
+       788,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192226078000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 6812,
+      "parent_pid": 788,
+      "created_100ns": 134363388048305976,
+      "observed_at_ns": 192226078000000,
+      "observed_at_utc": "2026-10-13T04:20:05.342288+00:00",
+      "first_observed_utc": "2026-10-13T04:20:05.034875+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       6812,
+       788,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192226078000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 4,
+      "round": 1,
+      "pid": 36796,
+      "parent_pid": 788,
+      "created_100ns": 134363388047828432,
+      "observed_at_ns": 192226078000000,
+      "observed_at_utc": "2026-10-13T04:20:05.342288+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.891779+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       36796,
+       788,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192226078000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 5,
+      "round": 1,
+      "pid": 3504,
+      "parent_pid": 788,
+      "created_100ns": 134363388045150986,
+      "observed_at_ns": 192226078000000,
+      "observed_at_utc": "2026-10-13T04:20:05.342288+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.758000+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       3504,
+       788,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192226093000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 6,
+      "round": 1,
+      "pid": 788,
+      "parent_pid": 25372,
+      "created_100ns": 134363388044359535,
+      "observed_at_ns": 192226093000000,
+      "observed_at_utc": "2026-10-13T04:20:05.346291+00:00",
+      "first_observed_utc": "2026-10-13T04:20:04.509197+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       788,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192226093000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "788": 25372,
+     "3504": 788,
+     "36796": 788,
+     "6812": 788,
+     "17204": 36796,
+     "14480": 6812,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "no completeness census: without a job (or kernel callbacks) an owned process whose parent exited unobserved is invisible, so its absence cannot be shown"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 7,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 141.0,
+     "max_snapshot_ms": 110.0
+    },
+    "job": {
+     "used": false,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership"
+    }
+   }
+  },
+  {
+   "scenario": "orphan_job_journal",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    30396
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 27,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 110.0,
+    "max_snapshot_ms": 79.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 36232,
+    "signalled_pids": [
+     30396,
+     36280,
+     36232
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 30396,
+      "parent_pid": 40500,
+      "created_100ns": 134363388058863022,
+      "observed_at_ns": 192228453000000,
+      "observed_at_utc": "2026-10-13T04:20:07.707515+00:00",
+      "first_observed_utc": "2026-10-13T04:20:05.945833+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       30396,
+       40500,
+       36232,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192228453000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 36280,
+      "parent_pid": 36232,
+      "created_100ns": 134363388054858189,
+      "observed_at_ns": 192228453000000,
+      "observed_at_utc": "2026-10-13T04:20:07.708513+00:00",
+      "first_observed_utc": "2026-10-13T04:20:05.615028+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       36280,
+       36232,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192228453000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 36232,
+      "parent_pid": 25372,
+      "created_100ns": 134363388054349610,
+      "observed_at_ns": 192228453000000,
+      "observed_at_utc": "2026-10-13T04:20:07.708513+00:00",
+      "first_observed_utc": "2026-10-13T04:20:05.480304+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       36232,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192228453000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "36232": 25372,
+     "36280": 36232,
+     "40500": 36232,
+     "30396": 40500,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 27,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 110.0,
+     "max_snapshot_ms": 79.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "orphan_job_stoptime",
+   "job": true,
+   "journal_poll_s": null,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "owned process 31928 has unprovable ancestry (parent exited unobserved)"
+   ],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": false,
+   "unproven_pids": [
+    31928
+   ],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    31928
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "stop_time_only",
+    "polls": 2,
+    "poll_interval_s": null,
+    "max_poll_gap_ms": 109.0,
+    "max_snapshot_ms": 47.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 3,
+    "never_observed_job_processes": 1,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 38512,
+    "signalled_pids": [
+     31928,
+     13684,
+     38512
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 31928,
+      "parent_pid": 19856,
+      "created_100ns": 134363388082475132,
+      "observed_at_ns": 192230828000000,
+      "observed_at_utc": "2026-10-13T04:20:10.089823+00:00",
+      "first_observed_utc": "2026-10-13T04:20:10.089823+00:00",
+      "ancestry_proven": false,
+      "ancestry": null,
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192230828000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 13684,
+      "parent_pid": 38512,
+      "created_100ns": 134363388078517689,
+      "observed_at_ns": 192230828000000,
+      "observed_at_utc": "2026-10-13T04:20:10.091344+00:00",
+      "first_observed_utc": "2026-10-13T04:20:10.041423+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       13684,
+       38512,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192230828000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 38512,
+      "parent_pid": 25372,
+      "created_100ns": 134363388078047133,
+      "observed_at_ns": 192230828000000,
+      "observed_at_utc": "2026-10-13T04:20:10.091344+00:00",
+      "first_observed_utc": "2026-10-13T04:20:07.846274+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38512,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192230828000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "38512": 25372,
+     "13684": 38512,
+     "31928": 19856,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "owned process 31928 has unprovable ancestry (parent exited unobserved)"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [
+     31928
+    ],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "stop_time_only",
+     "polls": 2,
+     "poll_interval_s": null,
+     "max_poll_gap_ms": 109.0,
+     "max_snapshot_ms": 47.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 3,
+     "never_observed_job_processes": 1,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "orphan_no_job_stoptime",
+   "job": false,
+   "journal_poll_s": null,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "no completeness census: without a job (or kernel callbacks) an owned process whose parent exited unobserved is invisible, so its absence cannot be shown"
+   ],
+   "signalled": 2,
+   "results": {
+    "ok": 2
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    27764
+   ],
+   "leaves_survived_stop": [
+    27764
+   ],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "stop_time_only",
+    "polls": 2,
+    "poll_interval_s": null,
+    "max_poll_gap_ms": 62.0,
+    "max_snapshot_ms": 47.0
+   },
+   "job_info": {
+    "used": false
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 33088,
+    "signalled_pids": [
+     37440,
+     33088
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 37440,
+      "parent_pid": 33088,
+      "created_100ns": 134363388102688760,
+      "observed_at_ns": 192233328000000,
+      "observed_at_utc": "2026-10-13T04:20:12.590021+00:00",
+      "first_observed_utc": "2026-10-13T04:20:12.589006+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       37440,
+       33088,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192233328000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 33088,
+      "parent_pid": 25372,
+      "created_100ns": 134363388102093743,
+      "observed_at_ns": 192233328000000,
+      "observed_at_utc": "2026-10-13T04:20:12.590021+00:00",
+      "first_observed_utc": "2026-10-13T04:20:10.262930+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       33088,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192233328000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "33088": 25372,
+     "37440": 33088,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "no completeness census: without a job (or kernel callbacks) an owned process whose parent exited unobserved is invisible, so its absence cannot be shown"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "stop_time_only",
+     "polls": 2,
+     "poll_interval_s": null,
+     "max_poll_gap_ms": 62.0,
+     "max_snapshot_ms": 47.0
+    },
+    "job": {
+     "used": false,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership"
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#1",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    4268
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 10,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 235.0,
+    "max_snapshot_ms": 109.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 42336,
+    "signalled_pids": [
+     4268,
+     23672,
+     42336
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 4268,
+      "parent_pid": 40092,
+      "created_100ns": 134363388131071003,
+      "observed_at_ns": 192234640000000,
+      "observed_at_utc": "2026-10-13T04:20:13.900532+00:00",
+      "first_observed_utc": "2026-10-13T04:20:13.238889+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       4268,
+       40092,
+       42336,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192234640000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 23672,
+      "parent_pid": 42336,
+      "created_100ns": 134363388127236167,
+      "observed_at_ns": 192234640000000,
+      "observed_at_utc": "2026-10-13T04:20:13.905624+00:00",
+      "first_observed_utc": "2026-10-13T04:20:12.876303+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       23672,
+       42336,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192234656000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 42336,
+      "parent_pid": 25372,
+      "created_100ns": 134363388126592291,
+      "observed_at_ns": 192234656000000,
+      "observed_at_utc": "2026-10-13T04:20:13.906625+00:00",
+      "first_observed_utc": "2026-10-13T04:20:12.716429+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       42336,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192234656000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "42336": 25372,
+     "23672": 42336,
+     "40092": 42336,
+     "4268": 40092,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 10,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 235.0,
+     "max_snapshot_ms": 109.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#2",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    9436
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 11,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 172.0,
+    "max_snapshot_ms": 125.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 30284,
+    "signalled_pids": [
+     9436,
+     40096,
+     30284
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 9436,
+      "parent_pid": 8932,
+      "created_100ns": 134363388147651414,
+      "observed_at_ns": 192236203000000,
+      "observed_at_utc": "2026-10-13T04:20:15.458378+00:00",
+      "first_observed_utc": "2026-10-13T04:20:14.904401+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       9436,
+       8932,
+       30284,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192236203000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 40096,
+      "parent_pid": 30284,
+      "created_100ns": 134363388142827424,
+      "observed_at_ns": 192236203000000,
+      "observed_at_utc": "2026-10-13T04:20:15.460408+00:00",
+      "first_observed_utc": "2026-10-13T04:20:14.551935+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       40096,
+       30284,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192236203000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 30284,
+      "parent_pid": 25372,
+      "created_100ns": 134363388141599536,
+      "observed_at_ns": 192236203000000,
+      "observed_at_utc": "2026-10-13T04:20:15.460408+00:00",
+      "first_observed_utc": "2026-10-13T04:20:14.271455+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       30284,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192236203000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "30284": 25372,
+     "40096": 30284,
+     "8932": 30284,
+     "9436": 8932,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 11,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 172.0,
+     "max_snapshot_ms": 125.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#3",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    40456
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 11,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 94.0,
+    "max_snapshot_ms": 78.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": [],
+    "note_rejections": 8
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 18988,
+    "signalled_pids": [
+     40456,
+     39008,
+     18988
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 40456,
+      "parent_pid": 35308,
+      "created_100ns": 134363388159685625,
+      "observed_at_ns": 192237296000000,
+      "observed_at_utc": "2026-10-13T04:20:16.558270+00:00",
+      "first_observed_utc": "2026-10-13T04:20:16.079335+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       40456,
+       35308,
+       18988,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192237296000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 39008,
+      "parent_pid": 18988,
+      "created_100ns": 134363388156602643,
+      "observed_at_ns": 192237296000000,
+      "observed_at_utc": "2026-10-13T04:20:16.559271+00:00",
+      "first_observed_utc": "2026-10-13T04:20:15.802526+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       39008,
+       18988,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192237296000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 18988,
+      "parent_pid": 25372,
+      "created_100ns": 134363388155781929,
+      "observed_at_ns": 192237296000000,
+      "observed_at_utc": "2026-10-13T04:20:16.559271+00:00",
+      "first_observed_utc": "2026-10-13T04:20:15.652904+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       18988,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192237296000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "18988": 25372,
+     "39008": 18988,
+     "35308": 18988,
+     "40456": 35308,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     },
+     {
+      "pid": 4480,
+      "snapshot_parent_pid": 40456,
+      "handle_parent_pid": 40456,
+      "created_100ns": 134363208282111605,
+      "parent_created_100ns": 134363388159685625,
+      "reason": "created no later than the member holding its parent PID (stale parent PID)"
+     }
+    ],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 11,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 94.0,
+     "max_snapshot_ms": 78.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": [],
+     "note_rejections": 8
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#4",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    19824
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 12,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 188.0,
+    "max_snapshot_ms": 78.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 23752,
+    "signalled_pids": [
+     19824,
+     33212,
+     23752
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 19824,
+      "parent_pid": 20648,
+      "created_100ns": 134363388170181525,
+      "observed_at_ns": 192238500000000,
+      "observed_at_utc": "2026-10-13T04:20:17.758225+00:00",
+      "first_observed_utc": "2026-10-13T04:20:17.164596+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       19824,
+       20648,
+       23752,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192238500000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 33212,
+      "parent_pid": 23752,
+      "created_100ns": 134363388167245415,
+      "observed_at_ns": 192238500000000,
+      "observed_at_utc": "2026-10-13T04:20:17.761225+00:00",
+      "first_observed_utc": "2026-10-13T04:20:16.827045+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       33212,
+       23752,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192238500000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 23752,
+      "parent_pid": 25372,
+      "created_100ns": 134363388166729625,
+      "observed_at_ns": 192238500000000,
+      "observed_at_utc": "2026-10-13T04:20:17.762768+00:00",
+      "first_observed_utc": "2026-10-13T04:20:16.719461+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       23752,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192238500000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "23752": 25372,
+     "33212": 23752,
+     "20648": 23752,
+     "19824": 20648,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 12,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 188.0,
+     "max_snapshot_ms": 78.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#5",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    33960
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 12,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 125.0,
+    "max_snapshot_ms": 94.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 6752,
+    "signalled_pids": [
+     33960,
+     11752,
+     6752
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 33960,
+      "parent_pid": 12092,
+      "created_100ns": 134363388184557159,
+      "observed_at_ns": 192239968000000,
+      "observed_at_utc": "2026-10-13T04:20:19.223463+00:00",
+      "first_observed_utc": "2026-10-13T04:20:18.535933+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       33960,
+       12092,
+       6752,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192239968000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 11752,
+      "parent_pid": 6752,
+      "created_100ns": 134363388180413125,
+      "observed_at_ns": 192239968000000,
+      "observed_at_utc": "2026-10-13T04:20:19.225488+00:00",
+      "first_observed_utc": "2026-10-13T04:20:18.203076+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       11752,
+       6752,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192239968000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 6752,
+      "parent_pid": 25372,
+      "created_100ns": 134363388179535269,
+      "observed_at_ns": 192239968000000,
+      "observed_at_utc": "2026-10-13T04:20:19.226490+00:00",
+      "first_observed_utc": "2026-10-13T04:20:18.031711+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       6752,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192239968000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "6752": 25372,
+     "11752": 6752,
+     "12092": 6752,
+     "33960": 12092,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 12,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 125.0,
+     "max_snapshot_ms": 94.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#6",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    15412
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 11,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 156.0,
+    "max_snapshot_ms": 94.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 11772,
+    "signalled_pids": [
+     15412,
+     4748,
+     11772
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 15412,
+      "parent_pid": 19304,
+      "created_100ns": 134363388197775020,
+      "observed_at_ns": 192241203000000,
+      "observed_at_utc": "2026-10-13T04:20:20.464107+00:00",
+      "first_observed_utc": "2026-10-13T04:20:19.883415+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       15412,
+       19304,
+       11772,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192241203000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 4748,
+      "parent_pid": 11772,
+      "created_100ns": 134363388194680468,
+      "observed_at_ns": 192241203000000,
+      "observed_at_utc": "2026-10-13T04:20:20.465111+00:00",
+      "first_observed_utc": "2026-10-13T04:20:19.644880+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       4748,
+       11772,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192241203000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 11772,
+      "parent_pid": 25372,
+      "created_100ns": 134363388193893086,
+      "observed_at_ns": 192241203000000,
+      "observed_at_utc": "2026-10-13T04:20:20.466104+00:00",
+      "first_observed_utc": "2026-10-13T04:20:19.464941+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       11772,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192241203000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "11772": 25372,
+     "4748": 11772,
+     "19304": 11772,
+     "15412": 19304,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 11,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 156.0,
+     "max_snapshot_ms": 94.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#7",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    27636
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 10,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 219.0,
+    "max_snapshot_ms": 141.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 18692,
+    "signalled_pids": [
+     27636,
+     38812,
+     18692
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 27636,
+      "parent_pid": 3008,
+      "created_100ns": 134363388211216079,
+      "observed_at_ns": 192242718000000,
+      "observed_at_utc": "2026-10-13T04:20:21.979995+00:00",
+      "first_observed_utc": "2026-10-13T04:20:21.305667+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       27636,
+       3008,
+       18692,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192242718000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 38812,
+      "parent_pid": 18692,
+      "created_100ns": 134363388206635365,
+      "observed_at_ns": 192242718000000,
+      "observed_at_utc": "2026-10-13T04:20:21.984020+00:00",
+      "first_observed_utc": "2026-10-13T04:20:20.879737+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38812,
+       18692,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192242734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 18692,
+      "parent_pid": 25372,
+      "created_100ns": 134363388205887099,
+      "observed_at_ns": 192242734000000,
+      "observed_at_utc": "2026-10-13T04:20:21.985016+00:00",
+      "first_observed_utc": "2026-10-13T04:20:20.654120+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       18692,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192242734000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "18692": 25372,
+     "38812": 18692,
+     "3008": 18692,
+     "27636": 3008,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 10,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 219.0,
+     "max_snapshot_ms": 141.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#8",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    8948
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 11,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 188.0,
+    "max_snapshot_ms": 125.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 31340,
+    "signalled_pids": [
+     8948,
+     41636,
+     31340
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 8948,
+      "parent_pid": 12468,
+      "created_100ns": 134363388227623522,
+      "observed_at_ns": 192244265000000,
+      "observed_at_utc": "2026-10-13T04:20:23.523534+00:00",
+      "first_observed_utc": "2026-10-13T04:20:22.860683+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       8948,
+       12468,
+       31340,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192244265000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 41636,
+      "parent_pid": 31340,
+      "created_100ns": 134363388223300109,
+      "observed_at_ns": 192244265000000,
+      "observed_at_utc": "2026-10-13T04:20:23.524536+00:00",
+      "first_observed_utc": "2026-10-13T04:20:22.513376+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       41636,
+       31340,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192244265000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 31340,
+      "parent_pid": 25372,
+      "created_100ns": 134363388222219813,
+      "observed_at_ns": 192244265000000,
+      "observed_at_utc": "2026-10-13T04:20:23.527603+00:00",
+      "first_observed_utc": "2026-10-13T04:20:22.323052+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       31340,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192244265000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "31340": 25372,
+     "41636": 31340,
+     "12468": 31340,
+     "8948": 12468,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 11,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 188.0,
+     "max_snapshot_ms": 125.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#9",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    29108
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 11,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 140.0,
+    "max_snapshot_ms": 78.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 36368,
+    "signalled_pids": [
+     29108,
+     39720,
+     36368
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 29108,
+      "parent_pid": 34444,
+      "created_100ns": 134363388241794570,
+      "observed_at_ns": 192245625000000,
+      "observed_at_utc": "2026-10-13T04:20:24.882470+00:00",
+      "first_observed_utc": "2026-10-13T04:20:24.277387+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       29108,
+       34444,
+       36368,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192245625000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 39720,
+      "parent_pid": 36368,
+      "created_100ns": 134363388237688203,
+      "observed_at_ns": 192245625000000,
+      "observed_at_utc": "2026-10-13T04:20:24.884473+00:00",
+      "first_observed_utc": "2026-10-13T04:20:23.975394+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       39720,
+       36368,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192245625000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 36368,
+      "parent_pid": 25372,
+      "created_100ns": 134363388236756018,
+      "observed_at_ns": 192245625000000,
+      "observed_at_utc": "2026-10-13T04:20:24.885211+00:00",
+      "first_observed_utc": "2026-10-13T04:20:23.761210+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       36368,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192245625000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "36368": 25372,
+     "39720": 36368,
+     "34444": 36368,
+     "29108": 34444,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 11,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 140.0,
+     "max_snapshot_ms": 78.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_journal#10",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    38748
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 12,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 188.0,
+    "max_snapshot_ms": 109.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 4,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 39452,
+    "signalled_pids": [
+     38748,
+     34560,
+     39452
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 38748,
+      "parent_pid": 37908,
+      "created_100ns": 134363388255774251,
+      "observed_at_ns": 192247125000000,
+      "observed_at_utc": "2026-10-13T04:20:26.380380+00:00",
+      "first_observed_utc": "2026-10-13T04:20:25.667191+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38748,
+       37908,
+       39452,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192247125000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 34560,
+      "parent_pid": 39452,
+      "created_100ns": 134363388251164749,
+      "observed_at_ns": 192247125000000,
+      "observed_at_utc": "2026-10-13T04:20:26.385946+00:00",
+      "first_observed_utc": "2026-10-13T04:20:25.293150+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       34560,
+       39452,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192247125000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 39452,
+      "parent_pid": 25372,
+      "created_100ns": 134363388250337301,
+      "observed_at_ns": 192247125000000,
+      "observed_at_utc": "2026-10-13T04:20:26.386943+00:00",
+      "first_observed_utc": "2026-10-13T04:20:25.098559+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       39452,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192247125000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "39452": 25372,
+     "34560": 39452,
+     "37908": 39452,
+     "38748": 37908,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 12,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 188.0,
+     "max_snapshot_ms": 109.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 4,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_slow_journal#1",
+   "job": true,
+   "journal_poll_s": 0.5,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "owned process 3332 has unprovable ancestry (parent exited unobserved)"
+   ],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": false,
+   "unproven_pids": [
+    3332
+   ],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    3332
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 5,
+    "poll_interval_s": 0.5,
+    "max_poll_gap_ms": 594.0,
+    "max_snapshot_ms": 156.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 3,
+    "never_observed_job_processes": 1,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 38224,
+    "signalled_pids": [
+     3332,
+     34984,
+     38224
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 3332,
+      "parent_pid": 27936,
+      "created_100ns": 134363388271700850,
+      "observed_at_ns": 192249718000000,
+      "observed_at_utc": "2026-10-13T04:20:28.969881+00:00",
+      "first_observed_utc": "2026-10-13T04:20:28.969364+00:00",
+      "ancestry_proven": false,
+      "ancestry": null,
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192249718000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 34984,
+      "parent_pid": 38224,
+      "created_100ns": 134363388267490487,
+      "observed_at_ns": 192249718000000,
+      "observed_at_utc": "2026-10-13T04:20:28.969881+00:00",
+      "first_observed_utc": "2026-10-13T04:20:27.456011+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       34984,
+       38224,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192249718000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 38224,
+      "parent_pid": 25372,
+      "created_100ns": 134363388265753729,
+      "observed_at_ns": 192249718000000,
+      "observed_at_utc": "2026-10-13T04:20:28.971398+00:00",
+      "first_observed_utc": "2026-10-13T04:20:26.741007+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38224,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192249718000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "38224": 25372,
+     "34984": 38224,
+     "3332": 27936,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "owned process 3332 has unprovable ancestry (parent exited unobserved)"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [
+     3332
+    ],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 5,
+     "poll_interval_s": 0.5,
+     "max_poll_gap_ms": 594.0,
+     "max_snapshot_ms": 156.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 3,
+     "never_observed_job_processes": 1,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_slow_journal#2",
+   "job": true,
+   "journal_poll_s": 0.5,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "owned process 27276 has unprovable ancestry (parent exited unobserved)"
+   ],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": false,
+   "unproven_pids": [
+    27276
+   ],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    27276
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 5,
+    "poll_interval_s": 0.5,
+    "max_poll_gap_ms": 610.0,
+    "max_snapshot_ms": 94.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 3,
+    "never_observed_job_processes": 1,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 27740,
+    "signalled_pids": [
+     27276,
+     2576,
+     27740
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 27276,
+      "parent_pid": 34708,
+      "created_100ns": 134363388296304886,
+      "observed_at_ns": 192252031000000,
+      "observed_at_utc": "2026-10-13T04:20:31.282410+00:00",
+      "first_observed_utc": "2026-10-13T04:20:31.282410+00:00",
+      "ancestry_proven": false,
+      "ancestry": null,
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192252031000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 2576,
+      "parent_pid": 27740,
+      "created_100ns": 134363388291928948,
+      "observed_at_ns": 192252031000000,
+      "observed_at_utc": "2026-10-13T04:20:31.286951+00:00",
+      "first_observed_utc": "2026-10-13T04:20:29.883298+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       2576,
+       27740,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192252031000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 27740,
+      "parent_pid": 25372,
+      "created_100ns": 134363388291210033,
+      "observed_at_ns": 192252031000000,
+      "observed_at_utc": "2026-10-13T04:20:31.287468+00:00",
+      "first_observed_utc": "2026-10-13T04:20:29.185272+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       27740,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192252031000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "27740": 25372,
+     "2576": 27740,
+     "27276": 34708,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "owned process 27276 has unprovable ancestry (parent exited unobserved)"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [
+     27276
+    ],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 5,
+     "poll_interval_s": 0.5,
+     "max_poll_gap_ms": 610.0,
+     "max_snapshot_ms": 94.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 3,
+     "never_observed_job_processes": 1,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_slow_journal#3",
+   "job": true,
+   "journal_poll_s": 0.5,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "owned process 38800 has unprovable ancestry (parent exited unobserved)"
+   ],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": false,
+   "unproven_pids": [
+    38800
+   ],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    38800
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 4,
+    "poll_interval_s": 0.5,
+    "max_poll_gap_ms": 781.0,
+    "max_snapshot_ms": 313.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 3,
+    "never_observed_job_processes": 1,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 42724,
+    "signalled_pids": [
+     38800,
+     25352,
+     42724
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 38800,
+      "parent_pid": 24732,
+      "created_100ns": 134363388319005762,
+      "observed_at_ns": 192254609000000,
+      "observed_at_utc": "2026-10-13T04:20:33.870083+00:00",
+      "first_observed_utc": "2026-10-13T04:20:33.864968+00:00",
+      "ancestry_proven": false,
+      "ancestry": null,
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192254609000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 25352,
+      "parent_pid": 42724,
+      "created_100ns": 134363388315109762,
+      "observed_at_ns": 192254609000000,
+      "observed_at_utc": "2026-10-13T04:20:33.870083+00:00",
+      "first_observed_utc": "2026-10-13T04:20:32.190404+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       25352,
+       42724,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192254609000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 42724,
+      "parent_pid": 25372,
+      "created_100ns": 134363388314401795,
+      "observed_at_ns": 192254609000000,
+      "observed_at_utc": "2026-10-13T04:20:33.871107+00:00",
+      "first_observed_utc": "2026-10-13T04:20:31.500830+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       42724,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192254625000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "42724": 25372,
+     "25352": 42724,
+     "38800": 24732,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "owned process 38800 has unprovable ancestry (parent exited unobserved)"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [
+     38800
+    ],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 4,
+     "poll_interval_s": 0.5,
+     "max_poll_gap_ms": 781.0,
+     "max_snapshot_ms": 313.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 3,
+     "never_observed_job_processes": 1,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_slow_journal#4",
+   "job": true,
+   "journal_poll_s": 0.5,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "owned process 34932 has unprovable ancestry (parent exited unobserved)"
+   ],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": false,
+   "unproven_pids": [
+    34932
+   ],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    34932
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 5,
+    "poll_interval_s": 0.5,
+    "max_poll_gap_ms": 594.0,
+    "max_snapshot_ms": 78.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 3,
+    "never_observed_job_processes": 1,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 14928,
+    "signalled_pids": [
+     34932,
+     18348,
+     14928
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 34932,
+      "parent_pid": 41644,
+      "created_100ns": 134363388346646782,
+      "observed_at_ns": 192257015000000,
+      "observed_at_utc": "2026-10-13T04:20:36.267337+00:00",
+      "first_observed_utc": "2026-10-13T04:20:36.267337+00:00",
+      "ancestry_proven": false,
+      "ancestry": null,
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192257015000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 18348,
+      "parent_pid": 14928,
+      "created_100ns": 134363388341863927,
+      "observed_at_ns": 192257015000000,
+      "observed_at_utc": "2026-10-13T04:20:36.268861+00:00",
+      "first_observed_utc": "2026-10-13T04:20:34.849763+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       18348,
+       14928,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192257015000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 14928,
+      "parent_pid": 25372,
+      "created_100ns": 134363388340936967,
+      "observed_at_ns": 192257015000000,
+      "observed_at_utc": "2026-10-13T04:20:36.268861+00:00",
+      "first_observed_utc": "2026-10-13T04:20:34.180048+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       14928,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192257015000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "14928": 25372,
+     "18348": 14928,
+     "34932": 41644,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "owned process 34932 has unprovable ancestry (parent exited unobserved)"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [
+     34932
+    ],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 5,
+     "poll_interval_s": 0.5,
+     "max_poll_gap_ms": 594.0,
+     "max_snapshot_ms": 78.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 3,
+     "never_observed_job_processes": 1,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "fast_orphan_job_slow_journal#5",
+   "job": true,
+   "journal_poll_s": 0.5,
+   "exhaustive": false,
+   "exhaustive_reasons": [
+    "owned process 10700 has unprovable ancestry (parent exited unobserved)"
+   ],
+   "signalled": 3,
+   "results": {
+    "ok": 3
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": false,
+   "unproven_pids": [
+    10700
+   ],
+   "churn_pids": 0,
+   "rounds": 2,
+   "leaf_pids_from_markers": [
+    10700
+   ],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 5,
+    "poll_interval_s": 0.5,
+    "max_poll_gap_ms": 610.0,
+    "max_snapshot_ms": 110.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 4,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 3,
+    "never_observed_job_processes": 1,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 6064,
+    "signalled_pids": [
+     10700,
+     13184,
+     6064
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 10700,
+      "parent_pid": 22572,
+      "created_100ns": 134363388368827859,
+      "observed_at_ns": 192259250000000,
+      "observed_at_utc": "2026-10-13T04:20:38.512316+00:00",
+      "first_observed_utc": "2026-10-13T04:20:38.511322+00:00",
+      "ancestry_proven": false,
+      "ancestry": null,
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192259250000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 13184,
+      "parent_pid": 6064,
+      "created_100ns": 134363388364545810,
+      "observed_at_ns": 192259250000000,
+      "observed_at_utc": "2026-10-13T04:20:38.512316+00:00",
+      "first_observed_utc": "2026-10-13T04:20:37.096248+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       13184,
+       6064,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192259250000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 6064,
+      "parent_pid": 25372,
+      "created_100ns": 134363388363739409,
+      "observed_at_ns": 192259250000000,
+      "observed_at_utc": "2026-10-13T04:20:38.513322+00:00",
+      "first_observed_utc": "2026-10-13T04:20:36.443077+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       6064,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192259265000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "6064": 25372,
+     "13184": 6064,
+     "10700": 22572,
+     "25372": 14244
+    },
+    "exhaustive": false,
+    "exhaustive_reasons": [
+     "owned process 10700 has unprovable ancestry (parent exited unobserved)"
+    ],
+    "rounds": 2,
+    "churn_pids": [],
+    "unproven_pids": [
+     10700
+    ],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 5,
+     "poll_interval_s": 0.5,
+     "max_poll_gap_ms": 610.0,
+     "max_snapshot_ms": 110.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 4,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 3,
+     "never_observed_job_processes": 1,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "churn_job_journal#1",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 19,
+   "results": {
+    "ok": 18,
+    "denied": 1
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 3,
+   "rounds": 3,
+   "leaf_pids_from_markers": [],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 11,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 297.0,
+    "max_snapshot_ms": 188.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 25,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 25,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 40416,
+    "signalled_pids": [
+     33016,
+     38052,
+     2496,
+     40384,
+     8544,
+     32060,
+     40264,
+     42464,
+     29984,
+     28320,
+     38180,
+     37676,
+     35468,
+     36284,
+     32320,
+     40416,
+     26208,
+     28512,
+     30308
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 33016,
+      "parent_pid": 40416,
+      "created_100ns": 134363388402124860,
+      "observed_at_ns": 192261093000000,
+      "observed_at_utc": "2026-10-13T04:20:40.359310+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.359310+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       33016,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 38052,
+      "parent_pid": 40416,
+      "created_100ns": 134363388400936007,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.361859+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.249997+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38052,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 2496,
+      "parent_pid": 40416,
+      "created_100ns": 134363388400565163,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.363379+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.161187+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       2496,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 4,
+      "round": 1,
+      "pid": 40384,
+      "parent_pid": 40416,
+      "created_100ns": 134363388400109599,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.364126+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.161187+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       40384,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 5,
+      "round": 1,
+      "pid": 8544,
+      "parent_pid": 40416,
+      "created_100ns": 134363388399461266,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.364126+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.160667+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       8544,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 6,
+      "round": 1,
+      "pid": 32060,
+      "parent_pid": 40416,
+      "created_100ns": 134363388398563615,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.365147+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.010493+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       32060,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 7,
+      "round": 1,
+      "pid": 40264,
+      "parent_pid": 40416,
+      "created_100ns": 134363388397996832,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.370190+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.010493+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       40264,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 8,
+      "round": 1,
+      "pid": 42464,
+      "parent_pid": 40416,
+      "created_100ns": 134363388397060827,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.372737+00:00",
+      "first_observed_utc": "2026-10-13T04:20:39.826704+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       42464,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261109000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 9,
+      "round": 1,
+      "pid": 29984,
+      "parent_pid": 40416,
+      "created_100ns": 134363388396549898,
+      "observed_at_ns": 192261109000000,
+      "observed_at_utc": "2026-10-13T04:20:40.373768+00:00",
+      "first_observed_utc": "2026-10-13T04:20:39.826704+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       29984,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261125000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 10,
+      "round": 1,
+      "pid": 28320,
+      "parent_pid": 40416,
+      "created_100ns": 134363388396209965,
+      "observed_at_ns": 192261125000000,
+      "observed_at_utc": "2026-10-13T04:20:40.379838+00:00",
+      "first_observed_utc": "2026-10-13T04:20:39.826704+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       28320,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261125000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 11,
+      "round": 1,
+      "pid": 38180,
+      "parent_pid": 40416,
+      "created_100ns": 134363388395831163,
+      "observed_at_ns": 192261125000000,
+      "observed_at_utc": "2026-10-13T04:20:40.380863+00:00",
+      "first_observed_utc": "2026-10-13T04:20:39.659345+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38180,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261140000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 12,
+      "round": 1,
+      "pid": 37676,
+      "parent_pid": 40416,
+      "created_100ns": 134363388395307607,
+      "observed_at_ns": 192261140000000,
+      "observed_at_utc": "2026-10-13T04:20:40.393610+00:00",
+      "first_observed_utc": "2026-10-13T04:20:39.659345+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       37676,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261140000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 13,
+      "round": 1,
+      "pid": 35468,
+      "parent_pid": 40416,
+      "created_100ns": 134363388394246449,
+      "observed_at_ns": 192261140000000,
+      "observed_at_utc": "2026-10-13T04:20:40.393610+00:00",
+      "first_observed_utc": "2026-10-13T04:20:39.533920+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       35468,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261140000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 14,
+      "round": 1,
+      "pid": 36284,
+      "parent_pid": 40416,
+      "created_100ns": 134363388390886966,
+      "observed_at_ns": 192261140000000,
+      "observed_at_utc": "2026-10-13T04:20:40.395638+00:00",
+      "first_observed_utc": "2026-10-13T04:20:39.366089+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       36284,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261140000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 15,
+      "round": 1,
+      "pid": 32320,
+      "parent_pid": 40416,
+      "created_100ns": 134363388387790497,
+      "observed_at_ns": 192261140000000,
+      "observed_at_utc": "2026-10-13T04:20:40.400729+00:00",
+      "first_observed_utc": "2026-10-13T04:20:38.954725+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       32320,
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261140000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 16,
+      "round": 1,
+      "pid": 40416,
+      "parent_pid": 25372,
+      "created_100ns": 134363388386751857,
+      "observed_at_ns": 192261140000000,
+      "observed_at_utc": "2026-10-13T04:20:40.402252+00:00",
+      "first_observed_utc": "2026-10-13T04:20:38.777975+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       40416,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261140000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 17,
+      "round": 2,
+      "pid": 26208,
+      "parent_pid": 40416,
+      "created_100ns": 134363388403470215,
+      "observed_at_ns": 192261437000000,
+      "observed_at_utc": "2026-10-13T04:20:40.702785+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.561427+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       26208,
+       40416,
+       25372
+      ],
+      "seen_during_stop": true,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261437000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 18,
+      "round": 2,
+      "pid": 28512,
+      "parent_pid": 40416,
+      "created_100ns": 134363388403060713,
+      "observed_at_ns": 192261437000000,
+      "observed_at_utc": "2026-10-13T04:20:40.702785+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.560903+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       28512,
+       40416,
+       25372
+      ],
+      "seen_during_stop": true,
+      "operation": "TerminateProcess",
+      "result": "denied",
+      "returned_at_ns": 192261453000000,
+      "winerror": 5
+     },
+     {
+      "sequence": 19,
+      "round": 2,
+      "pid": 30308,
+      "parent_pid": 40416,
+      "created_100ns": 134363388402601422,
+      "observed_at_ns": 192261453000000,
+      "observed_at_utc": "2026-10-13T04:20:40.704306+00:00",
+      "first_observed_utc": "2026-10-13T04:20:40.560903+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       30308,
+       40416,
+       25372
+      ],
+      "seen_during_stop": true,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192261453000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "40416": 25372,
+     "32320": 40416,
+     "36284": 40416,
+     "39272": 40416,
+     "42656": 40416,
+     "42408": 40416,
+     "34044": 40416,
+     "8116": 40416,
+     "35468": 40416,
+     "40224": 40416,
+     "37676": 40416,
+     "38180": 40416,
+     "28320": 40416,
+     "29984": 40416,
+     "42464": 40416,
+     "40264": 40416,
+     "32060": 40416,
+     "8544": 40416,
+     "40384": 40416,
+     "2496": 40416,
+     "38052": 40416,
+     "33016": 40416,
+     "30308": 40416,
+     "28512": 40416,
+     "26208": 40416,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 3,
+    "churn_pids": [
+     26208,
+     28512,
+     30308
+    ],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 11,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 297.0,
+     "max_snapshot_ms": 188.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 25,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 25,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "churn_job_journal#2",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 15,
+   "results": {
+    "ok": 15
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 4,
+   "rounds": 3,
+   "leaf_pids_from_markers": [],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 9,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 406.0,
+    "max_snapshot_ms": 266.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 24,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 24,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 21488,
+    "signalled_pids": [
+     26592,
+     41240,
+     38892,
+     28056,
+     29840,
+     24588,
+     23956,
+     32392,
+     24508,
+     32164,
+     29560,
+     21488,
+     41964,
+     14364,
+     5448
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 26592,
+      "parent_pid": 21488,
+      "created_100ns": 134363388427685077,
+      "observed_at_ns": 192263718000000,
+      "observed_at_utc": "2026-10-13T04:20:42.980617+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.980617+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       26592,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263718000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 41240,
+      "parent_pid": 21488,
+      "created_100ns": 134363388427002466,
+      "observed_at_ns": 192263718000000,
+      "observed_at_utc": "2026-10-13T04:20:42.981614+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.980617+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       41240,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263718000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 38892,
+      "parent_pid": 21488,
+      "created_100ns": 134363388426048508,
+      "observed_at_ns": 192263718000000,
+      "observed_at_utc": "2026-10-13T04:20:42.981614+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.773257+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       38892,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 4,
+      "round": 1,
+      "pid": 28056,
+      "parent_pid": 21488,
+      "created_100ns": 134363388424826019,
+      "observed_at_ns": 192263734000000,
+      "observed_at_utc": "2026-10-13T04:20:42.987165+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.645204+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       28056,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 5,
+      "round": 1,
+      "pid": 29840,
+      "parent_pid": 21488,
+      "created_100ns": 134363388424347278,
+      "observed_at_ns": 192263734000000,
+      "observed_at_utc": "2026-10-13T04:20:42.988684+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.645204+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       29840,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 6,
+      "round": 1,
+      "pid": 24588,
+      "parent_pid": 21488,
+      "created_100ns": 134363388423218219,
+      "observed_at_ns": 192263734000000,
+      "observed_at_utc": "2026-10-13T04:20:42.989708+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.645204+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       24588,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 7,
+      "round": 1,
+      "pid": 23956,
+      "parent_pid": 21488,
+      "created_100ns": 134363388422456832,
+      "observed_at_ns": 192263734000000,
+      "observed_at_utc": "2026-10-13T04:20:42.996275+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.407669+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       23956,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 8,
+      "round": 1,
+      "pid": 32392,
+      "parent_pid": 21488,
+      "created_100ns": 134363388421173832,
+      "observed_at_ns": 192263734000000,
+      "observed_at_utc": "2026-10-13T04:20:42.997793+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.407669+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       32392,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 9,
+      "round": 1,
+      "pid": 24508,
+      "parent_pid": 21488,
+      "created_100ns": 134363388418953974,
+      "observed_at_ns": 192263734000000,
+      "observed_at_utc": "2026-10-13T04:20:42.997793+00:00",
+      "first_observed_utc": "2026-10-13T04:20:42.105191+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       24508,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263734000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 10,
+      "round": 1,
+      "pid": 32164,
+      "parent_pid": 21488,
+      "created_100ns": 134363388415789212,
+      "observed_at_ns": 192263734000000,
+      "observed_at_utc": "2026-10-13T04:20:42.998817+00:00",
+      "first_observed_utc": "2026-10-13T04:20:41.656781+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       32164,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263750000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 11,
+      "round": 1,
+      "pid": 29560,
+      "parent_pid": 21488,
+      "created_100ns": 134363388412752722,
+      "observed_at_ns": 192263750000000,
+      "observed_at_utc": "2026-10-13T04:20:43.014011+00:00",
+      "first_observed_utc": "2026-10-13T04:20:41.548562+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       29560,
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263781000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 12,
+      "round": 1,
+      "pid": 21488,
+      "parent_pid": 25372,
+      "created_100ns": 134363388411409034,
+      "observed_at_ns": 192263781000000,
+      "observed_at_utc": "2026-10-13T04:20:43.031733+00:00",
+      "first_observed_utc": "2026-10-13T04:20:41.268057+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       21488,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192263781000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 13,
+      "round": 2,
+      "pid": 41964,
+      "parent_pid": 21488,
+      "created_100ns": 134363388430004363,
+      "observed_at_ns": 192264046000000,
+      "observed_at_utc": "2026-10-13T04:20:43.301167+00:00",
+      "first_observed_utc": "2026-10-13T04:20:43.198236+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       41964,
+       21488,
+       25372
+      ],
+      "seen_during_stop": true,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192264046000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 14,
+      "round": 2,
+      "pid": 14364,
+      "parent_pid": 21488,
+      "created_100ns": 134363388429686356,
+      "observed_at_ns": 192264046000000,
+      "observed_at_utc": "2026-10-13T04:20:43.301167+00:00",
+      "first_observed_utc": "2026-10-13T04:20:43.197241+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       14364,
+       21488,
+       25372
+      ],
+      "seen_during_stop": true,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192264046000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 15,
+      "round": 2,
+      "pid": 5448,
+      "parent_pid": 21488,
+      "created_100ns": 134363388428732476,
+      "observed_at_ns": 192264046000000,
+      "observed_at_utc": "2026-10-13T04:20:43.305915+00:00",
+      "first_observed_utc": "2026-10-13T04:20:43.197241+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       5448,
+       21488,
+       25372
+      ],
+      "seen_during_stop": true,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192264046000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "21488": 25372,
+     "29560": 21488,
+     "32164": 21488,
+     "16504": 21488,
+     "28432": 21488,
+     "26332": 21488,
+     "16184": 21488,
+     "12020": 21488,
+     "24508": 21488,
+     "26560": 21488,
+     "35968": 21488,
+     "9764": 21488,
+     "32392": 21488,
+     "23956": 21488,
+     "24588": 21488,
+     "29840": 21488,
+     "28056": 21488,
+     "38892": 21488,
+     "41240": 21488,
+     "26592": 21488,
+     "41264": 21488,
+     "5448": 21488,
+     "14364": 21488,
+     "41964": 21488,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 3,
+    "churn_pids": [
+     5448,
+     14364,
+     41264,
+     41964
+    ],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 9,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 406.0,
+     "max_snapshot_ms": 266.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 24,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 24,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  },
+  {
+   "scenario": "churn_job_journal#3",
+   "job": true,
+   "journal_poll_s": 0.02,
+   "exhaustive": true,
+   "exhaustive_reasons": [],
+   "signalled": 14,
+   "results": {
+    "ok": 14
+   },
+   "all_signalled_recorded_before": true,
+   "every_signalled_in_tree": true,
+   "every_signalled_chains_to_controller": true,
+   "unproven_pids": [],
+   "churn_pids": 1,
+   "rounds": 3,
+   "leaf_pids_from_markers": [],
+   "leaves_survived_stop": [],
+   "decoy_attempted": false,
+   "decoy_alive_after": true,
+   "journal": {
+    "mode": "continuous",
+    "polls": 12,
+    "poll_interval_s": 0.02,
+    "max_poll_gap_ms": 203.0,
+    "max_snapshot_ms": 171.0
+   },
+   "job_info": {
+    "used": true,
+    "assigned_before_resume": true,
+    "accounting_before_safety_net": {
+     "total": 23,
+     "active": 0,
+     "terminated": 0
+    },
+    "observed_members": 23,
+    "never_observed_job_processes": 0,
+    "safety_net_terminated_pids": []
+   },
+   "record": {
+    "schema": "signal-stop/1",
+    "controller_pid": 25372,
+    "root_pid": 20220,
+    "signalled_pids": [
+     37412,
+     32520,
+     41196,
+     5364,
+     42672,
+     41748,
+     26772,
+     41952,
+     19728,
+     6156,
+     10976,
+     35944,
+     20220,
+     2516
+    ],
+    "signal_attempts": [
+     {
+      "sequence": 1,
+      "round": 1,
+      "pid": 37412,
+      "parent_pid": 20220,
+      "created_100ns": 134363388449606221,
+      "observed_at_ns": 192265796000000,
+      "observed_at_utc": "2026-10-13T04:20:45.059760+00:00",
+      "first_observed_utc": "2026-10-13T04:20:45.059760+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       37412,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 2,
+      "round": 1,
+      "pid": 32520,
+      "parent_pid": 20220,
+      "created_100ns": 134363388449106899,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.062782+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.989452+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       32520,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 3,
+      "round": 1,
+      "pid": 41196,
+      "parent_pid": 20220,
+      "created_100ns": 134363388448458509,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.065374+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.928358+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       41196,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 4,
+      "round": 1,
+      "pid": 5364,
+      "parent_pid": 20220,
+      "created_100ns": 134363388447912397,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.069441+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.926338+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       5364,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 5,
+      "round": 1,
+      "pid": 42672,
+      "parent_pid": 20220,
+      "created_100ns": 134363388447323143,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.070442+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.823288+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       42672,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 6,
+      "round": 1,
+      "pid": 41748,
+      "parent_pid": 20220,
+      "created_100ns": 134363388446614266,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.070442+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.713546+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       41748,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 7,
+      "round": 1,
+      "pid": 26772,
+      "parent_pid": 20220,
+      "created_100ns": 134363388445994686,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.071441+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.713546+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       26772,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 8,
+      "round": 1,
+      "pid": 41952,
+      "parent_pid": 20220,
+      "created_100ns": 134363388445362944,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.074444+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.713031+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       41952,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265812000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 9,
+      "round": 1,
+      "pid": 19728,
+      "parent_pid": 20220,
+      "created_100ns": 134363388444889811,
+      "observed_at_ns": 192265812000000,
+      "observed_at_utc": "2026-10-13T04:20:45.075443+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.596506+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       19728,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265828000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 10,
+      "round": 1,
+      "pid": 6156,
+      "parent_pid": 20220,
+      "created_100ns": 134363388444526232,
+      "observed_at_ns": 192265828000000,
+      "observed_at_utc": "2026-10-13T04:20:45.080036+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.596506+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       6156,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265828000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 11,
+      "round": 1,
+      "pid": 10976,
+      "parent_pid": 20220,
+      "created_100ns": 134363388438981751,
+      "observed_at_ns": 192265828000000,
+      "observed_at_utc": "2026-10-13T04:20:45.081038+00:00",
+      "first_observed_utc": "2026-10-13T04:20:44.095310+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       10976,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265828000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 12,
+      "round": 1,
+      "pid": 35944,
+      "parent_pid": 20220,
+      "created_100ns": 134363388436225896,
+      "observed_at_ns": 192265828000000,
+      "observed_at_utc": "2026-10-13T04:20:45.086581+00:00",
+      "first_observed_utc": "2026-10-13T04:20:43.814955+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       35944,
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265828000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 13,
+      "round": 1,
+      "pid": 20220,
+      "parent_pid": 25372,
+      "created_100ns": 134363388435147637,
+      "observed_at_ns": 192265828000000,
+      "observed_at_utc": "2026-10-13T04:20:45.091121+00:00",
+      "first_observed_utc": "2026-10-13T04:20:43.615340+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       20220,
+       25372
+      ],
+      "seen_during_stop": false,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265828000000,
+      "winerror": 0
+     },
+     {
+      "sequence": 14,
+      "round": 2,
+      "pid": 2516,
+      "parent_pid": 20220,
+      "created_100ns": 134363388450366624,
+      "observed_at_ns": 192265937000000,
+      "observed_at_utc": "2026-10-13T04:20:45.194472+00:00",
+      "first_observed_utc": "2026-10-13T04:20:45.150915+00:00",
+      "ancestry_proven": true,
+      "ancestry": [
+       2516,
+       20220,
+       25372
+      ],
+      "seen_during_stop": true,
+      "operation": "TerminateProcess",
+      "result": "ok",
+      "returned_at_ns": 192265937000000,
+      "winerror": 0
+     }
+    ],
+    "process_tree": {
+     "20220": 25372,
+     "35944": 20220,
+     "10976": 20220,
+     "952": 20220,
+     "27036": 20220,
+     "34396": 20220,
+     "42268": 20220,
+     "20656": 20220,
+     "32468": 20220,
+     "37448": 20220,
+     "13560": 20220,
+     "28748": 20220,
+     "6156": 20220,
+     "19728": 20220,
+     "41952": 20220,
+     "26772": 20220,
+     "41748": 20220,
+     "42672": 20220,
+     "5364": 20220,
+     "41196": 20220,
+     "32520": 20220,
+     "37412": 20220,
+     "2516": 20220,
+     "25372": 14244
+    },
+    "exhaustive": true,
+    "exhaustive_reasons": [],
+    "rounds": 3,
+    "churn_pids": [
+     2516
+    ],
+    "unproven_pids": [],
+    "rejections": [],
+    "exited_before_observation": [],
+    "journal": {
+     "mode": "continuous",
+     "polls": 12,
+     "poll_interval_s": 0.02,
+     "max_poll_gap_ms": 203.0,
+     "max_snapshot_ms": 171.0
+    },
+    "job": {
+     "used": true,
+     "role": "completeness census and final safety net only; per-PID signal evidence comes from toolhelp snapshots plus pinned handles, never from job membership",
+     "assigned_before_resume": true,
+     "accounting_before_safety_net": {
+      "total": 23,
+      "active": 0,
+      "terminated": 0
+     },
+     "observed_members": 23,
+     "never_observed_job_processes": 0,
+     "safety_net_terminated_pids": []
+    }
+   }
+  }
+ ]
+}
