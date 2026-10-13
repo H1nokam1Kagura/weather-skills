@@ -4,7 +4,7 @@
 - Read WAVE3-BRIEF, P0 entries (CAP-OPERATOR-ACTIONS, CAP-LEDGER-APPEND, CAP-OPERATOR-RECORD-SETUP,
   CAP-TRANSITION-REQUEST), decisions D14/D20/D21/D26/D28/D30, frozen DEV-ONLY cases E01-P1, E03-P3,
   E07-P1, E14-P3, E15-P2, scorer use of operator_actions / transition_requests.
-- No code written yet.
+- Code written: operator_ledger.py, runner.py hunks, e2e_injections.py hunks, test_operator_channel_v27.py.
 
 ## Design (planned)
 - NEW tools/workflow/operator_ledger.py: JSONL ledger created exclusively by the controller at capture
@@ -25,7 +25,7 @@
    test_operator_channel_v27.py; 5. pytest full tools/workflow/tests + tests/test_weather_adapter*.py; ruff.
 
 ## Test status
-- Not run yet (no code changes).
+- test_operator_channel_v27.py: 37 passed. Ruff check+format clean. Full suite: pending.
 
 ## Open questions
 - Notify-and-wait stop and before-resume call sites belong to other agents (resume()/notify not in my

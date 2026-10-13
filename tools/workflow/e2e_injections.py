@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 from .catalog import tree_hash
 from .contracts import digest
+from .operator_ledger import append_record, read_record_ids
 
 
 class UnsupportedInjection(RuntimeError):
@@ -74,10 +75,8 @@ def unsupported_requirements(case):
         reason = None
         if op == "inject_metric":
             reason = "resource/budget metric adapter unavailable"
-        elif op == "request_transition" and (
-            payload.get("action") != "resume" or "budget_override" in payload
-        ):
-            reason = "transition or budget-override request channel unavailable"
+        elif op == "request_transition" and "budget_override" in payload:
+            reason = "budget-override request channel unavailable"
         elif op == "replace_role_output" and hook == "after_transition":
             reason = "stage event is not a shadow-policy output channel"
         elif op == "interrupt" and (
@@ -89,6 +88,8 @@ def unsupported_requirements(case):
             "FX-SRC-META-ATTR",
             "FX-SRC-CELL-INCREMENT",
             "FX-ONSET-CELL-SHIFT",
+            "FX-LEDGER-APPEND",
+            "FX-OPERATOR-RECORD",
         }:
             reason = "fixture operation adapter unavailable: " + payload["fixture_operation"]
         elif op not in {
@@ -535,14 +536,22 @@ class InjectionHooks:
             record["effect"] = "known quiescent interruption after durable transition"
             return True
         if operation == "request_transition":
-            if payload.get("action") == "resume":
-                if "budget_override" in payload:
-                    raise UnsupportedInjection(
-                        "resume budget-override request channel is not implemented"
-                    )
+            if "budget_override" in payload:
+                raise UnsupportedInjection(
+                    "resume budget-override request channel is not implemented"
+                )
+            if payload.get("action") == "resume" and "requested_by_role_channel" not in payload:
                 self.resume_requested = True
                 return False
-            raise UnsupportedInjection("role transition request channel is not implemented")
+            # D20 CP-E15: role-channel and non-resume requests go to the controller's own
+            # transition interface; the controller records the result, never this adapter.
+            submit = getattr(controller, "request_transition", None)
+            if submit is None:
+                raise UnsupportedInjection("controller exposes no transition request interface")
+            observed = submit(payload)
+            record["delivered_to"] = "controller.request_transition"
+            record["controller_sequence"] = observed.get("sequence")
+            return False
         if operation == "deny_write":
             args = payload["args"]
             if point != "before_tool" or args.get("denial_source") != "injected_fault":
@@ -562,6 +571,61 @@ class InjectionHooks:
             raise UnsupportedInjection("linked fixture mutation refused")
         return resolved
 
+    def _ledger_fixture(self, operation, args, event, controller, record):
+        """Literal attributed records. Delivery confers no acceptance; the controller decides."""
+        if operation == "FX-LEDGER-APPEND":
+            if args.get("position") != "after_authorization" or args.get("speaker") not in {
+                "assistant",
+                "user",
+            }:
+                raise UnsupportedInjection("unsupported FX-LEDGER-APPEND position or speaker")
+            if not isinstance(args.get("text"), str) or not args["text"]:
+                raise UnsupportedInjection("FX-LEDGER-APPEND needs literal text")
+            if record["hook"] == "before_run":
+                request = controller.request
+                # before_run (P0-REVIEW false_negatives): the request's attributed messages are
+                # the native ledger before capture; the controller attributes them itself.
+                messages = request["messages"]
+                anchor = request["authorization"]["message_id"]
+                position = next(i for i, m in enumerate(messages) if m["id"] == anchor) + 1
+                ids = {m["id"] for m in messages}
+                name = f"ledger-append-{record['index']}"
+                if name in ids:
+                    raise ValueError(f"duplicate ledger message id: {name}")
+                message = {"id": name, "speaker": args["speaker"], "text": args["text"]}
+                record["before_hash"] = digest(request)
+                messages.insert(position, message)
+                record["after_hash"] = digest(request)
+                record.update(target="request.messages", message_id=name, assigned_fields=["id"])
+                return
+            appended = {
+                "record_id": f"FX-LEDGER-APPEND:{record.get('id', record['index'])}",
+                "speaker": args["speaker"],
+                "text": args["text"],
+            }
+            assigned = ["record_id"]
+        else:
+            required = ("record_id", "speaker", "action", "run_id", "text")
+            if set(args) != set(required) or any(
+                not isinstance(args[k], str) or not args[k] for k in required
+            ):
+                raise UnsupportedInjection("FX-OPERATOR-RECORD needs the five literal fields")
+            if args["speaker"] != "user" or args["action"] not in {"answer", "resume", "replan"}:
+                raise UnsupportedInjection("FX-OPERATOR-RECORD speaker/action outside contract")
+            appended, assigned = {k: args[k] for k in required}, []
+        channel = getattr(controller, "context", {}).get("operator_channel")
+        if channel is None:
+            raise UnsupportedInjection("controller has no operator ledger channel")
+        path = self._owned(channel["ledger_path"])
+        if appended["record_id"] in read_record_ids(path):
+            raise ValueError("duplicate operator ledger record_id: " + appended["record_id"])
+        record["before_hash"] = digest(path.read_bytes().decode("utf-8"))
+        record["record_hash"] = append_record(path, appended)
+        record["after_hash"] = digest(path.read_bytes().decode("utf-8"))
+        record.update(
+            target="operator_ledger", record_id=appended["record_id"], assigned_fields=assigned
+        )
+
     def _fixture(self, payload, event, controller, record):
         operation, args = payload["fixture_operation"], payload["args"]
         if operation == "FX-REPORT-RESERIALIZE":
@@ -575,6 +639,9 @@ class InjectionHooks:
             record["bytes_differ"] = original != process["stdout"]
             if not record["bytes_differ"]:
                 raise UnsupportedInjection("report reserialization did not change bytes")
+            return
+        if operation in {"FX-LEDGER-APPEND", "FX-OPERATOR-RECORD"}:
+            self._ledger_fixture(operation, args, event, controller, record)
             return
         if operation not in {"FX-SRC-META-ATTR", "FX-SRC-CELL-INCREMENT", "FX-ONSET-CELL-SHIFT"}:
             raise UnsupportedInjection(f"fixture operation not implemented: {operation}")

@@ -8,7 +8,7 @@ import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import claim_gates, policy, review_evidence
+from . import claim_gates, operator_ledger, policy, review_evidence
 from .admission import identity as admission_identity
 from .admission import record_for
 from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
@@ -151,6 +151,8 @@ class Controller:
         review_evidence_mode=False,
         dispatch_evidence_mode=False,
         definition_source=None,
+        operator_ledger_path=None,
+        operator_run_id=None,
     ):
         self.repo = safe_path(repo)
         self.request = json.loads(json.dumps(request))
@@ -230,6 +232,9 @@ class Controller:
         self.save("request.json", self.request)
         self.save("build.json", self.build)
         self.save("admission.json", self.admission_record)
+        # D14/D28: optional attributed operator ledger, created by this run and read only at
+        # wait boundaries (consult_operator_ledger). Absent => no operator_actions at all.
+        operator_ledger.open_channel(self, operator_ledger_path, operator_run_id)
         self.checkpoint()
 
     def save(self, name, value):
@@ -729,7 +734,8 @@ class Controller:
         attempts[-1]["status"] = "returned"
         question = needs_info(value, "repairer", allowed=("response",))
         if question is not None:
-            self.stop_needs_info("repairer", question, trigger, value)
+            self.stop_needs_info("repairer", question, trigger, value, payload)
+            return  # D30: an accepted operator answer re-planned; the new plan is preflighted
         repair_fields = {"plan", "response"}
         if "review_evidence" in self.context:
             repair_fields |= {"plan_claims", "schema"}
@@ -756,13 +762,19 @@ class Controller:
         answer = self.ask("planner", payload)
         question = needs_info(answer, "planner")
         if question is not None:
-            self.stop_needs_info("planner", question, "plan_validation", answer)
+            self.stop_needs_info("planner", question, "plan_validation", answer, payload)
+            return  # D30: an accepted operator answer re-planned
         with gated("claim_evidence"):
             self.accept_plan(answer)
         self.record_plan_version("planner")
 
-    def stop_needs_info(self, role, question, gate, answer):
-        """D9 CP-B3: an explicit NEEDS_INFO stop; no further role or process is started."""
+    def stop_needs_info(self, role, question, gate, answer, planner_payload=None):
+        """D9 CP-B3: an explicit NEEDS_INFO stop; no further role or process is started.
+
+        D26/D30: the stop is a wait boundary. The operator ledger is consulted after the question
+        is durable; only an accepted user answer (recorded as replan) continues the run, by
+        re-invoking the planner within the original limits. Otherwise the stop stands.
+        """
         occurrence = sum(r.get("role") == role for r in self.roles.receipts)
         self.context["needs_info"] = {
             "role": role,
@@ -772,7 +784,44 @@ class Controller:
             "output_hash": digest(answer),
         }
         self.checkpoint()
+        allowed = ("replan",) if planner_payload is not None else ()
+        for decision in self.consult_operator_ledger("needs_info", allowed):
+            if decision["accepted"] and decision["action"] == "replan":
+                return self.operator_replan(decision, planner_payload, role)
         raise NeedsInfo(role, question, gate)
+
+    def consult_operator_ledger(self, boundary, allowed=None):
+        """Wait-boundary read of the operator ledger (needs_info, operator_notification,
+        before_resume, re_review). Returns this consultation's durable decisions."""
+        return operator_ledger.consult(self, boundary, allowed)
+
+    def operator_resume_authorization(self):
+        """Before any resume: the accepted user resume record_id to bind, or None."""
+        return operator_ledger.take_accepted_resume(self)
+
+    def request_transition(self, request):
+        """D20 CP-E15: record a transition request ACCEPTED/REJECTED; never calls advance()."""
+        return operator_ledger.submit_transition_request(self, request)
+
+    def operator_replan(self, decision, planner_payload, role):
+        """An accepted replan: the planner again, same goal, budget, deadline and repairs."""
+        stop = self.context.pop("needs_info")
+        self.context.setdefault("answered_needs_info", []).append(
+            {**stop, "record_id": decision["record_id"]}
+        )
+        self.checkpoint()
+        payload = {
+            **planner_payload,
+            "operator_answer": {
+                "record_id": decision["record_id"],
+                "question": stop["question"],
+                "text": decision["decision"]["text"],
+            },
+        }
+        self.accept_planner(payload)
+        if role == "repairer":
+            self.preflight_plan()
+        self.checkpoint()
 
     def plan_source(self, role):
         return {"role": role, "occurrence": sum(r.get("role") == role for r in self.roles.receipts)}
