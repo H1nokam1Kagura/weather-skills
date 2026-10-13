@@ -40,8 +40,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/difference.py -i a.zarr -i b.zarr --output <o
     [--variable VAR ...]
 ```
 
-The output must be a distinct store from both inputs; the skill rejects a run
-where `--output` resolves to either `--input` path.
+Write to a new path: `--output` is replaced, so pointing it at an input
+destroys that input.
 
 ### Arguments
 - `--input`, `-i` — input Zarr; pass exactly twice. The first is A (the
@@ -101,21 +101,8 @@ One data variable per differenced variable, holding A − B on the aligned
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` DAG. Difference is a
-join: the top-level array is this difference entry, and `input` is a list
-with one item per input (A then B), each carrying that input's full
-upstream subgraph, so both branches are recorded equally. The entry also
-records the git `commit` of the skill that ran (the `version` is the value
-printed by `--help`; inherited upstream entries carry their own versions
-and commits). Inspect a written output's lineage with the `provenance`
-skill.
-
-Re-running with identical arguments against unchanged inputs and an existing
-output is a cheap no-op — reuse the same output path. A cache hit requires the
-same skill `version`, the same flags, the same input names, the same input
-content, and the same upstream history; any modification to either input forces
-a recompute (a renamed-but-unchanged input misses, and a modified same-named
-input misses).
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 

@@ -61,3 +61,28 @@ def test_concat_rejects_single_input(tmp_path, concat):
     with pytest.raises(SystemExit) as exc:
         run_skill(concat, "-i", str(src), "-o", str(tmp_path / "out.zarr"), "--dim", "time")
     assert exc.value.code == 2
+
+
+def test_concat_converts_compatible_units(tmp_path, concat):
+    hourly = make_gridded(fill=1.0)
+    hourly["precip"].attrs["units"] = "mm hr-1"
+    d1 = write_zarr(make_gridded(fill=1.0), tmp_path / "d1.zarr")
+    d2 = write_zarr(hourly, tmp_path / "d2.zarr")
+    out = tmp_path / "out.zarr"
+
+    run_skill(concat, "-i", str(d1), "-i", str(d2), "-o", str(out), "--dim", "number")
+
+    ds = xr.open_zarr(out, consolidated=True)
+    assert float(ds["precip"].isel(number=1).mean()) == pytest.approx(24.0)
+
+
+def test_concat_rejects_incompatible_units(tmp_path, concat):
+    kelvin = make_gridded()
+    kelvin["precip"].attrs["units"] = "K"
+    d1 = write_zarr(make_gridded(), tmp_path / "d1.zarr")
+    d2 = write_zarr(kelvin, tmp_path / "d2.zarr")
+    out = tmp_path / "out.zarr"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(concat, "-i", str(d1), "-i", str(d2), "-o", str(out), "--dim", "number")
+    assert exc.value.code == 2
+    assert not out.exists()

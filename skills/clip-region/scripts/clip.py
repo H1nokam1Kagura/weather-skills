@@ -2,7 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
 #   "shapely",
 # ]
 # ///
@@ -25,16 +24,10 @@ _SKILL_VERSION = "0.0.2"
 @weather_skill.argument("--bbox")
 @weather_skill.argument(
     "--region",
-    default=None,
-    help=(
-        "ISO3, country, or named region. Clips to the boundary polygon and "
-        "keeps every grid cell that overlaps it, including cells that "
-        "straddle the border. Mutex with --bbox and --geojson."
-    ),
+    help="ISO3, country, or named region (mutex with --bbox and --geojson).",
 )
 @weather_skill.argument(
     "--geojson",
-    default=None,
     help="GeoJSON polygon path (mutex with --bbox and --region).",
 )
 @weather_skill.argument(
@@ -42,7 +35,7 @@ _SKILL_VERSION = "0.0.2"
     action="store_true",
     help="With --geojson or --region: NaN outside instead of dropping cells/stations.",
 )
-def clip_region(ds, output, bbox=None, geojson=None, region=None, keep_outside=False, **kwargs):
+def clip_region(ds, bbox, region, geojson, keep_outside, **kwargs):
     """Subset by bbox, named region, or GeoJSON polygon."""
     if keep_outside and geojson is None and region is None:
         raise UsageError("--keep-outside requires --geojson or --region")

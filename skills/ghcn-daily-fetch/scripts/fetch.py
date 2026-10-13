@@ -2,14 +2,8 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "xarray",
-#   "zarr",
-#   "numpy",
 #   "pandas",
 #   "requests",
-#   "cf_xarray",
-#   "pint-xarray>=0.6",
-#   "cftime",
 # ]
 # ///
 """Fetch NOAA GHCN-Daily station observations over HTTPS and write a point_obs weather-skills standard dataset Zarr."""
@@ -199,7 +193,6 @@ def _var_attrs(ds) -> dict:
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -208,9 +201,9 @@ def _var_attrs(ds) -> dict:
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(start_time, end_time, bbox, workers, variable, **kwargs):
+def fetch(start_time, end_time, bbox, workers, variable, probe_latest, **kwargs):
     """Fetch NOAA GHCN-Daily station observations over HTTPS and write a point_obs weather-skills standard dataset Zarr."""
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         from email.utils import parsedate_to_datetime
 
         year = datetime.now(UTC).date().year

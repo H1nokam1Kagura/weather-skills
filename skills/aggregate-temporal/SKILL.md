@@ -117,4 +117,5 @@ Same variables; the time/step axis is replaced by the aggregated window.
 
 ### Provenance
 
-History entry records period/window, method, variables, and paths as usual.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.

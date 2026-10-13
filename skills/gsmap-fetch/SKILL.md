@@ -95,8 +95,8 @@ totals) before feeding a daily-oriented skill.
 
 ### Provenance
 
-Standard `weather_skills_history` stamp via the decorator, plus
-`weather_skills_source=earth-engine:JAXA/GPM_L3/GSMaP/v6/operational`.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Example
 

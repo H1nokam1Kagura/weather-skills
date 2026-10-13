@@ -2,19 +2,14 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
 #   "dynamical-catalog==1.0.1",
 #   "ecmwf-datastores-client==0.4.2",
 #   "requests",
-#   "xarray",
 #   "cfgrib",
 #   # eccodeslib carries the native libeccodes that cfgrib loads on macOS/Linux;
 #   # eccodes drops this as a transitive dep via PyPI metadata (ecmwf/eccodes-python#150),
 #   # so it is declared directly. Windows bundles the library in eccodes itself.
 #   "eccodeslib",
-#   "zarr",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch ECMWF S2S ensemble fields (cf + pf) and write a weather-skills standard dataset Zarr."""
@@ -721,7 +716,6 @@ def _is_s2s_embargo_error(exc: BaseException) -> bool:
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -730,9 +724,9 @@ def _is_s2s_embargo_error(exc: BaseException) -> bool:
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(bbox, date, variable, **kwargs):
+def fetch(bbox, date, variable, probe_latest, **kwargs):
     """Fetch ECMWF S2S ensemble fields (cf + pf) and write a weather-skills standard dataset Zarr."""
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         found = _catalog_latest_init()
         if found is not None:
             print(found.isoformat())

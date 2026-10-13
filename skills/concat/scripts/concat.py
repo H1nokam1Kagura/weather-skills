@@ -2,8 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
-#   "xarray",
 # ]
 # ///
 """Concatenate Zarr stores along a named dim."""
@@ -36,6 +34,7 @@ def _coerce(values):
 @weather_skill.argument("--coords", help="Comma-separated coord values for the new dim")
 def concat(ds, dim, coords, **kwargs):
     """Concatenate Zarr stores along a named dim."""
+    import pint
     import xarray as xr
 
     # Repeat -i/--input per store. nargs="+" would treat a second -i as a
@@ -53,7 +52,10 @@ def concat(ds, dim, coords, **kwargs):
             dss = [d.expand_dims({dim: [v]}) for d, v in zip(dss, vals, strict=True)]
         else:
             dss = [d.expand_dims(dim) for d in dss]
-    return xr.concat(dss, dim=dim)
+    try:
+        return xr.concat(dss, dim=dim)
+    except pint.DimensionalityError as exc:
+        raise UsageError(f"inputs carry incompatible units: {exc}") from None
 
 
 if __name__ == "__main__":

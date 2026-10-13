@@ -54,3 +54,20 @@ def test_accepts_precip_totals(tmp_path, summarize_dim):
     result = xr.open_zarr(out, consolidated=True)
     assert "time" not in result.dims
     assert "sum" in result["precip"].attrs["cell_methods"]
+
+
+@pytest.mark.parametrize("flag", [["--dim", "tme"], ["--dim", "time", "-v", "precp"]])
+def test_rejects_unknown_dim_or_variable(tmp_path, summarize_dim, flag):
+    src = write_zarr(make_gridded(), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            summarize_dim,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "out.zarr"),
+            "--method",
+            "mean",
+            *flag,
+        )
+    assert exc.value.code == 2

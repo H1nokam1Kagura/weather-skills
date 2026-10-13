@@ -124,7 +124,6 @@ def _parse(query: str, as_of: date) -> tuple[date, date, str]:
 @weather_skill.argument(
     "query",
     nargs="?",
-    default=None,
     help="Relative date token (last-2w, latest, now-3d, YYYY-MM-DD, …)",
 )
 @weather_skill.argument(
@@ -137,7 +136,7 @@ def _parse(query: str, as_of: date) -> tuple[date, date, str]:
     default="flags",
     help="stdout format: CLI flags (default), START/END, or JSON",
 )
-def resolve_time(query, as_of, emit="flags", **kwargs):
+def resolve_time(query, as_of, emit, **kwargs):
     """Resolve a relative date query to absolute --start-time/--end-time or --date."""
     if query is None:
         raise UsageError(f"pass a query token. {_QUERY_HELP}")

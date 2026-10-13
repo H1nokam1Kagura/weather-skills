@@ -2,8 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Convert data variable(s) to --to-units, or --to-standard (temp °C, precip mm)."""
@@ -36,7 +34,6 @@ _STANDARD_NAME_BY_UNITS = {
 @weather_skill.argument("--variable", "-v")
 @weather_skill.argument(
     "--to-units",
-    default=None,
     help="Target units (UDUNITS/CF). Mutually exclusive with --to-standard.",
 )
 @weather_skill.argument(

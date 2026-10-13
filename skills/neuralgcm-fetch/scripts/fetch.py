@@ -2,12 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "xarray",
-#   "zarr>=3",
-#   "cftime",
 #   "gcsfs",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a NeuralGCM S2S ensemble forecast and write a weather-skills standard dataset."""
@@ -304,7 +299,6 @@ def _select_variables(ds, variable):
 @weather_skill.argument(
     "--cycle",
     choices=list(_CYCLES),
-    default=None,
     help="Init hour UTC (00 or 12). Default: 00 with --date; latest cycle when --date is omitted.",
 )
 @weather_skill.argument("--bbox")
@@ -313,7 +307,6 @@ def _select_variables(ds, variable):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -321,7 +314,7 @@ def _select_variables(ds, variable):
         "Does not download fields. Optional IDENT selects a --dataset id."
     ),
 )
-def fetch(dataset, date, bbox, variable, output, **kwargs):
+def fetch(dataset, date, bbox, variable, cycle, probe_latest, **kwargs):
     """Fetch a NeuralGCM S2S ensemble forecast and write a weather-skills standard dataset.
 
     Opens a consolidated Zarr under
@@ -330,9 +323,8 @@ def fetch(dataset, date, bbox, variable, output, **kwargs):
     standard forecast cube, optionally subsets by ``--bbox`` / ``--variable``,
     and returns a Dataset for the decorator to write.
     """
-    dsid = _canonical_dataset(kwargs["probe_latest"] or dataset)
-    cycle = kwargs.get("cycle")
-    if kwargs.get("probe_latest") is not None:
+    dsid = _canonical_dataset(probe_latest or dataset)
+    if probe_latest is not None:
         stamps = _list_init_stamps()
         if cycle:
             stamps = [s for s in stamps if s.endswith(f"T{cycle}")]

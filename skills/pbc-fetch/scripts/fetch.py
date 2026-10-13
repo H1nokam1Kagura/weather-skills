@@ -2,12 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "xarray",
-#   "zarr>=3",
-#   "cftime",
 #   "gcsfs",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a PBC AI Weather Quest precip forecast and write a weather-skills standard dataset."""
@@ -263,7 +258,6 @@ def _as_forecast(ds, *, init, dataset: str):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -272,7 +266,7 @@ def _as_forecast(ds, *, init, dataset: str):
         "(era5-p_pr_19, pr_26, …)."
     ),
 )
-def fetch(dataset, date, bbox, variable, output, **kwargs):
+def fetch(dataset, date, bbox, variable, probe_latest, **kwargs):
     """Fetch a PBC AI Weather Quest precip forecast and write a weather-skills standard dataset.
 
     Opens a Zarr under ``gs://sheerwater-datalake/pbc-data/<dataset>/<YYYYMMDD>/``
@@ -282,8 +276,8 @@ def fetch(dataset, date, bbox, variable, output, **kwargs):
     to write.
     """
     dataset = _resolve_dataset(dataset)
-    if kwargs.get("probe_latest") is not None:
-        ident = kwargs["probe_latest"] or dataset
+    if probe_latest is not None:
+        ident = probe_latest or dataset
         dsid = _resolve_dataset(ident)
         _folder, init = _resolve_folder(None, dsid)
         print(init.isoformat())

@@ -2,12 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
 #   "dynamical-catalog==1.0.1",
-#   "xarray",
-#   "zarr",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch CHIRPS precipitation from the dynamical.org catalog (final, prelim fallback) and write a weather-skills standard dataset Zarr."""
@@ -118,7 +113,6 @@ def _latest_day(dataset_id: str) -> date | None:
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -127,9 +121,9 @@ def _latest_day(dataset_id: str) -> date | None:
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(start_time, end_time, bbox, **kwargs):
+def fetch(start_time, end_time, bbox, probe_latest, **kwargs):
     """Fetch CHIRPS precipitation from the dynamical.org catalog (final, prelim fallback) and write a weather-skills standard dataset Zarr."""
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         found = [
             day for day in (_latest_day(_FINAL_ID), _latest_day(_PRELIM_ID)) if day is not None
         ]

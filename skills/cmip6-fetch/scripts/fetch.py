@@ -2,14 +2,8 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "xarray",
-#   "zarr",
 #   "gcsfs",
-#   "numpy",
 #   "pandas",
-#   "cftime",
-#   "cf_xarray",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a CMIP6 climate-projection dataset from the public Pangeo Google Cloud catalog and write a weather-skills standard dataset Zarr."""
@@ -172,7 +166,6 @@ def _drop_bounds(ds):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -181,9 +174,21 @@ def _drop_bounds(ds):
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(start_time, end_time, bbox, model, experiment, variable, member, table, grid, **kwargs):
+def fetch(
+    start_time,
+    end_time,
+    bbox,
+    model,
+    experiment,
+    variable,
+    member,
+    table,
+    grid,
+    probe_latest,
+    **kwargs,
+):
     """Fetch a CMIP6 climate-projection dataset from the public Pangeo Google Cloud catalog and write a weather-skills standard dataset Zarr."""
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         print("none")
         return
 

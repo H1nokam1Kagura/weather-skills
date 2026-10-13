@@ -2,10 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
-#   "xarray",
 #   "xarray-regrid",
-#   "numpy",
 # ]
 # ///
 """Coarsen/align onto a target grid (geometry only, linear)."""
@@ -70,7 +67,6 @@ def _clip_reference_axis(input_vals, ref_vals):
 @weather_skill.argument("--variable", "-v")
 @weather_skill.argument(
     "--reference-grid",
-    default=None,
     help=(
         "Zarr whose lat/lon become the target (exact coordinate values). "
         "Prefer this when matching another dataset for difference/verify."
@@ -79,13 +75,11 @@ def _clip_reference_axis(input_vals, ref_vals):
 @weather_skill.argument(
     "--target-resolution",
     type=float,
-    default=None,
     help="Target spacing in degrees (with --offset). Prefer --reference-grid to match a Zarr.",
 )
 @weather_skill.argument(
     "--offset",
     type=float,
-    default=None,
     help="Grid offset in degrees; points at offset + k*resolution (with --target-resolution).",
 )
 def coarsen(ds, variable, reference_grid, target_resolution, offset, **kwargs):

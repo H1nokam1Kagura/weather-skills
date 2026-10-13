@@ -2,7 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
 # ]
 # ///
 """Rename one data variable (omit --variable after select left a single var)."""

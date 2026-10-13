@@ -2,10 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
-#   "xarray",
-#   "zarr",
-#   "numpy",
 #   "pandas",
 #   "tahmo",
 # ]
@@ -273,7 +269,6 @@ def _ensure_setup(state):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -282,15 +277,14 @@ def _ensure_setup(state):
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(start_time, end_time, workers, bbox, station, **kwargs):
+def fetch(start_time, end_time, workers, bbox, station, list_stations, probe_latest, **kwargs):
     """Fetch TAHMO station observations and write a point_obs weather-skills standard dataset Zarr."""
     import pandas as pd
     import xarray as xr
 
-    list_stations = kwargs.get("list_stations")
     if list_stations and bbox is None:
         raise UsageError("--list-stations requires --bbox N/W/S/E.")
-    if not list_stations and kwargs.get("probe_latest") is None and not station and bbox is None:
+    if not list_stations and probe_latest is None and not station and bbox is None:
         raise UsageError("pass --station ID (repeatable) and/or --bbox N/W/S/E.")
 
     api, stations, var_meta = _ensure_setup({})
@@ -299,7 +293,7 @@ def fetch(start_time, end_time, workers, bbox, station, **kwargs):
         _print_station_list(_filter_bbox(_ta_stations(stations), bbox))
         return
 
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         from datetime import UTC, datetime, timedelta
 
         end = datetime.now(UTC).date()

@@ -45,9 +45,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/select_dim.py --input <in.zarr> --output <out
 ### Arguments
 
 - `--input`, `-i` — input Zarr.
-- `--output`, `-o` — output Zarr. Must be a distinct path: the same store as
-  the input (or one nested inside the other) is rejected. An existing path
-  here must be a directory (a store to replace); a plain file is rejected.
+- `--output`, `-o` — output Zarr, replaced if it exists. Use a new path;
+  pointing it at the input destroys the input.
 - `--dim` — the dimension to select along (exactly one per run).
 - `--index` — integer position to select. Repeat once per position. Strict
   integers only (ASCII digits; no floats, signs other than a leading minus,
@@ -99,21 +98,8 @@ message; no output is produced.
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: the input's chain plus
-an entry for this run, each entry `{skill, version, args, input}` (the
-`version` recorded in this skill's own entry is the value printed by its
-`--help`; inherited upstream entries carry their own versions). Repeated
-`--index`/`--value` flags are recorded as a list in the order given, since
-that order determines the output; index positions are recorded as canonical
-integers (`0` and `00` are the same selection). Inspect a written output's
-lineage with the `provenance` skill.
-
-Re-running with identical arguments against an unchanged input and an existing
-output is a cheap no-op — reuse the same output path. A cache hit requires the
-same skill `version`, the same flags (in the same order), the same input name,
-the same input content, and the same upstream history; any modification to the
-input forces a recompute (a renamed-but-unchanged input misses, and a modified
-same-named input misses).
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Example
 

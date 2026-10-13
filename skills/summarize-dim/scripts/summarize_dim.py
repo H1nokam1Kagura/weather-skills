@@ -2,7 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
 # ]
 # ///
 """Summarize named dims with a statistic."""
@@ -40,6 +39,9 @@ _SKILL_VERSION = "0.0.2"
 def summarize_dim(ds, variable, dim, method, lat_weighted, **kwargs):
     """Summarize named dims with a statistic."""
     dims = list(dict.fromkeys(dim))
+    for d in dims:
+        if d not in ds.dims:
+            raise UsageError(f"--dim {d!r} not in dataset (have {list(ds.dims)})")
     lat_dim = None
     if lat_weighted:
         if method != "mean":
@@ -50,6 +52,9 @@ def summarize_dim(ds, variable, dim, method, lat_weighted, **kwargs):
 
     # No --variable: whole dataset (vars without the dim are skipped by rdims).
     selected = list(dict.fromkeys(variable)) if variable else list(ds.data_vars)
+    for var in selected:
+        if var not in ds.data_vars:
+            raise UsageError(f"--variable {var!r} not in dataset (have {list(ds.data_vars)})")
     out = ds.copy()
     for var in selected:
         da = ds[var]

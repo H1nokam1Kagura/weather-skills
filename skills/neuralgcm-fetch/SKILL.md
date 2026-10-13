@@ -118,12 +118,8 @@ negative precip at zero. Do **not** run `deaccumulate`. For daily/weekly
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only
-array of per-step entries `{skill, version, args, input}`. For this fetcher it
-is a length-1 array with `skill="neuralgcm-fetch"` and `input=null`. `args`
-records the run's flag values under underscored names; `version` is the value
-printed by `--help`. Inspect a written output's provenance with the
-`provenance` skill.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 

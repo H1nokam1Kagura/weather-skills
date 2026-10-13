@@ -2,12 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
 #   "dynamical-catalog==1.0.1",
-#   "xarray",
-#   "zarr",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a dynamical.org open-catalog dataset and write a weather-skills standard dataset Zarr."""
@@ -256,7 +251,6 @@ def _open_dataset(state, dataset) -> dict:
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -265,12 +259,12 @@ def _open_dataset(state, dataset) -> dict:
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(bbox, dataset, date, start_time, end_time, variable, **kwargs):
+def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, **kwargs):
     """Fetch a dynamical.org open-catalog dataset and write a weather-skills standard dataset Zarr."""
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         import numpy as np
 
-        dsid = kwargs["probe_latest"] or dataset
+        dsid = probe_latest or dataset
         if not dsid:
             raise UsageError("--dataset is required (or pass it as --probe-latest <id>).")
         state = _open_dataset({}, dsid)

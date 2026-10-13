@@ -82,17 +82,8 @@ Stamped with `weather_skills_source=tahmo` and `featureType=timeSeries`.
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only array of
-per-step entries `{skill, version, args, input}`. For a fetcher this is a
-length-1 array; downstream zarr-writing skills append their own entry. `args`
-is the argparse namespace minus the `--input`/`--output` path strings;
-`version` is the `_SKILL_VERSION` constant in `scripts/fetch.py`.
-
-The `args` dict stores argparse dest names (underscored, e.g. `time_dim`,
-`target_resolution`, `end_time`), not the hyphenated CLI flag names
-(`--time-dim`, `--target-resolution`, `--end-time`). A consumer
-reconstructing a `uv run ${CLAUDE_SKILL_DIR}/scripts/<skill>.py <args>` invocation must
-translate underscore → hyphen.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 

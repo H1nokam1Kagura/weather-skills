@@ -2,8 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
-#   "numpy",
 # ]
 # ///
 """Print dimensions, coordinates, and a bounded data-variable summary of a Zarr."""
@@ -133,7 +131,7 @@ def _data_var(name, da, max_values):
     help="Max values printed per coordinate and per data-variable sample (default 24). "
     "0 prints every coordinate value; data samples still cap at 256.",
 )
-def inspect_zarr(ds, format="human", max_values=24, **kwargs):
+def inspect_zarr(ds, format, max_values, **kwargs):
     """Print dimensions, coordinates, and a bounded data-variable summary of a Zarr."""
     if max_values < 0:
         raise UsageError(

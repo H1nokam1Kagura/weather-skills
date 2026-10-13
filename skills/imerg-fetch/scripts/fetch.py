@@ -2,15 +2,10 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
 #   "earthaccess",
 #   "h5netcdf",
 #   "h5py",
 #   "dask",
-#   "xarray",
-#   "zarr",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch IMERG live precipitation and write a weather-skills standard dataset Zarr."""
@@ -46,7 +41,6 @@ _GRANULE_DATE_RE = re.compile(r"\.(\d{8})-S")
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -55,12 +49,12 @@ _GRANULE_DATE_RE = re.compile(r"\.(\d{8})-S")
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(start_time, end_time, version, **kwargs):
+def fetch(start_time, end_time, version, probe_latest, **kwargs):
     """Fetch IMERG live precipitation and write a weather-skills standard dataset Zarr."""
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         import earthaccess
 
-        release = kwargs["probe_latest"] or version or "late"
+        release = probe_latest or version or "late"
         if release not in SHORTNAMES:
             raise UsageError(f"unknown IMERG product {release!r}; choose late or final")
         earthaccess.login()

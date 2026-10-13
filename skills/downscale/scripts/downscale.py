@@ -2,10 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
-#   "xarray",
 #   "xarray-regrid",
-#   "numpy",
 # ]
 # ///
 """Downscale onto a finer grid (linear or empirical q-q)."""
@@ -57,10 +54,10 @@ def _qmap_1d(model, ref):
     required=True,
     choices=["linear-interpolation", "q-q"],
 )
-@weather_skill.argument("-f", "--factor", type=int, default=None)
-@weather_skill.argument("--target-resolution", type=float, default=None)
-@weather_skill.argument("--reference-grid", default=None)
-@weather_skill.argument("--qq-reference", default=None)
+@weather_skill.argument("-f", "--factor", type=int)
+@weather_skill.argument("--target-resolution", type=float)
+@weather_skill.argument("--reference-grid")
+@weather_skill.argument("--qq-reference")
 @weather_skill.argument("--time-dim", default="time")
 def downscale(
     ds,

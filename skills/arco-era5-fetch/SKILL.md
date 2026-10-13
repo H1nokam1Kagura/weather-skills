@@ -121,17 +121,8 @@ only "Killed").
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only array of
-per-step entries `{skill, version, args, input}`. For this fetcher it is a
-length-1 array with `skill="arco-era5-fetch"` and `input=null`; downstream
-zarr-writing skills append their own entry. `args` records every option except
-the `--output` path — `start`, `end`, `bbox`, and `variable`. `version` is this skill's
-version, also printed by `--help`. Inspect a written output's provenance with the
-`provenance` skill.
-
-The `args` dict stores option names with underscores, not the hyphenated CLI flag
-names. A consumer reconstructing a `uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py <args>`
-invocation must translate underscore → hyphen.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 

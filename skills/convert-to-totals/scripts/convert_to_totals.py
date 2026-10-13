@@ -2,9 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cf-xarray",
-#   "cftime>=1.6",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Convert rate variables to period totals using stamped aggregation_period."""
@@ -72,7 +69,7 @@ def _sum_cell_methods_dim(da, dim: str | None) -> str:
     default=1.0,
     help="Drop intervals whose aggregation_coverage is below this (0–1). Default 1.0.",
 )
-@weather_skill.argument("--time-dim", default=None)
+@weather_skill.argument("--time-dim")
 def convert_to_totals(ds, variable, min_coverage, time_dim, **kwargs):
     """Multiply rates by stamped aggregation_period → amounts. Terminal before plot."""
     dim = _resolve_dim(ds, time_dim)

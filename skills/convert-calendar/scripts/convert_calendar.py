@@ -2,8 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
-#   "numpy",
 # ]
 # ///
 """Convert time axis to a target CF calendar."""
@@ -40,7 +38,7 @@ _SKILL_VERSION = "0.0.2"
     choices=["date", "year"],
     help="Required when source or target is 360_day.",
 )
-@weather_skill.argument("--time-dim", default=None)
+@weather_skill.argument("--time-dim")
 def convert_calendar(ds, calendar, align_on, time_dim, **kwargs):
     """Convert time axis to a target CF calendar."""
     import numpy as np

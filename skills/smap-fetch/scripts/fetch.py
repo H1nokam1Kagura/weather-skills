@@ -4,12 +4,6 @@
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
 #   "earthaccess",
 #   "h5py",
-#   "xarray",
-#   "zarr",
-#   "numpy",
-#   "cf_xarray",
-#   "pint-xarray>=0.6",
-#   "cftime",
 # ]
 # ///
 """Fetch SMAP SPL3SMP_E soil moisture via Earthdata and write a weather-skills standard dataset Zarr."""
@@ -249,7 +243,6 @@ def _stamp_cf(ds) -> None:
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -258,13 +251,13 @@ def _stamp_cf(ds) -> None:
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(start_time, end_time, bbox, overpass, **kwargs):
+def fetch(start_time, end_time, bbox, overpass, probe_latest, **kwargs):
     """Fetch SMAP SPL3SMP_E soil moisture via Earthdata and write a weather-skills standard dataset Zarr."""
     import earthaccess
     import numpy as np
     import xarray as xr
 
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         end = datetime.now(UTC).date()
         start = end - timedelta(days=21)
         _login()

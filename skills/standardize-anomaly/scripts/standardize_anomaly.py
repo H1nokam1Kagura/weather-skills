@@ -2,10 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
-#   "numpy>=2.4",
-#   "xarray>=2026.4",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Standardized anomaly: (ds[var] - clim[var_avg]) / clim[var_std]."""

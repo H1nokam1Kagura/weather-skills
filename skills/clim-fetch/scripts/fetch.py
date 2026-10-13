@@ -2,15 +2,10 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
 #   "fsspec",
 #   "aiohttp",
 #   "dask",
-#   "xarray",
-#   "zarr",
-#   "numpy",
 #   "pandas",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a cached climatology from Sheerwater's public GCS mirror.

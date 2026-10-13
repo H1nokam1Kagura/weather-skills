@@ -29,13 +29,12 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/rename.py --input <in.zarr> --output <out.zar
     --to-name <NAME> [--variable NAME]
 ```
 
-The output must be a distinct store from the input; the skill rejects a run
-where `--input` and `--output` resolve to the same store or one nested inside
-the other.
+Write to a new path: `--output` is replaced, so pointing it at the input
+destroys the input.
 
 ### Arguments
 - `--input`, `-i` — input Zarr containing a weather-skills standard dataset.
-- `--output`, `-o` — output Zarr (a distinct path from `--input`).
+- `--output`, `-o` — output Zarr.
 - `--to-name` — the new variable name; becomes the output variable's name.
 - `--variable`, `-v` — source data variable to rename. If omitted and the input
   has a single data variable, that one is used. If multiple data vars are
@@ -59,20 +58,8 @@ dimension (renaming onto it would clash).
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only
-array of per-step entries `{skill, version, args, input}`. This skill reads the
-upstream input's `weather_skills_history` (default `[]` and stderr warning if
-absent) and appends its own entry. `args` is the argparse namespace minus the
-`--input`/`--output` path strings; `input` is a `{basename, hash}` dict —
-`basename` is the upstream zarr's filename and `hash` is a sha256 of its stored
-bytes, so a renamed-but-unchanged input still cache-hits and a
-same-named-but-modified input correctly cache-misses; `version` is the
-`_SKILL_VERSION` constant in `scripts/rename.py`.
-
-The `args` dict stores argparse dest names (underscored, e.g. `to_name`), not
-the hyphenated CLI flag names (`--to-name`). A consumer reconstructing a
-`uv run ${CLAUDE_SKILL_DIR}/scripts/<skill>.py <args>` invocation must
-translate underscore → hyphen.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Example
 

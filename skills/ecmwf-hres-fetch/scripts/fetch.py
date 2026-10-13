@@ -2,19 +2,14 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime",
 #   # >=0.3.34 for the IFS Cycle 50r1 (2026-05-12) date-aware oper/scda
 #   # stream fix in Client.patch_stream — older pins misroute 06/18Z runs.
 #   "ecmwf-opendata==0.3.34",
-#   "xarray",
 #   "cfgrib",
 #   # eccodeslib carries the native libeccodes that cfgrib loads on macOS/Linux;
 #   # eccodes drops this as a transitive dep via PyPI metadata (ecmwf/eccodes-python#150),
 #   # so it is declared directly. Windows bundles the library in eccodes itself.
 #   "eccodeslib",
-#   "zarr",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a deterministic ECMWF HRES (IFS oper) forecast and write a weather-skills standard dataset Zarr."""
@@ -307,7 +302,6 @@ def _standardize(ds):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -315,9 +309,9 @@ def _standardize(ds):
         "Does not download fields."
     ),
 )
-def fetch(bbox, date, run, variable, **kwargs):
+def fetch(bbox, date, run, variable, probe_latest, **kwargs):
     """Fetch a deterministic ECMWF HRES (IFS oper) forecast and write a weather-skills standard dataset Zarr."""
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         from ecmwf.opendata import Client
 
         client = Client(source="ecmwf")

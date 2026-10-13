@@ -43,7 +43,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/zonal_moisture_transport.py -i <q_and_or_u.za
     [--humidity-variable VAR] [--wind-variable VAR] [--output-name NAME]
 ```
 
-The output must be a distinct store from every input.
+Write to a new path: `--output` is replaced, so pointing it at an input
+destroys that input.
 
 ### Arguments
 
@@ -75,7 +76,7 @@ are preserved. Positive `viwve` is eastward transport.
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr. Inspect it
+The output carries a `weather_skills_history` provenance chain; inspect it
 with the `provenance` skill.
 
 ## Examples

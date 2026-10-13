@@ -124,13 +124,8 @@ Failures are reactive and each emits a one-line actionable message:
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only array of
-per-step entries `{skill, version, args, input}`. For this fetcher it is a
-length-1 array with `skill="cmip6-fetch"` and `input=null`. `args` records the
-resolved facets (`model`, `experiment`, `variable`, `member`, `table`, the chosen
-`grid`, and the dataset `data_version`), the `bbox`, and `start`/`end`. `version`
-is this skill's version, also printed by `--help`.
-Inspect a written output's provenance with the `provenance` skill.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 

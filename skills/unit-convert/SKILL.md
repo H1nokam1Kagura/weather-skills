@@ -46,8 +46,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/unit-convert.py -i <in.zarr> -o <out.zarr> \
 
 ### Provenance
 
-Appends a `{skill, version, args, input}` entry to `weather_skills_history`
-(see the `provenance` skill).
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 

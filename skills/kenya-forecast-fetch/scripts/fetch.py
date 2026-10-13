@@ -2,13 +2,8 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "xarray",
-#   "zarr>=3",
-#   "cftime",
 #   "fsspec",
 #   "aiohttp",
-#   "numpy",
-#   "pint-xarray>=0.6",
 #   "netcdf4",
 #   "rioxarray",
 # ]
@@ -333,7 +328,6 @@ def _shift_step_origin_to_zero(ds):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -342,7 +336,7 @@ def _shift_step_origin_to_zero(ds):
         "(dataset id, IMERG late/final, …)."
     ),
 )
-def fetch(dataset, date, bbox, variable, output, **kwargs):
+def fetch(dataset, date, bbox, variable, probe_latest, **kwargs):
     """Fetch a Kenya forecasts archive grid and write a weather-skills standard dataset.
 
     Opens a store under ``gs://kenya-forecasting-data/<date>/data/`` over HTTPS
@@ -351,8 +345,8 @@ def fetch(dataset, date, bbox, variable, output, **kwargs):
     subsets by ``--bbox`` and ``--variable``, normalizes units/CF attrs, and
     returns a Dataset for the decorator to write.
     """
-    if kwargs.get("probe_latest") is not None:
-        dsid = kwargs["probe_latest"] or dataset
+    if probe_latest is not None:
+        dsid = probe_latest or dataset
         if dsid not in _DATASETS:
             raise UsageError(f"unknown --dataset {dsid!r}; choose one of: {', '.join(_DATASETS)}")
         print(_resolve_date(None, dsid))

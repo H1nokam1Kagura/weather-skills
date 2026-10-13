@@ -2,12 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "xarray",
-#   "zarr>=3",
-#   "cftime",
 #   "adlfs",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a Cumulus AI operational ensemble forecast and write a weather-skills standard dataset."""
@@ -151,7 +146,6 @@ def _to_standard(ds):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help=(
@@ -159,7 +153,7 @@ def _to_standard(ds):
         "Does not download fields. Optional IDENT selects a --dataset id."
     ),
 )
-def fetch(dataset, date, bbox, variable, output, **kwargs):
+def fetch(dataset, date, bbox, variable, probe_latest, workers, **kwargs):
     """Fetch a Cumulus AI operational ensemble forecast and write a weather-skills standard dataset.
 
     Opens the init's Zarr store
@@ -167,7 +161,7 @@ def fetch(dataset, date, bbox, variable, output, **kwargs):
     with the SAS in ``AZURE_STORAGE_SAS_TOKEN``, optionally subsets by
     ``--bbox``, and returns a Dataset for the decorator to write.
     """
-    probe = kwargs.get("probe_latest")
+    probe = probe_latest
     name = probe or dataset
     folder = _DATASETS.get(name, name)
     prefix = f"az://{_ACCOUNT}/{_ROOT}/{folder}/"
@@ -196,7 +190,7 @@ def fetch(dataset, date, bbox, variable, output, **kwargs):
     store = stores[-1]
     print(f"Opening {prefix}{store}", file=sys.stderr)
 
-    ds = _open_store(f"az://{_ROOT}/{folder}/{store}", bbox, kwargs["workers"])
+    ds = _open_store(f"az://{_ROOT}/{folder}/{store}", bbox, workers)
     ds = _to_standard(ds)
     if bbox is None:
         ds = ensure_normalized_longitude(ds)

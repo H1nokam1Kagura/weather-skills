@@ -2,10 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
-#   "numpy>=2.4",
 #   "scipy",
-#   "xarray>=2026.4",
 # ]
 # ///
 """Sample a gridded dataset at point locations, writing a point_obs dataset."""

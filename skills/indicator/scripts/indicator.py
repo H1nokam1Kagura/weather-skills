@@ -2,9 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
-#   "numpy>=2.4",
-#   "xarray>=2026.4",
 # ]
 # ///
 """Apply a boolean indicator (or ensemble probability) to a daily standard dataset."""
@@ -100,7 +97,6 @@ def _step_days(ds, dim: str) -> int:
 @weather_skill.argument(
     "--detect",
     choices=["first", "any"],
-    default=None,
     help="Collapse the time axis: first True coordinate, or True anywhere.",
 )
 @weather_skill.argument(

@@ -2,12 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "xarray",
-#   "zarr>=3",
-#   "cftime",
 #   "gcsfs",
-#   "numpy",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Fetch a Google WeatherNext 2 ensemble forecast and write a weather-skills standard dataset."""
@@ -288,7 +283,6 @@ def _select_variables(ds, variable):
 @weather_skill.argument(
     "--cycle",
     choices=list(_CYCLES),
-    default=None,
     help="Init hour UTC (00, 06, 12, or 18). Default: 00 with --date; latest cycle "
     "when --date is omitted.",
 )
@@ -307,12 +301,11 @@ def _select_variables(ds, variable):
     "--probe-latest",
     nargs="?",
     const="",
-    default=None,
     metavar="IDENT",
     probe=True,
     help="Print the latest available YYYY-MM-DD on stdout and exit. Does not download fields.",
 )
-def fetch(date, bbox, variable, output, member=None, **kwargs):
+def fetch(date, bbox, variable, member, cycle, probe_latest, **kwargs):
     """Fetch a Google WeatherNext 2 ensemble forecast and write a weather-skills standard dataset.
 
     Opens a consolidated Zarr under
@@ -321,8 +314,7 @@ def fetch(date, bbox, variable, output, member=None, **kwargs):
     standard ensemble-forecast cube, optionally subsets by ``--bbox`` /
     ``--variable``, and returns a Dataset for the decorator to write.
     """
-    cycle = kwargs.get("cycle")
-    if kwargs.get("probe_latest") is not None:
+    if probe_latest is not None:
         stamps = _list_init_stamps()
         if cycle:
             stamps = [s for s in stamps if s.endswith(f"_{cycle}hr_01_preds")]

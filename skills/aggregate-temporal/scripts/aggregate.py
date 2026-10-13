@@ -2,12 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cf-xarray",
-#   "cftime",
-#   "xarray",
-#   "numpy",
 #   "pandas",
-#   "pint-xarray>=0.6",
 # ]
 # ///
 """Temporal aggregation: calendar resample, rolling window, or step buckets (rates)."""
@@ -517,7 +512,6 @@ def _rolling_aggregation_period(ds, dim, window, interval):
 @weather_skill.argument("--variable", "-v", action="append")
 @weather_skill.argument(
     "--period",
-    default=None,
     help=(
         "Calendar/step window: daily, weekly, dekadal, monthly, or a pint "
         "duration in whole days (e.g. '21 day'). Mutex with --window."
@@ -526,20 +520,17 @@ def _rolling_aggregation_period(ds, dim, window, interval):
 @weather_skill.argument(
     "--window",
     type=int,
-    default=None,
     help="Rolling window in axis steps (mutex with --period).",
 )
 @weather_skill.argument("--align", default="left", choices=["left", "right", "center"])
 @weather_skill.argument(
     "--stride",
-    default=None,
     help="With --window: int step or stride_dates string (day/week/Monday/...).",
 )
 @weather_skill.argument("--method", default="mean", choices=["mean", "max", "min"])
-@weather_skill.argument("--time-dim", default=None)
+@weather_skill.argument("--time-dim")
 @weather_skill.argument(
     "--end-time",
-    default=None,
     help=(
         "With --period: exclusive right edge of the final bin (bins walk "
         "backward; labeled at the left edge, same as forecast step buckets)."
@@ -547,12 +538,10 @@ def _rolling_aggregation_period(ds, dim, window, interval):
 )
 @weather_skill.argument(
     "--start-time",
-    default=None,
     help="With --period and --end-time: optional earliest coverage floor.",
 )
 def aggregate(
     ds,
-    output,
     variable,
     time_dim,
     period,

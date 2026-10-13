@@ -108,12 +108,8 @@ exit.
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only array of
-per-step entries `{skill, version, args, input}`. For this fetcher it is a
-length-1 array with `skill="oisst-fetch"` and `input=null`; downstream
-zarr-writing skills append their own entry. `args` records the `bbox` and
-`start`/`end`. `version` is this skill's version, also printed
-by `--help`. Inspect a written output's provenance with the `provenance` skill.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 

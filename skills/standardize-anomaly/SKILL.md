@@ -114,10 +114,8 @@ is masked to `NaN` rather than a division artifact.
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr, same shape as
-`difference`'s: entry `input` is a list with one item per input (`--input`
-then `--climatology`), each carrying that input's own upstream chain.
-Inspect with the `provenance` skill.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Example
 

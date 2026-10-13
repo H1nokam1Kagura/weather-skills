@@ -112,13 +112,7 @@ cost. On tight-memory hosts, narrow the `--bbox` or shorten the window.
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only array of
-per-step entries `{skill, version, args, input}`. For this fetcher it is a
-length-1 array with `skill="ghcn-daily-fetch"` and `input=null`; downstream
-zarr-writing skills append their own entry. `args` records `bbox`, the sorted
-`variable` list, and `start`/`end` — `--workers` is excluded (a concurrency knob
-that does not change the data). `version` is this
-skill's version, also printed by `--help`. Inspect a written output's provenance
+The output carries a `weather_skills_history` provenance chain; inspect it
 with the `provenance` skill.
 
 ## Examples

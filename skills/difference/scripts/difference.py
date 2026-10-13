@@ -2,9 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
-#   "cftime>=1.6",
-#   "numpy>=2.4",
-#   "xarray>=2026.4",
 # ]
 # ///
 """Subtract A − B (xarray-aligned)."""
@@ -24,7 +21,7 @@ _WIDEN = {1: "int16", 2: "int32", 4: "int64"}
 )
 @weather_skill.argument("-i", "--input", type=Dataset("any"), action="append", required=True)
 @weather_skill.argument("--variable", "-v", action="append")
-def difference(ds, variable, output, **kwargs):
+def difference(ds, variable, **kwargs):
     """Subtract A − B (xarray-aligned)."""
     if len(ds) != 2:
         raise UsageError(f"expected exactly two --input paths, got {len(ds)}")

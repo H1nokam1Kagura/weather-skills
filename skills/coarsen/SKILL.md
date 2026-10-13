@@ -84,27 +84,8 @@ lat/lon and data variables is preserved.
 
 ### Provenance
 
-The output stamps a JSON-encoded `weather_skills_history` attr: an append-only array
-of per-step entries `{skill, version, args, input}`. This skill reads the
-upstream input's `weather_skills_history` (default `[]` and stderr warning if absent)
-and appends its own entry. `args` is the argparse namespace minus the
-`--input`/`--output` path strings; `input` is a `{basename, hash}` dict —
-`basename` is the upstream zarr's filename and `hash` is a sha256 of its
-stored bytes; `version` is the `_SKILL_VERSION` constant in
-`scripts/coarsen.py`. Cache-hit comparison reads the existing
-output's `weather_skills_history`: a hit requires the upstream chain to match and the
-last entry's `skill`, `version`, `args`, and `input.basename` to match the
-proposed new entry; on a hit the script returns without recomputing. The
-`input.hash` is not part of the cache key — the comparison rests on basename,
-args, and the upstream chain, and the input content is not re-hashed for the
-cache decision (so a same-named input whose content changed in place still
-hits on basename).
-
-The `args` dict stores argparse dest names (underscored, e.g.
-`target_resolution`, `offset`, `reference_grid`), not the hyphenated CLI flag
-names. A consumer reconstructing a
-`uv run ${CLAUDE_SKILL_DIR}/scripts/<skill>.py <args>` invocation must translate
-underscore → hyphen.
+The output carries a `weather_skills_history` provenance chain; inspect it
+with the `provenance` skill.
 
 ## Examples
 
