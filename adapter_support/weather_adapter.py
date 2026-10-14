@@ -90,13 +90,17 @@ class WeatherAdapter(Adapter):
         self.producers = load_producers() if producers is None else producers
 
     def d4_declared(self, capability):
-        """Owner ruling D4: a reviewed capability-to-producer record, status PRODUCER_MAPPED."""
+        """Owner ruling D4: a reviewed capability-to-producer record, status PRODUCER_MAPPED.
+        A signature is a reviewer, a review time and the commit the review read; a name alone
+        does not declare (a later code change needs a re-review and a new pin)."""
         record = self.producers["capabilities"].get(capability)
         return (
             isinstance(record, dict)
             and record.get("status") == "PRODUCER_MAPPED"
-            and isinstance(record.get("reviewer"), str)
-            and bool(record["reviewer"].strip())
+            and all(
+                isinstance(record.get(key), str) and bool(record[key].strip())
+                for key in ("reviewer", "reviewed_at", "reviewed_commit")
+            )
         )
 
     def implemented_capabilities(self):

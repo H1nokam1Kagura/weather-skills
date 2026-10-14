@@ -3,7 +3,7 @@
   "authority": "Owner ruling D4 (CR-09): every declared capability requires a reviewed capability-to-producer record; an empty signal list is never emitted as exhaustive evidence. Source: simkit/handoffs/completion-20261012/decisions/OWNER-RULINGS.json.",
   "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer (container_harness/analyze_trace.py, run by entry.sh after the traced tree exits) supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids, symbols.HARNESS_CONTROLLER_PID, harness_observations.{max_concurrent_children, shell_launches, data_fetch_attempts, signal_capture_exhaustive, tracer_status} and the harness RAM sampler's min_free_ram_while_running_gib as a harness-observations input file (observations_path). The projection merges it, checked against the controller's own records. CAP-EXHAUSTIVE-WRITES, CAP-SIGNAL-CAPTURE and CAP-HARNESS-OBS are PRODUCER_MAPPED on that route but declared only when a reviewer signs the record; carrying values declares nothing.",
   "base": "wave 4 (feat/simkit-w4-admit-snowyowl); line numbers refer to the commit that last edited each record (git log -L); records not touched in wave 4 still cite controller 0e862c8",
-  "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED and reviewer is a non-empty string. reviewer/reviewed_at are left null for the coordinator. PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
+  "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED, and reviewer, reviewed_at and reviewed_commit are all non-empty strings (the signature pins the commit the independent review read; a later change to the record's code needs a re-review and a new pin). PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
   "frozen_shapes": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json structures (frozen v2.7, read-only)",
   "tests_file": "tests/test_evidence_projection_v27.py",
   "capabilities": {
@@ -59,8 +59,11 @@
         "test_failed_goal_check_records_its_fields_natively",
         "test_argv_flags_never_guess_an_irregular_argv"
       ],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-SYMBOLS": {
       "d4_gated": true,
@@ -97,8 +100,11 @@
         "test_receipts_carry_flags_resume_counters_and_the_initial_clock",
         "test_container_projection_resolves_source_expected_after"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:58:22Z",
+      "reviewed_commit": "8b7a8c40e4edaa8129ddeff9e635b8c07b85c3dd",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REREVIEW.md",
       "mapping_choices_for_review": [
         "HARNESS_HASH:source_expected_after = source_pre for a case whose injection_schedule has no mutate_fixture entry (harness expectation from the case itself); any mutate_fixture entry leaves it MISSING (CAP-FIXTURE-OP)",
         "HARNESS_SOURCE_HASH:definition.* falls back to the controller's bound definition record when no review was captured (noted as definition_symbol_resolved_from)"
@@ -116,8 +122,11 @@
       "missing_fields": [],
       "mapping_choices_for_review": ["identity mapping; a gate code outside FAILED_GATES is omitted (scores NOT_OBSERVED) and reported, never replaced by a nearby gate"],
       "tests": ["test_terminal_mapping_never_guesses_an_unmapped_gate", "test_claim_gate_block_projects_a_routed_record_and_no_review", "test_needs_info_stop_and_visible_synthetic_marker"],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES (first review at 9488b0a; regression check clean at 42ff3e9)",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-ROLE-OUTPUT-SCHEMA": {
       "d4_gated": true,
@@ -132,8 +141,11 @@
       "missing_fields": [{"field": "role_output.shadow_policy outputs", "owner": "CAP-SHADOW (role not produced at base; emitted as [] only because the role is never invoked)"}],
       "mapping_choices_for_review": ["plan.steps -> plan (full plan kept as controller_plan)", "plan_claims -> claims", "verifier verdict = controller-recorded D8 verdict, raw output kept as returned_output", "unknown output fields are passed through and listed in notes.unmapped_role_output_fields"],
       "tests": ["test_released_projection_maps_native_records_without_filling", "test_needs_info_stop_and_visible_synthetic_marker"],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES (first review at 9488b0a; regression check clean at 42ff3e9)",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-BOUND-SOURCES": {
       "d4_gated": true,
@@ -162,8 +174,11 @@
         "test_failed_then_returned_reviewer_is_renumbered_to_the_receipt_ordinal",
         "test_claim_checks_and_evidence_checker_project_one_reviewer_numbering"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md",
       "notes": "Frozen manifest method name is record_review_snapshots; this adapter's method is capture_bound_sources (the frozen runner reads capability ids only). snapshot() trusts the envelope's request/goal/plan hashes (hash-pinned capture file); the diagnostic path recomputes them."
     },
     "CAP-RUN-PROVENANCE": {
@@ -179,8 +194,11 @@
       "missing_fields": [],
       "notes": "Owner ruling D3: synthetic CHIRPS-identical input runs under production admission; admission_note states that 'production' is a consequence of the ruling, not an observed fetch. The scan covers what the system reads; it is a marker scan, not a proof of semantic invisibility.",
       "tests": ["test_released_run_provenance_follows_ruling_d3", "test_needs_info_stop_and_visible_synthetic_marker", "test_zero_collected_outputs_are_never_tagged"],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES (first review at 9488b0a; regression check clean at 42ff3e9)",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-PROFILE": {
       "d4_gated": true,
@@ -193,8 +211,11 @@
       "evidence_fields": ["case.profile -> profile.json variant, checked against the controller profile id and states"],
       "missing_fields": [],
       "tests": ["test_profile_selection_is_checked_against_the_controller_profile", "test_data_profile_run_with_null_title_releases_without_a_map"],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES (first review at 9488b0a; regression check clean at 42ff3e9)",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-LEDGER-SEED": {
       "d4_gated": true,
@@ -221,8 +242,11 @@
         "test_authorizations_are_the_controllers_decisions",
         "test_unfinished_run_keeps_authorizations_missing"
       ],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-HARNESS-OBS": {
       "d4_gated": true,
@@ -253,8 +277,11 @@
       ],
       "notes": "Upgraded from PARTIAL: each whole-tree field now has a harness producer. The network-syscall trace set and the RAM sampler are unit-tested on synthetic captures (container_harness/tests/test_analyze_trace.py) but have not yet run in a container; the first container run is the reviewer's evidence for them. max_concurrent_children and shell_launches already came out of the container canary.",
       "tests": ["test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_observe_harness_carries_whole_tree_fields_or_reports_them_missing", "container_harness/tests/test_analyze_trace.py::test_data_fetch_attempts_count_non_local_destinations", "container_harness/tests/test_analyze_trace.py::test_quiet_run_reports_zero_fetch_attempts_only_when_network_was_traced", "container_harness/tests/test_analyze_trace.py::test_relay_connect_is_role_transport_only_from_the_controller", "container_harness/tests/test_analyze_trace.py::test_unobservable_network_makes_fetch_attempts_missing", "container_harness/tests/test_analyze_trace.py::test_undecoded_sendmsg_destination_makes_fetch_attempts_missing", "container_harness/tests/test_analyze_trace.py::test_connected_sendmsg_with_null_destination_is_not_an_attempt", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_is_the_running_minimum_of_harness_readings", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_missing_unless_the_whole_run_is_covered", "container_harness/tests/test_analyze_trace.py::test_threads_are_not_children_and_concurrency_counts_overlap", "container_harness/tests/test_analyze_trace.py::test_shell_launches_and_relative_paths_after_chdir"],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:58:22Z",
+      "reviewed_commit": "8b7a8c40e4edaa8129ddeff9e635b8c07b85c3dd",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REREVIEW.md"
     },
     "CAP-SIGNAL-CAPTURE": {
       "d4_gated": true,
@@ -278,8 +305,11 @@
       ],
       "notes": "Upgraded from PARTIAL on the container route (container_route_ruling_2026-10-13): the harness trace is the producer, already exercised by the container canary/tree/tracer-death scenarios. Results certify Linux only; Windows signal_stop code is not exercised on this route. Declared only when a reviewer signs.",
       "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "container_harness/tests/test_analyze_trace.py::test_signal_forms_group_pidfd_tgkill_zero_and_failed", "container_harness/tests/test_analyze_trace.py::test_user_delivery_without_attempt_makes_signals_missing", "container_harness/tests/test_analyze_trace.py::test_process_tree_uses_creating_parent_and_notes_reassignment", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty"],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-EXHAUSTIVE-WRITES": {
       "d4_gated": true,
@@ -302,8 +332,11 @@
       ],
       "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). Upgraded from NOT_DECLARED: the method exists and the producer (trace analyzer) already ran in the container canary/tree scenarios. Exhaustive capture is attribution-blind inside one process: run_case's harness staging (case root, source/, harness/) runs in the traced controller process and is therefore in created_paths, outside the frozen allow-list HARNESS_RUN_DIR (all_under, every v2.7 case), as are tool caches under $HOME seen in the canary. That is a scoring outcome the capture correctly exposes, not a capture defect; see the write-allow-list finding in the handoff. Declared only when a reviewer signs.",
       "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_exhaustive_write_capture_only_from_a_complete_trace", "container_harness/tests/test_analyze_trace.py::test_unresolvable_creating_call_makes_created_paths_missing", "container_harness/tests/test_analyze_trace.py::test_created_paths_semantics", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty", "container_harness/tests/test_analyze_trace.py::test_io_uring_success_makes_created_paths_missing_only"],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:58:22Z",
+      "reviewed_commit": "8b7a8c40e4edaa8129ddeff9e635b8c07b85c3dd",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REREVIEW.md"
     },
     "CAP-EVIDENCE-CHECKER": {
       "d4_gated": true,
@@ -331,8 +364,11 @@
         "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
         "test_tampered_claim_check_or_operator_record_refuses_projection"
       ],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-PRE-REVIEW-GATES": {
       "d4_gated": true,
@@ -364,8 +400,11 @@
         "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
         "test_tampered_claim_check_or_operator_record_refuses_projection"
       ],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-OPERATOR-ACTIONS": {
       "d4_gated": true,
@@ -396,8 +435,11 @@
         "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
         "test_tampered_claim_check_or_operator_record_refuses_projection"
       ],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:12:50Z",
+      "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REVIEW.md"
     },
     "CAP-NOT-IMPLEMENTED": {
       "d4_gated": false,
@@ -571,8 +613,11 @@
         "tests/test_role_substitution_adapter.py::test_substituted_double_fails_closed_without_the_frozen_bound_definition",
         "tests/test_role_substitution_adapter.py::test_repairer_baseline_response_is_the_frozen_probe_text"
       ],
-      "reviewer": null,
-      "reviewed_at": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-14T15:58:22Z",
+      "reviewed_commit": "8b7a8c40e4edaa8129ddeff9e635b8c07b85c3dd",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REREVIEW.md"
     }
   }
 }

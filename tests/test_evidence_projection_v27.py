@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -788,7 +789,10 @@ def write_observations(tmp_path, record, name="harness-evidence.json"):
 
 
 def test_container_harness_observations_merge_without_declaring(released, frozen, tmp_path):
-    adapter = WeatherAdapter()
+    from adapter_support.weather_adapter import load_producers
+
+    # Carrying harness values declares nothing: only the signature does (checked unsigned).
+    adapter = WeatherAdapter(producers=unsigned_producers(load_producers))
     base = adapter.capture_evidence(released.run)
     record = harness_observations(base)
     merged = adapter.capture_evidence(
@@ -1276,14 +1280,46 @@ def test_run_case_is_opt_in_and_refuses_undeclared_capabilities_before_side_effe
     assert WeatherAdapter(enable_run_case="yes").can_run() is False
 
 
-def test_every_frozen_case_stays_not_implemented_under_the_real_runner(frozen):
-    adapter = WeatherAdapter(enable_run_case=True)
+def test_every_frozen_case_stays_not_implemented_unsigned_under_the_real_runner(frozen):
+    from adapter_support.weather_adapter import load_producers
+
+    adapter = WeatherAdapter(enable_run_case=True, producers=unsigned_producers(load_producers))
     records = simkit_run(frozen["cases"], adapter, profile={})
     assert len(records) == 66
     assert {r["status"] for r in records} == {"NOT_IMPLEMENTED"}
     assert all("run_case" not in r["missing_capabilities"] for r in records)
     assert all("CAP-EXHAUSTIVE-WRITES" in r["missing_capabilities"] for r in records)
     assert all(r["evidence"] is None for r in records)
+
+
+# The frozen cases the signed producer file admits (2026-10-14 D4 sign-off). A change to this
+# set is a change to what is runnable and must be made here deliberately.
+SIGNED_ADMITTED = {
+    "DEV-E2E-V2_7-E01-P1-CTL",
+    "DEV-E2E-V2_7-E02-P1-CTL",
+    "DEV-E2E-V2_7-E02-P1-INJ",
+    "DEV-E2E-V2_7-E04-P1-CTL",
+    "DEV-E2E-V2_7-E04-P1-INJ",
+    "DEV-E2E-V2_7-E07-P1-CTL",
+    "DEV-E2E-V2_7-E08-P1-INJ",
+    "DEV-E2E-V2_7-E13-P1-CTL",
+    "DEV-E2E-V2_7-E13-P1-INJ",
+    "DEV-E2E-V2_7-E13-P3-CTL",
+    "DEV-E2E-V2_7-E13-P3-INJ",
+}
+
+
+def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
+    adapter = WeatherAdapter()
+    implemented = adapter.implemented_capabilities()
+    gated = {c for c, r in adapter.producers["capabilities"].items() if r.get("d4_gated")}
+    admitted = set()
+    for case in frozen["cases"]:
+        missing = set(case["adapter_requirements"]) - implemented
+        assert not (missing & gated), (case["id"], sorted(missing & gated))
+        if not missing:
+            admitted.add(case["id"])
+    assert admitted == SIGNED_ADMITTED
 
 
 def producers_with(**changes):
@@ -1294,27 +1330,48 @@ def producers_with(**changes):
     return producers
 
 
+def unsigned_producers(load_producers):
+    """The committed producer records with every D4 signature removed (review fields null)."""
+    producers = load_producers()
+    for record in producers["capabilities"].values():
+        if record.get("d4_gated") is True:
+            record.update(reviewer=None, reviewed_at=None, reviewed_commit=None)
+    return producers
+
+
 def test_d4_gate_declares_only_reviewed_producer_mapped_records():
-    base = WeatherAdapter()
+    from adapter_support.weather_adapter import load_producers
+
+    base = WeatherAdapter(producers=unsigned_producers(load_producers))
     records = base.producers["capabilities"]
     gated = {c for c, r in records.items() if r.get("d4_gated") is True}
     assert gated and not (gated & base.implemented_capabilities())
     for capability in gated:
         record = records[capability]
-        assert record["reviewer"] is None
         assert record["evidence_fields"] and record["tests"]
         if record["status"] != "NOT_DECLARED":
             assert record["producers"]
             assert getattr(WeatherAdapter, record["method"]) is not getattr(
                 Adapter, record["method"], None
             )
-    reviewed = WeatherAdapter(producers=producers_with(**{"CAP-REASON-MAP": {"reviewer": "lead"}}))
-    assert "CAP-REASON-MAP" in reviewed.implemented_capabilities()
+    sign = {"reviewer": "lead", "reviewed_at": "2026-10-14T00:00:00Z", "reviewed_commit": "abc123"}
+    unsigned = unsigned_producers(load_producers)
+    unsigned["capabilities"]["CAP-REASON-MAP"].update(sign)
+    assert "CAP-REASON-MAP" in WeatherAdapter(producers=unsigned).implemented_capabilities()
+    # A name alone, or a signature without its pinned commit or time, declares nothing.
+    for partial in (
+        {"reviewer": "lead"},
+        {**sign, "reviewed_commit": None},
+        {**sign, "reviewed_at": " "},
+    ):
+        unsigned = unsigned_producers(load_producers)
+        unsigned["capabilities"]["CAP-REASON-MAP"].update(partial)
+        assert "CAP-REASON-MAP" not in WeatherAdapter(producers=unsigned).implemented_capabilities()
     # A PARTIAL or NOT_DECLARED record is never declared by review alone (no record is PARTIAL
     # since wave 4, so the status is set here).
     for status in ("PARTIAL", "NOT_DECLARED"):
         unmapped = WeatherAdapter(
-            producers=producers_with(**{"CAP-RECEIPTS": {"reviewer": "lead", "status": status}})
+            producers=producers_with(**{"CAP-RECEIPTS": {**sign, "status": status}})
         )
         assert "CAP-RECEIPTS" not in unmapped.implemented_capabilities()
     # Container-route capabilities: producer-mapped, still undeclared until a reviewer signs.
@@ -1322,10 +1379,25 @@ def test_d4_gate_declares_only_reviewed_producer_mapped_records():
     for capability in container:
         assert records[capability]["status"] == "PRODUCER_MAPPED"
         assert capability not in base.implemented_capabilities()
-    signed = WeatherAdapter(
-        producers=producers_with(**{c: {"reviewer": "lead"} for c in container})
-    )
-    assert set(container) <= signed.implemented_capabilities()
+    unsigned = unsigned_producers(load_producers)
+    for capability in container:
+        unsigned["capabilities"][capability].update(sign)
+    assert set(container) <= WeatherAdapter(producers=unsigned).implemented_capabilities()
+
+
+def test_committed_d4_signatures_are_complete_and_pinned():
+    """Every d4_gated record in the committed file carries a full signature (reviewer, time,
+    reviewed commit, an APPROVE verdict and its report) and is therefore declared."""
+    adapter = WeatherAdapter()
+    for capability, record in adapter.producers["capabilities"].items():
+        if record.get("d4_gated") is not True:
+            continue
+        assert record["status"] == "PRODUCER_MAPPED", capability
+        assert re.fullmatch(r"[0-9a-f]{40}", record["reviewed_commit"]), capability
+        assert record["reviewed_at"].endswith("Z") and record["reviewer"].strip(), capability
+        assert record["review_verdict"].startswith("APPROVE"), capability
+        assert record["review_report"].endswith(".md"), capability
+        assert capability in adapter.implemented_capabilities(), capability
 
 
 def test_symbol_resolver_is_a_closed_native_table(released):
