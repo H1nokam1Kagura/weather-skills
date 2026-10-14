@@ -247,7 +247,7 @@ class InjectionHooks:
         self.dependent = any(isinstance(s, dict) and "requires" in s for s in self.schedule)
         self.dispositions = {}
         self.accepted_approvals = 0
-        self.initial_binding = None
+        self.initial_plan = None
         self.stopped = False
         self.harness_error = None
         self.fault = None  # a classified drop fault raised after the boundary scan
@@ -493,26 +493,30 @@ class InjectionHooks:
         return False
 
     def _in_plan_scope(self, selector, event):
-        """initial = first accepted plan identity; child_of_initial needs a real parent binding."""
+        """initial = first accepted plan identity; child_of_initial needs a real parent plan.
+
+        The identity is the plan (event ``plan_hash``, the controller's plan-version hash), not
+        the binding: a material change that re-binds the same plan (a runtime-manifest bump)
+        keeps it "initial" (frozen schedule contract after_review_approval.plan_scope)."""
         scope = selector.get("plan_scope")
         if scope is None:
             return True
         if scope != event.get("plan_scope"):
             return False
-        binding = event.get("binding_hash")
+        plan = event.get("plan_hash")
         if scope == "initial":
-            # An unobserved binding never matches; the first observed one defines "initial".
-            if not isinstance(binding, str) or not binding:
+            # An unobserved plan never matches; the first observed one defines "initial".
+            if not isinstance(plan, str) or not plan:
                 return False
-            return self.initial_binding is None or binding == self.initial_binding
+            return self.initial_plan is None or plan == self.initial_plan
         if scope == "child_of_initial":
             return (
-                isinstance(self.initial_binding, str)
-                and bool(self.initial_binding)
-                and event.get("parent_binding_hash") == self.initial_binding
-                and isinstance(binding, str)
-                and bool(binding)
-                and binding != self.initial_binding
+                isinstance(self.initial_plan, str)
+                and bool(self.initial_plan)
+                and event.get("parent_plan_hash") == self.initial_plan
+                and isinstance(plan, str)
+                and bool(plan)
+                and plan != self.initial_plan
             )
         return False
 
@@ -569,7 +573,7 @@ class InjectionHooks:
                 self.harness_error = "accepted-approval occurrence disagrees with controller"
                 raise HarnessDispatchError(self.harness_error)
             if approval == 1:
-                self.initial_binding = event.get("binding_hash")
+                self.initial_plan = event.get("plan_hash")
         interrupted = False
         for index, spec in enumerate(self.schedule):
             if index in self.dispositions or spec["hook"] != hook_point:

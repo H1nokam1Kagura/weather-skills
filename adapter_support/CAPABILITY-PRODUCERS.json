@@ -2,7 +2,7 @@
   "schema": "weather-adapter.capability-producers/1",
   "authority": "Owner ruling D4 (CR-09): every declared capability requires a reviewed capability-to-producer record; an empty signal list is never emitted as exhaustive evidence. Source: simkit/handoffs/completion-20261012/decisions/OWNER-RULINGS.json.",
   "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer (container_harness/analyze_trace.py, run by entry.sh after the traced tree exits) supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids, symbols.HARNESS_CONTROLLER_PID, harness_observations.{max_concurrent_children, shell_launches, data_fetch_attempts, signal_capture_exhaustive, tracer_status} and the harness RAM sampler's min_free_ram_while_running_gib as a harness-observations input file (observations_path). The projection merges it, checked against the controller's own records. CAP-EXHAUSTIVE-WRITES, CAP-SIGNAL-CAPTURE and CAP-HARNESS-OBS are PRODUCER_MAPPED on that route but declared only when a reviewer signs the record; carrying values declares nothing.",
-  "base": "wave 4 (feat/simkit-w4-admit-snowyowl); line numbers refer to the commit that last edited each record (git log -L); records not touched in wave 4 still cite controller 0e862c8",
+  "base": "wave 5 follow-up (feat/simkit-w5-fxfollow-snowyowl): every line number in every record (producer lines and the line references inside symbol/emits/notes text) refers to this branch's final commit, the commit that carries this text",
   "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED, and reviewer, reviewed_at and reviewed_commit are all non-empty strings (the signature pins the commit the independent review read; a later change to the record's code needs a re-review and a new pin). PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
   "frozen_shapes": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json structures (frozen v2.7, read-only)",
   "tests_file": "tests/test_evidence_projection_v27.py",
@@ -13,24 +13,24 @@
       "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/runner.py", "line": 562, "symbol": "Controller.dispatch_event", "emits": "controller-global sequence, resume_phase, run_id; dispatch-event-NNNNNN.json hashed into checkpoint evidence"},
-        {"file": "tools/workflow/runner.py", "line": 738, "symbol": "Controller.ask", "emits": "dispatch_attempt / invocation_prepared / dispatch_returned / dispatch_failed; receipt.controller_dispatch {attempt_id, sequence, occurrence, resume_phase}"},
+        {"file": "tools/workflow/runner.py", "line": 748, "symbol": "Controller.ask", "emits": "dispatch_attempt / invocation_prepared / dispatch_returned / dispatch_failed; receipt.controller_dispatch {attempt_id, sequence, occurrence, resume_phase}"},
         {"file": "tools/workflow/agents.py", "line": 142, "symbol": "Roles.ask", "emits": "receipt {role, invocation_id, session_id, input_hash, output_hash, cost_usd, model_usage}"},
         {"file": "tools/workflow/runner.py", "line": 598, "symbol": "Controller.process_event", "emits": "launch_check / process_launch / process_exit / signal_stop on the same clock"},
         {"file": "tools/workflow/processes.py", "line": 340, "symbol": "Processes.run", "emits": "launch_check {tool, free_ram_gib, budget_ok, launched, reading_source} (line 347), process_launch {serial, tool, argv, pid, parent_pid} + process-NNN.start.json (line 401), process_exit {exit_code, stdout_bytes, stderr_bytes, wall_seconds, stop_reason} (line 293)"},
-        {"file": "tools/workflow/runner.py", "line": 1108, "symbol": "Controller.record_plan_validation", "emits": "plan_validations {plan_hash (plan-version hash), argv, parser_accepted, verdict, failed_fields, source} + plan_validation event"},
+        {"file": "tools/workflow/runner.py", "line": 1126, "symbol": "Controller.record_plan_validation", "emits": "plan_validations {plan_hash (plan-version hash), argv, parser_accepted, verdict, failed_fields, source} + plan_validation event"},
         {"file": "tools/workflow/runner.py", "line": 622, "symbol": "Controller.advance", "emits": "transition events (state clocks)"},
-        {"file": "tools/workflow/runner.py", "line": 1737, "symbol": "Controller.finish", "emits": "terminal event and result.json terminal"},
+        {"file": "tools/workflow/runner.py", "line": 1755, "symbol": "Controller.finish", "emits": "terminal event and result.json terminal"},
         {"file": "tools/workflow/runner.py", "line": 288, "symbol": "Controller.checkpoint", "emits": "spent, budget, elapsed_s, total_seconds, repairs_used, max_repairs, resumes"},
         {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "HarnessLaunchObserver", "emits": "harness-computed *_hash_at_launch (before_tool) and gate artifact_content_hash (after_tool)"},
-        {"file": "tools/workflow/trace_records.py", "line": 21, "symbol": "record_initial_state (called from Controller.run, runner.py:1753)", "emits": "initial_state dispatch event {state, controller_pid} as the first event of a fresh run: event_seq['controller_trace.states[CAPTURED]']"},
-        {"file": "tools/workflow/trace_records.py", "line": 67, "symbol": "retain_compiled_goal (called from runner.py:1917)", "emits": "failed goal check {verdict FAIL, failed_fields, compiler_occurrence, gate, reason} in context.goal_check + goal-check.json + goal_check dispatch event"},
+        {"file": "tools/workflow/trace_records.py", "line": 21, "symbol": "record_initial_state (called from Controller.run, runner.py:1771)", "emits": "initial_state dispatch event {state, controller_pid} as the first event of a fresh run: event_seq['controller_trace.states[CAPTURED]']"},
+        {"file": "tools/workflow/trace_records.py", "line": 67, "symbol": "retain_compiled_goal (called from runner.py:1935)", "emits": "failed goal check {verdict FAIL, failed_fields, compiler_occurrence, gate, reason} in context.goal_check + goal-check.json + goal_check dispatch event"},
         {"file": "tools/workflow/recovery.py", "line": 97, "symbol": "new_ledger / ledger (bound by Controller.bind_recovery for every run)", "emits": "counters.automatic_resumes_used, limits.max_automatic_resumes, and the recovery lists resume, interruptions, diagnoses, mechanical_repairs, operator_notifications, transport_retries (context.recovery, schema workflow.recovery/1), read by evidence_projection.Projection.recovery_list / pending_lists"},
         {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "argv_flags", "emits": "process_receipts[*].flags from the parser-accepted controller argv"},
         {"file": "tools/workflow/runner.py", "line": 659, "symbol": "Controller.issue_active_approval", "emits": "native active approval (approval_id, reviewer_occurrence, reviewer_session_id, hashes, binding_hash, replaces) + active-approval-NNN.json + active_approval dispatch event"},
-        {"file": "tools/workflow/contracts.py", "line": 105, "symbol": "plan_version_hash", "emits": "the plan-version identity carried as every plan_hash: digest({plan, plan_claims}) when the plan carries a claims envelope, else digest(plan); a claims-only repair is a new version with its own hash (EC v2_5.plan_symbols, v2_4.claim_checks one per plan version). Writers: approval runner.py:670, plan_versions 1085, plan_validations 1119, re-review records 1278, claim check and checker payload 1402-1441 (Controller.plan_hash 1072), review envelope review_evidence.py:144, harness launch hashes evidence_projection.py:1500, diagnostic path weather_adapter.py:866"},
-        {"file": "tools/workflow/runner.py", "line": 991, "symbol": "Controller.record_refused_plan", "emits": "one FAIL plan_validations record (parser_accepted false, hashed with the candidate's own claims via candidate_claims, line 1076) for a planner plan refused while its review envelope was unpacked, recorded only when validate_plan itself refuses that plan; an envelope or claims refusal records no plan validation"},
+        {"file": "tools/workflow/contracts.py", "line": 105, "symbol": "plan_version_hash", "emits": "the plan-version identity carried as every plan_hash: digest({plan, plan_claims}) when the plan carries a claims envelope, else digest(plan); a claims-only repair is a new version with its own hash (EC v2_5.plan_symbols, v2_4.claim_checks one per plan version). Writers: approval runner.py:670, plan_versions 1103, plan_validations 1137, re-review records 1296, claim check and checker payload 1420-1459 (Controller.plan_hash 1090), review envelope review_evidence.py:144, harness launch hashes evidence_projection.py:1511, diagnostic path weather_adapter.py:965"},
+        {"file": "tools/workflow/runner.py", "line": 1006, "symbol": "Controller.record_refused_plan", "emits": "one FAIL plan_validations record (parser_accepted false, hashed with the candidate's own claims via candidate_claims, line 1094) for a planner plan refused while its review envelope was unpacked, recorded only when validate_plan itself refuses that plan; an envelope or claims refusal records no plan validation"},
         {"file": "tools/workflow/contracts.py", "line": 277, "symbol": "plan_failed_fields", "emits": "plan_validations failed_fields naming each offending argument as plan.steps[i].args.<name> (lines 299-309), not only the args map"},
-        {"file": "adapter_support/evidence_projection.py", "line": 234, "symbol": "argument_labels (applied to plan_validations failed_fields at line 547)", "emits": "the controller's failed_fields verbatim and first, followed by the bare argument name of each plan.steps[i].args.<name> path not already listed"}
+        {"file": "adapter_support/evidence_projection.py", "line": 234, "symbol": "argument_labels (applied to plan_validations failed_fields at line 550)", "emits": "the controller's failed_fields verbatim and first, followed by the bare argument name of each plan.steps[i].args.<name> path not already listed"}
       ],
       "evidence_fields": [
         "invocation_receipts[*] {role (compiler occurrence k -> compiler_k, occurrence 1), session_id, occurrence (receipt ordinal per role), phase, seq (= dispatch_returned sequence), verdict (reviewer output / verifier_verdicts / checker receipt)}",
@@ -82,16 +82,16 @@
       "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/runner.py", "line": 288, "symbol": "Controller.checkpoint", "emits": "request_hash, build_hash, plan, root, source"},
-        {"file": "tools/workflow/runner.py", "line": 1082, "symbol": "Controller.record_plan_version", "emits": "plan_versions[k].plan_hash (HARNESS_PLAN_HASH:vN), the plan-version hash contracts.plan_version_hash(plan, plan_claims)"},
+        {"file": "tools/workflow/runner.py", "line": 1100, "symbol": "Controller.record_plan_version", "emits": "plan_versions[k].plan_hash (HARNESS_PLAN_HASH:vN), the plan-version hash contracts.plan_version_hash(plan, plan_claims)"},
         {"file": "tools/workflow/processes.py", "line": 401, "symbol": "Processes.run launch record", "emits": "pid, parent_pid (HARNESS_PID:<tool>, HARNESS_CONTROLLER_PID)"},
         {"file": "adapter_support/evidence_projection.py", "line": 154, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"},
         {"file": "tools/workflow/claim_gates.py", "line": 35, "symbol": "bind_definition_source", "emits": "definition source hash (HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling, D1)"},
-        {"file": "adapter_support/weather_adapter.py", "line": 624, "symbol": "WeatherAdapter.prepare_fixture", "emits": "source_pre (harness tree_hash before the run)"},
+        {"file": "adapter_support/weather_adapter.py", "line": 723, "symbol": "WeatherAdapter.prepare_fixture", "emits": "source_pre (harness tree_hash before the run)"},
         {"file": "tools/workflow/trace_records.py", "line": 21, "symbol": "record_initial_state", "emits": "controller_pid (HARNESS_CONTROLLER_PID when no child process was launched)"},
-        {"file": "adapter_support/pre_review_projection.py", "line": 482, "symbol": "expected_source_after (run_case)", "emits": "HARNESS_HASH:source_expected_after = source_pre when the case declares no fixture operation"},
-        {"file": "adapter_support/evidence_projection.py", "line": 1142, "symbol": "Projection.symbols", "emits": "HARNESS_PLAN_HASH:current = contracts.plan_version_hash(checkpoint plan, its claims) (line 1153); HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling from the captured review snapshot source (cross-checked with the bound definition); HARNESS_SOURCE_CACHE from the checkpoint source"},
-        {"file": "container_harness/project_in_container.py", "line": 29, "symbol": "INPUT_KEYS / load_inputs (container route)", "emits": "the SCORED in-container projection merges run_case's projection inputs (fd 4 record): launch_observations, processes_root, source_pre, authorized_goal, run_provenance, source_expected_after and source_expected_after_reason, so HARNESS_HASH:source_pre/source_expected_after and HARNESS_GOAL_HASH:authorized resolve on the route that is scored (case_driver.score)"},
-        {"file": "tools/workflow/contracts.py", "line": 105, "symbol": "plan_version_hash", "emits": "the plan-version identity carried as every plan_hash: digest({plan, plan_claims}) when the plan carries a claims envelope, else digest(plan); a claims-only repair is a new version with its own hash (EC v2_5.plan_symbols, v2_4.claim_checks one per plan version). Writers: approval runner.py:670, plan_versions 1085, plan_validations 1119, re-review records 1278, claim check and checker payload 1402-1441 (Controller.plan_hash 1072), review envelope review_evidence.py:144, harness launch hashes evidence_projection.py:1500, diagnostic path weather_adapter.py:866"}
+        {"file": "adapter_support/pre_review_projection.py", "line": 488, "symbol": "expected_source_after (run_case)", "emits": "HARNESS_HASH:source_expected_after = source_pre when the case declares no fixture operation"},
+        {"file": "adapter_support/evidence_projection.py", "line": 1147, "symbol": "Projection.symbols", "emits": "HARNESS_PLAN_HASH:current = contracts.plan_version_hash(checkpoint plan, its claims) (line 1158); HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling from the captured review snapshot source (cross-checked with the bound definition); HARNESS_SOURCE_CACHE from the checkpoint source"},
+        {"file": "container_harness/project_in_container.py", "line": 30, "symbol": "INPUT_KEYS / load_inputs (container route)", "emits": "the SCORED in-container projection merges run_case's projection inputs (fd 4 record): launch_observations, processes_root, source_pre, authorized_goal, run_provenance, source_expected_after and source_expected_after_reason, and fixture_operations for a case with fixture operations (CAP-FIXTURE-OP), so HARNESS_HASH:source_pre/source_expected_after and HARNESS_GOAL_HASH:authorized resolve on the route that is scored (case_driver.score)"},
+        {"file": "tools/workflow/contracts.py", "line": 105, "symbol": "plan_version_hash", "emits": "the plan-version identity carried as every plan_hash: digest({plan, plan_claims}) when the plan carries a claims envelope, else digest(plan); a claims-only repair is a new version with its own hash (EC v2_5.plan_symbols, v2_4.claim_checks one per plan version). Writers: approval runner.py:670, plan_versions 1103, plan_validations 1137, re-review records 1296, claim check and checker payload 1420-1459 (Controller.plan_hash 1090), review envelope review_evidence.py:144, harness launch hashes evidence_projection.py:1511, diagnostic path weather_adapter.py:965"}
       ],
       "evidence_fields": [
         "symbols{HARNESS_RUN_DIR, HARNESS_SOURCE_CACHE, HARNESS_REQUEST_HASH(:current), HARNESS_MANIFEST_HASH:current, HARNESS_GOAL_HASH:current, HARNESS_GOAL_HASH:authorized (harness-supplied variant goal via the controller digest), HARNESS_PLAN_HASH:current/vN (plan-version hashes: contracts.plan_version_hash(plan, plan_claims), the same value as every plan_hash they are compared with, so a claims-only repair gets its own :vN), HARNESS_HASH:source/source_pre/source_expected_after, HARNESS_CONTROLLER_PID, HARNESS_PID:<tool> (single launch only), HARNESS_RESOLVED_ARTIFACT_PATH:onset/map, HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling}"
@@ -102,7 +102,7 @@
         {"field": "HARNESS_HASH:onset_partial_at_interrupt", "owner": "CAP-MIDPROCESS (one case)"},
         {"field": "HARNESS_HASH:source_expected_after for a case with a mutate_fixture entry", "owner": "CAP-FIXTURE-OP (records the expected hash when it applies the operation)"},
         {"field": "HARNESS_HASH:source_expected_after when no run_case projection inputs were supplied", "owner": "CAP-SYMBOLS (gap named CAP-SYMBOLS, never CAP-FIXTURE-OP)"},
-        {"field": "HARNESS_RUN_ID (injection payloads)", "owner": "CAP-RESUME / CAP-FIXTURE-OP (payload symbols delivered by InjectionHooks; every case using it requires one of them)"}
+        {"field": "HARNESS_RUN_ID (injection payloads) as a projected symbol", "owner": "not in resolve_symbol's closed table: the payload symbol is supplied to the schedule by WeatherAdapter.run_case (operator_ledger_projection.operator_run_id_symbol: the operator_run_id the controller's channel binds) and resolved by InjectionHooks.resolve; E03-P3-CTL uses it and requires neither CAP-RESUME nor CAP-FIXTURE-OP (see CAP-OPERATOR-RECORD-SETUP)"}
       ],
       "notes": "Bare HARNESS_GOAL_HASH is not a symbol: it is the prefix of run_evidence captured_identities.bindings (score.py: symbols starting with it), satisfied by :current/:authorized. HARNESS_CONTROLLER_PID is the in-process controller (shared with the harness); open question in P0-P3-P7-P8. A HARNESS_PID:<tool> with more than one launch stays unresolved (only probe bundles use those).",
       "tests": [
@@ -128,8 +128,8 @@
       "method": "map_terminal_reason",
       "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "tools/workflow/runner.py", "line": 1703, "symbol": "Controller.terminal_for", "emits": "{outcome, reason, failed_gate} in the frozen vocabulary + terminal_mapping provenance"},
-        {"file": "tools/workflow/runner.py", "line": 1737, "symbol": "Controller.finish", "emits": "context.terminal, terminal dispatch event, result.json terminal"},
+        {"file": "tools/workflow/runner.py", "line": 1721, "symbol": "Controller.terminal_for", "emits": "{outcome, reason, failed_gate} in the frozen vocabulary + terminal_mapping provenance"},
+        {"file": "tools/workflow/runner.py", "line": 1755, "symbol": "Controller.finish", "emits": "context.terminal, terminal dispatch event, result.json terminal"},
         {"file": "tools/workflow/processes.py", "line": 76, "symbol": "free_gib (unmeasurable MemAvailable)", "emits": "Refused(gate='resource_guard') when available RAM cannot be measured"},
         {"file": "tools/workflow/processes.py", "line": 358, "symbol": "Processes.run launch check (lines 358-361)", "emits": "Refused(gate='resource_guard') for the launch-check RAM floor and the aggregate time budget"},
         {"file": "tools/workflow/processes.py", "line": 511, "symbol": "Processes.run in-run stop (lines 511-512)", "emits": "Refused(gate='resource_guard') when the final stop reason is RAM_GUARD or TIME_GUARD (RESOURCE_STOPS); an output-budget stop stays untagged, and a deferred observer exception is raised first"},
@@ -155,9 +155,9 @@
       "method": "map_role_output",
       "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "tools/workflow/runner.py", "line": 738, "symbol": "Controller.ask", "emits": "role-NNN-<role>.json {input, output, receipt}, hashed into checkpoint evidence"},
-        {"file": "tools/workflow/runner.py", "line": 2134, "symbol": "Controller.record_verifier", "emits": "verifier_verdicts {verdict PASS|FAIL, sub_reason, returned_verdict} (D8)"},
-        {"file": "tools/workflow/runner.py", "line": 1448, "symbol": "Controller.accept_review_output", "emits": "frozen reviewer shape accepted (UC-03)"}
+        {"file": "tools/workflow/runner.py", "line": 748, "symbol": "Controller.ask", "emits": "role-NNN-<role>.json {input, output, receipt}, hashed into checkpoint evidence"},
+        {"file": "tools/workflow/runner.py", "line": 2165, "symbol": "Controller.record_verifier", "emits": "verifier_verdicts {verdict PASS|FAIL, sub_reason, returned_verdict} (D8)"},
+        {"file": "tools/workflow/runner.py", "line": 1466, "symbol": "Controller.accept_review_output", "emits": "frozen reviewer shape accepted (UC-03)"}
       ],
       "evidence_fields": ["role_output.<role>[k] for every contract role (empty list when never invoked)", "compiler_N[0].goal", "planner/repairer: plan (controller plan.steps), controller_plan (verbatim), claims (from claims or plan_claims), needs_info, rationale, response", "reviewer verbatim", "verifier {verdict (D8), sub_reason, returned_output}", "evidence_checker verbatim"],
       "missing_fields": [],
@@ -210,7 +210,7 @@
       "producers": [
         {"file": "adapter_support/fixture_staging.py", "line": 42, "symbol": "stage_fixture", "emits": "harness manifest {tag synthetic, generator_provenance}; system-visible fixture carries no synthetic attribute"},
         {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "tag_outputs / run_provenance", "emits": "harness output-tags.json; scan of request, role input payloads and source metadata"},
-        {"file": "tools/workflow/runner.py", "line": 2175, "symbol": "Controller.execution_context", "emits": "classification/source_origin seen by every role (scanned)"}
+        {"file": "tools/workflow/runner.py", "line": 2206, "symbol": "Controller.execution_context", "emits": "classification/source_origin seen by every role (scanned)"}
       ],
       "evidence_fields": ["harness_observations.run_provenance {tag, manifest_hash, outputs_tagged, visible_to_system, scan, admission_note}"],
       "missing_fields": [],
@@ -245,12 +245,12 @@
       "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/contracts.py", "line": 179, "symbol": "request_goal", "emits": "validates the seeded operator ledger: user-only authorization, verbatim quotes, goal_hash, CR-02 unattributed nulls"},
-        {"file": "tools/workflow/runner.py", "line": 2016, "symbol": "Controller.advance('AUTHORIZED', request.authorization)", "emits": "the AUTHORIZED transition and its dispatch event: the authorization decision the controller acted on"}
+        {"file": "tools/workflow/runner.py", "line": 2047, "symbol": "Controller.advance('AUTHORIZED', request.authorization)", "emits": "the AUTHORIZED transition and its dispatch event: the authorization decision the controller acted on"}
       ],
       "evidence_fields": [
         "workflow.request/1 from source_ledger + request_delta",
         "harness seeded-ledger.json {request, derivation, ledger_records}",
-        "controller_trace.authorizations: one record per AUTHORIZED transition (evidence must equal the request authorization) {source, speaker, goal_hash, message_id, quote, authorized_at}; [] when a finished run never authorized; MISSING when the run did not finish"
+        "controller_trace.authorizations: one record per surviving AUTHORIZED transition (the history replayed with each return_to_review's withdrawals, fixture_rereview_projection.transition_history; evidence must equal the request authorization) {source, speaker, goal_hash, message_id, quote, authorized_at}; [] when a finished run never authorized; MISSING when the run did not finish"
       ],
       "missing_fields": [],
       "mapping_choices_for_review": [
@@ -341,9 +341,9 @@
         {"file": "container_harness/entry.sh", "line": 127, "symbol": "pre-run find baseline + root strace -ff -A -y -e trace=%file,...,bind,memfd_create,io_uring_*", "emits": "baseline.txt/baseline_links.tsv taken just before the tracer starts; every path syscall of the uid-1000 tree"},
         {"file": "container_harness/analyze_trace.py", "line": 739, "symbol": "analyze replay_one add/move/remove", "emits": "filesystem_snapshot.created_paths (a creating call whose path cannot be resolved, e.g. a relative path on an undecorated dirfd, makes it MISSING, never a shorter list): every new directory entry the tree made (files, dirs, fifos, sockets, links, rename targets, create-then-delete), symlinked directory components resolved; tracer_status; MISSING on tracer death, truncation, inconsistency, analyzer error or a successful io_uring_setup"},
         {"file": "adapter_support/evidence_projection.py", "line": 154, "symbol": "load_harness_observations / Projection.observed", "emits": "merges created_paths from observations_path (unique absolute paths, never both present and missing)"},
-        {"file": "adapter_support/evidence_projection.py", "line": 1415, "symbol": "write_capture_status", "emits": "notes.write_capture {status EXHAUSTIVE|MISSING, reason}: EXHAUSTIVE only with tracer_status OK, no trace-derived field in the harness's missing, created_paths carried and every present artifact path among them"},
-        {"file": "adapter_support/weather_adapter.py", "line": 237, "symbol": "WeatherAdapter.assert_exhaustive_write_capture", "emits": "the write_capture verdict plus created_paths when EXHAUSTIVE (licenses empty_is_exhaustive); otherwise MISSING with the harness's reason"},
-        {"file": "adapter_support/evidence_projection.py", "line": 1388, "symbol": "project_run", "emits": "when the write_capture verdict is not EXHAUSTIVE, created_paths is removed from the scored evidence and a CAP-EXHAUSTIVE-WRITES missing entry carries the reason (frozen score.py reads any created_paths list as exhaustive under empty_is_exhaustive)"}
+        {"file": "adapter_support/evidence_projection.py", "line": 1426, "symbol": "write_capture_status", "emits": "notes.write_capture {status EXHAUSTIVE|MISSING, reason}: EXHAUSTIVE only with tracer_status OK, no trace-derived field in the harness's missing, created_paths carried and every present artifact path among them"},
+        {"file": "adapter_support/weather_adapter.py", "line": 282, "symbol": "WeatherAdapter.assert_exhaustive_write_capture", "emits": "the write_capture verdict plus created_paths when EXHAUSTIVE (licenses empty_is_exhaustive); otherwise MISSING with the harness's reason"},
+        {"file": "adapter_support/evidence_projection.py", "line": 1396, "symbol": "project_run", "emits": "when the write_capture verdict is not EXHAUSTIVE, created_paths is removed from the scored evidence and a CAP-EXHAUSTIVE-WRITES missing entry carries the reason (frozen score.py reads any created_paths list as exhaustive under empty_is_exhaustive)"}
       ],
       "evidence_fields": ["filesystem_snapshot.created_paths (container harness input only; compared by exact string with artifacts.<id>.path, so the projection must run in the trace's path namespace: container_harness/project_in_container.py)"],
       "missing_fields": [{"field": "filesystem_snapshot.created_paths", "owner": "container harness (MISSING without the observations input, or when the harness reports it missing, e.g. tracer death, io_uring or an unresolvable creating path)"}, {"field": "filesystem_snapshot.created_paths carried but not vouched for (write_capture not EXHAUSTIVE: another trace-derived gap, or a present artifact missing from the list)", "owner": "CAP-EXHAUSTIVE-WRITES (withheld from the scored evidence by project_run, reason carried)"}],
@@ -365,10 +365,10 @@
       "method": "invoke_evidence_checker",
       "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "tools/workflow/runner.py", "line": 1394, "symbol": "Controller.claim_check", "emits": "after gate 1 PASS with judged claims: ask('evidence_checker', checker_payload) before any reviewer payload; receipt verdict = worst ruled verdict, receipt occurrence"},
+        {"file": "tools/workflow/runner.py", "line": 1412, "symbol": "Controller.claim_check", "emits": "after gate 1 PASS with judged claims: ask('evidence_checker', checker_payload) before any reviewer payload; receipt verdict = worst ruled verdict, receipt occurrence"},
         {"file": "tools/workflow/claim_gates.py", "line": 193, "symbol": "checker_payload / validate_checker_output / worst", "emits": "detached judged-claims payload; output bound to plan_hash (the controller's plan-version hash, Controller.plan_hash, the same value in checker_payload and validate_checker_output), every judged claim ruled once in SUPPORTED|INSUFFICIENT|CONTRADICTED"},
         {"file": "tools/workflow/agents.py", "line": 212, "symbol": "Roles.ask session check", "emits": "a reused session id is refused: each invocation is its own session"},
-        {"file": "tools/workflow/runner.py", "line": 738, "symbol": "Controller.ask", "emits": "role-NNN-evidence_checker.json, dispatch_returned clock"},
+        {"file": "tools/workflow/runner.py", "line": 748, "symbol": "Controller.ask", "emits": "role-NNN-evidence_checker.json, dispatch_returned clock"},
         {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "evidence_checker_report", "emits": "receipts, role_output.evidence_checker, own_session, placement (checker < claim check < presented reviewer)"}
       ],
       "evidence_fields": [
@@ -398,7 +398,7 @@
       "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/claim_gates.py", "line": 246, "symbol": "build_record", "emits": "exactly the v2_4.claim_checks field set: citation gate, controller computation of derivable claims, checker verdicts, decision"},
-        {"file": "tools/workflow/runner.py", "line": 1394, "symbol": "Controller.claim_check", "emits": "claim-check-NNN.json, context.review_evidence.claim_checks, claim_check dispatch event {index, plan_hash, decision, record_hash}; reviewer_occurrence = capture counter + 1 when presented"},
+        {"file": "tools/workflow/runner.py", "line": 1412, "symbol": "Controller.claim_check", "emits": "claim-check-NNN.json, context.review_evidence.claim_checks, claim_check dispatch event {index, plan_hash, decision, record_hash}; reviewer_occurrence = capture counter + 1 when presented"},
         {"file": "tools/workflow/review_evidence.py", "line": 191, "symbol": "capture", "emits": "review-capture-NNN.json per reviewer dispatch attempt (native counter, RETURNED|FAILED)"},
         {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "claim_checks / reviewer_attempts", "emits": "verified projection; native reviewer attempt renumbered to the reviewer receipt ordinal"}
       ],
@@ -492,7 +492,7 @@
       "d4_gated": false,
       "method": "configure_repair",
       "status": "PRODUCER_MAPPED",
-      "producers": [{"file": "tools/workflow/runner.py", "line": 685, "symbol": "Controller.repair", "emits": "max_repairs / repairs_used"}],
+      "producers": [{"file": "tools/workflow/runner.py", "line": 911, "symbol": "Controller.repair", "emits": "max_repairs / repairs_used"}],
       "evidence_fields": ["budget_ledger.final.limits.max_repair_attempts", "budget_ledger.final.repair_attempts_used"],
       "missing_fields": [],
       "notes": "Declared before D4 (P2). Not gated here.",
@@ -540,7 +540,7 @@
       "d4_gated": false,
       "method": "dispatch_after_accepted_review",
       "status": "PRODUCER_MAPPED",
-      "producers": [{"file": "tools/workflow/runner.py", "line": 474, "symbol": "Controller.accepted_approval", "emits": "after_review_approval boundary only after a durable committed APPROVE"}],
+      "producers": [{"file": "tools/workflow/runner.py", "line": 688, "symbol": "Controller.accepted_approval", "emits": "after_review_approval boundary only after a durable committed APPROVE; plan_scope initial = the first accepted plan identity (plan_hash, the plan-version hash), not the binding, so a re-bind of the same plan (runtime-manifest bump) stays initial (InjectionHooks._in_plan_scope compares the same identity)"}],
       "evidence_fields": ["after_review_approval dispositions"],
       "missing_fields": [],
       "notes": "Declared before D4 (P5). Not gated here.",
@@ -555,44 +555,44 @@
       "producers": [
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 490,
+          "line": 494,
           "symbol": "SubstitutedRoles.ask",
           "emits": "the frozen baseline output of a substituted role plus a native agents.Roles-shape receipt (fresh invocation_id, distinct session_id, input_hash, output_hash, baseline_output_hash, mode substituted, cost_usd 0.0); reviewer receipts carry dispatch.stdin_hash of the exact payload"
         },
         {
           "file": "tools/workflow/e2e_injections.py",
-          "line": 641,
+          "line": 645,
           "symbol": "InjectionHooks._apply (json_patch / replace_role_output at after_role)",
           "emits": "the scheduled substitution applied in place to the answer at the controller's after_role emit; record {index, operation, before_hash, after_hash, status APPLIED}; unreached entries stay unreached"
         },
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 619,
+          "line": 627,
           "symbol": "CaseScheduleHooks.rebind",
           "emits": "the substituted invocation's own receipt rebound to the delivered output: same receipt object, invocation_id and session_id; output_hash = digest(delivered); substitutions[] {schedule_indexes, operations, pre_substitution_output_hash, delivered_output_hash, adapter_mappings, wrappings (bare-plan wrap only)}; refuses any receipt that is not the double's own, and a bare-plan wrap whose replaced output hash is not the recorded source_output_hash or whose delivered hash is not the recorded wrapped_output_hash"
         },
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 267,
-          "symbol": "wrap_bare_plan (WRAP_RULE / WRAP_RULE_ID bare-plan-wrap/v1 at line 143)",
+          "line": 270,
+          "symbol": "wrap_bare_plan (WRAP_RULE / WRAP_RULE_ID bare-plan-wrap/v1 at line 146)",
           "emits": "owner ruling e07_bare_plan_wrapping_2026-10-14: the native envelope for a planner/repairer bare step list (steps verbatim, every other field copied from the replaced output) plus the wrapping record {rule_id, rule, owner_ruling, source, source_output_hash, frozen_payload_hash, wrapped_output_hash, delivered_verbatim[{field, source}], derived_fields[{field, source, value}]} on the schedule entry and on each delivery (substitutions[].wrappings)"
         },
         {
           "file": "tools/workflow/runner.py",
-          "line": 826,
-          "symbol": "Controller.ask (after_role emit; dispatch receipt binding check at 835; role file at 866)",
+          "line": 836,
+          "symbol": "Controller.ask (after_role emit; dispatch receipt binding check at 842; role file at 875)",
           "emits": "role-NNN-<role>.json {input, output, receipt} and dispatch_returned with the rebound receipt; the controller's own binding check still refuses an output that no receipt binds"
         },
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 386,
+          "line": 389,
           "symbol": "substitution_plan (WeatherAdapter.substitute_role_output)",
           "emits": "static contract-to-native mapping of every after_role role-output entry, dry-run against the baseline; AdapterRefusal before any side effect for anything unmappable"
         },
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 109,
-          "symbol": "FROZEN_REPAIRER_RESPONSES / repairer_response (line 124)",
+          "line": 112,
+          "symbol": "FROZEN_REPAIRER_RESPONSES / repairer_response (line 127)",
           "emits": "the substituted repairer's response: the frozen probe-bundle text verbatim for the pair (E13-P1, E13-P3, E15-P1), else a labelled harness-authored fallback"
         },
         {
@@ -624,7 +624,7 @@
         "Baselines (CTL uses them; CTL and INJ both add their own schedule): compilers = the reference variant goal; planner = {schema workflow.review-envelope/1, plan expected_plan(goal), plan_claims C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE} taken from the frozen clean probe-bundle claims citing definition:agrhymet-sos-rolling sha256:3db5ec77...; repairer = the same envelope + the pair's frozen response text verbatim (DEV-ONLY <pair>-INJ probe_bundles[0].evidence.role_output.repairer[0].response); reviewer = APPROVE with approved_binding {plan_hash, source_hash} of the presented review_evidence and findings []; evidence_checker = SUPPORTED for every judged claim; verifier = PASS, binding_hash copied from the payload, scope data-replay.",
         "D1 reference definition: the container case driver passes the pinned file container_harness/pinned/definitions/agrhymet-sos-rolling.txt (LF-only by .gitattributes) as definition_source; case_driver.reference_definition hash-checks its bytes against FROZEN_DEFINITION_SOURCE_HASH (sha256:3db5ec77...) and refuses the run on a mismatch, so the controller binds it under definition:agrhymet-sos-rolling. The substituted planner/repairer cite only that bound source: if the controller bound no definition:agrhymet-sos-rolling with the frozen hash (or the text lacks a frozen quote), they fail closed with SubstitutionUnavailable -- nothing returned, no receipt, an observed dispatch failure -- never a citation of an unbound source.",
         "Substituted reviewer receipts record dispatch.system_prompt as the literal marker 'SUBSTITUTED: no system prompt was sent; ...' (hash-consistent), not a prompt that was never sent.",
-        "Bare-plan wrapping (owner ruling e07_bare_plan_wrapping_2026-10-14; replaces the earlier refusal of these replacements). Rule bare-plan-wrap/v1, verbatim: 'A planner/repairer replace_role_output whose frozen payload carries plan as a JSON array is wrapped into the native envelope of the output it replaces at the controller's after_role point. For a substituted role that output is the stand-in's baseline for this invocation (static_baseline(role, goal, pair)); at delivery its hash must equal the recorded source_output_hash, and the delivered hash the recorded wrapped_output_hash, else the substitution is refused. The array is delivered verbatim as plan.steps. Every other key of the typed plan (goal_hash, final) and every other envelope key the replaced output carries (schema, plan_claims; response or rationale only when the payload does not supply it) is copied unchanged from the replaced output. Payload keys other than plan are delivered verbatim and must be native envelope keys of the role (repairer: response; planner: rationale). No value is invented: a key the replaced output does not carry is never added, and any other payload shape is refused.' Derived fields and sources for the only frozen instance (E07-P1-CTL and E07-P1-INJ entry 2, repairer occurrence 1): /plan/goal_hash <- replaced output /plan/goal_hash (= digest(goal)); /plan/final <- replaced output /plan/final (['onset', 'map']); /schema <- replaced output /schema (workflow.review-envelope/1); /plan_claims <- replaced output /plan_claims (the frozen C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE baseline claims); delivered verbatim: /plan/steps <- frozen payload /plan, /response <- frozen payload /response. E07-P2 schedules no bare step list (its repairer is live); it stays refused as live + substituted. Observed on the frozen E07-P1 cases: the controller's own plan validation blocks the planner's patched title (entry 0) at GOAL_CHECKED (plan_validation), so the wrapped repairer entry is reported unreached; delivery of the wrap is exercised on a local variant without entry 0 (CTL releases; INJ ends repair_exhausted after the controller rejects the repairer-channel retry request). Reading of the ruling's wording: 'the controller's own current plan context' (owner ruling e07_bare_plan_wrapping_2026-10-14) is read as the replaced output the controller receives at the after_role point, i.e. the stand-in's baseline for that invocation, identical to the plan being replaced; the derived fields are copied from that output and from nothing else (D4 re-review at 0371bfb: in E07-P1 it equals the controller's current plan context, entry 0 patching only a step argument).",
+        "Bare-plan wrapping (owner ruling e07_bare_plan_wrapping_2026-10-14; replaces the earlier refusal of these replacements). Rule bare-plan-wrap/v1, verbatim: 'A planner/repairer replace_role_output whose frozen payload carries plan as a JSON array is wrapped into the native envelope of the output it replaces at the controller's after_role point. For a substituted role that output is the stand-in's baseline for this invocation (static_baseline(role, goal, pair)); at delivery its hash must equal the recorded source_output_hash, and the delivered hash the recorded wrapped_output_hash, else the substitution is refused. The array is delivered verbatim as plan.steps. Every other key of the typed plan (goal_hash, final) and every other envelope key the replaced output carries (schema, plan_claims; response or rationale only when the payload does not supply it) is copied unchanged from the replaced output. Payload keys other than plan are delivered verbatim and must be native envelope keys of the role (repairer: response; planner: rationale). No value is invented: a key the replaced output does not carry is never added, and any other payload shape is refused.' Derived fields and sources for the only frozen instance (E07-P1-CTL and E07-P1-INJ entry 2, repairer occurrence 1): /plan/goal_hash <- replaced output /plan/goal_hash (= digest(goal)); /plan/final <- replaced output /plan/final (['onset', 'map']); /schema <- replaced output /schema (workflow.review-envelope/1); /plan_claims <- replaced output /plan_claims (the frozen C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE baseline claims); delivered verbatim: /plan/steps <- frozen payload /plan, /response <- frozen payload /response. E07-P2 schedules no bare step list (its repairer is live); it stays refused as live + substituted. Observed on the frozen E07-P1 cases (since the repair-routing fix): the controller's own plan validation refuses the planner's patched title (entry 0) at GOAL_CHECKED (plan_validation) and routes it to the single allowed repair; the wrapped repairer output (entry 2) is applied, restores the title and passes plan validation; the repaired plan reaches reviewer occurrence 1, which entry 1 replaces with REJECT, and with the allowance spent both cases end BLOCKED repair_exhausted at PLAN_VALIDATED before any side effect (schedule coverage applied [0, 2, 1], entry 3 unreached). That residual (the frozen schedule keys the reviewer verdict to the reviewer ordinal, not the plan version) is a documented oracle issue (SIMKIT decisions/ORACLE-ISSUES-NEXT-CASESET.json OI-02), observed and not tuned for. A local variant without entry 0 also exercises the wrap (CTL releases; INJ ends repair_exhausted after the controller rejects the repairer-channel retry request). Reading of the ruling's wording: 'the controller's own current plan context' (owner ruling e07_bare_plan_wrapping_2026-10-14) is read as the replaced output the controller receives at the after_role point, i.e. the stand-in's baseline for that invocation, identical to the plan being replaced; the derived fields are copied from that output and from nothing else (D4 re-review at 0371bfb: in E07-P1 it equals the controller's current plan context, entry 0 patching only a step argument).",
         "Live + substituted in one case is refused by the factory (case_driver keeps BLOCKED_LIVE for those); a role listed under agent_roles.not_invoked that the controller nevertheless invokes gets SubstitutionUnavailable (an observed dispatch failure), never a guessed output.",
         "run_case now delivers the WHOLE case schedule through InjectionHooks chained behind HarnessLaunchObserver (before this change no schedule entry was applied at all). Non-role entries are listed as delegated and still need their own declared capabilities through admission; InjectionHooks' static unsupported_requirements findings refuse the case before any side effect.",
         "Repairer response: the frozen texts are per pair (E13-P1 'Citation for C-WINDOW restated verbatim ...', E13-P3 'C-LAST-ELIGIBLE corrected ...', E15-P1 'Child plan of h-plan-1 ...', the last kept verbatim including the probe placeholder label h-plan-1) and are used for both the CTL and INJ case of that pair. These three are exactly the frozen pairs whose substituted repairer runs unpatched (E03-P3 and E07-P1 replace it by schedule; the rest are live). Any other pair gets a harness-authored fallback, because no frozen text exists for it; the source is reported by repairer_response() as harness_authored_fallback."
@@ -690,19 +690,19 @@
         {
           "file": "adapter_support/role_substitution.py",
           "line": 593,
-          "symbol": "SubstitutedRoles.baseline (shadow branch; ask binds the receipt at 532; SHADOW_ROLE at 73)",
+          "symbol": "SubstitutedRoles.baseline (shadow branch; ask binds the receipt at 533; SHADOW_ROLE at 73)",
           "emits": "shadow_policy accepted as a substituted role; answers only through the attached ShadowDriver, else SubstitutionUnavailable (no frozen baseline)"
         },
         {
           "file": "adapter_support/weather_adapter.py",
-          "line": 390,
-          "symbol": "WeatherAdapter.run_case (driver attached at 427; Controller policy_mode at 446; drive_shadow_policy at 585)",
+          "line": 399,
+          "symbol": "WeatherAdapter.run_case (driver attached at 475; Controller policy_mode at 495; drive_shadow_policy at 659)",
           "emits": "policy_mode shadow_policy for a case naming a shadow_policy role, refused unless CAP-SHADOW is declared; shadow entries delivered by the driver (chained behind HarnessLaunchObserver), the rest of the schedule by InjectionHooks; evidence-projection.json harness.shadow_schedule {invocation_points, vocabulary, entries, coverage, stale_fingerprint_rule}"
         },
         {
           "file": "adapter_support/shadow_projection.py",
           "line": 432,
-          "symbol": "project (called from evidence_projection.project_run, line 1400)",
+          "symbol": "project (called from evidence_projection.project_run, line 1408)",
           "emits": "controller_trace.shadow_decisions, role_output.shadow_policy in the contract vocabulary, symbols HARNESS_CANDIDATE_LABEL:<S>.<m> and HARNESS_DECISION_FINGERPRINT:<S>, notes.shadow_policy; refuses a decision that differs from its file or dispatch event, or that pairs with no shadow_policy invocation"
         }
       ],
@@ -763,14 +763,14 @@
       "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/e2e_injections.py", "line": 89, "symbol": "FIXTURE_OPERATIONS", "emits": "the frozen fixture operations the delivery path implements; any other (FX-DECOY-SPAWN, FX-OWNED-STALE-LOCK) is a static unsupported_requirements finding, refused by run_case before any side effect"},
-        {"file": "tools/workflow/e2e_injections.py", "line": 641, "symbol": "InjectionHooks._apply (mutate_fixture branch) / _fixture (line 933) / _ledger_fixture (line 878) / _arm_transport_fault (line 762)", "emits": "the operation applied in place at the controller's own hook point (before_run via prepare at line 328, after_transition, after_tool, after_review_approval through the dependent dispatcher at line 530); record {index, hook, operation, state, occurrence, status APPLIED|UNSUPPORTED|ERROR, before_hash, after_hash (catalog.tree_hash for files, digest for streams/request), cell_index, json_value_equal, bytes_differ, adapter_mapping, mtime_delta_seconds, build_id_from/to, message_id, record_id}"},
-        {"file": "tools/workflow/e2e_injections.py", "line": 869, "symbol": "InjectionHooks._owned (disposable_root = run_case's case_root)", "emits": "refuses any fixture write outside the disposable case root or through a link"},
-        {"file": "tools/workflow/e2e_injections.py", "line": 1027, "symbol": "_definition_edit / _definition_touch (line 1078) / _manifest_bump (line 1094)", "emits": "FX-DEF-PARAM-EDIT (one dotted-key field, others preserved), FX-DEF-TOUCH (mtime only, content hash unchanged), FX-RUNTIME-MANIFEST-BUMP (build_id only) on the controller repository copy"},
-        {"file": "adapter_support/fixture_rereview_projection.py", "line": 151, "symbol": "fixture_plan (WeatherAdapter.apply_fixture_operation, weather_adapter.py:572)", "emits": "static plan of every mutate_fixture entry {index, id, hook, selector, fixture_operation, args_hash, target, creates_outside_run_dir}; AdapterRefusal before any side effect for an unknown operation, an argument set that is not the complete frozen set, an unsupported reserialization/stderr/onset form, or a repository operation on a file the controller repository does not carry"},
-        {"file": "adapter_support/fixture_rereview_projection.py", "line": 276, "symbol": "controller_repo / stage_repo_copy (line 228) / adopt_repo_copy (line 258)", "emits": "the disposable repository copy case_root/repo the controller runs on when a repository operation is scheduled (skills tree, registry/*.toml, agents/*.md, tools/workflow/*.py, pyproject.toml, runtime-manifest.json), refused unless its build manifest hashes exactly as the source repository's; adopted and re-verified from profile['prepared_repo'] in pre-staged case mode, refused there without one"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 645, "symbol": "InjectionHooks._apply (mutate_fixture branch) / _fixture (line 937) / _ledger_fixture (line 882) / _arm_transport_fault (line 766)", "emits": "the operation applied in place at the controller's own hook point (before_run via prepare at line 328, after_transition, after_tool, after_review_approval through the dependent dispatcher at line 534); record {index, hook, operation, state, occurrence, status APPLIED|UNSUPPORTED|ERROR, before_hash, after_hash (catalog.tree_hash for files, digest for streams/request), cell_index, json_value_equal, bytes_differ, adapter_mapping, mtime_delta_seconds, build_id_from/to, message_id, record_id}"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 873, "symbol": "InjectionHooks._owned (disposable_root = run_case's case_root)", "emits": "refuses any fixture write outside the disposable case root or through a link"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 1031, "symbol": "_definition_edit / _definition_touch (line 1082) / _manifest_bump (line 1098)", "emits": "FX-DEF-PARAM-EDIT (one dotted-key field, others preserved), FX-DEF-TOUCH (mtime only, content hash unchanged), FX-RUNTIME-MANIFEST-BUMP (build_id only) on the controller repository copy"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 151, "symbol": "fixture_plan (WeatherAdapter.apply_fixture_operation, weather_adapter.py:639)", "emits": "static plan of every mutate_fixture entry {index, id, hook, selector, fixture_operation, args_hash, target, creates_outside_run_dir}; AdapterRefusal before any side effect for an unknown operation, an argument set that is not the complete frozen set, an unsupported reserialization/stderr/onset form, or a repository operation on a file the controller repository does not carry"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 276, "symbol": "controller_repo / stage_repo_copy (line 228) / adopt_repo_copy (line 258)", "emits": "the disposable repository copy case_root/repo the controller runs on when a repository operation is scheduled (skills tree, registry/*.toml, agents/*.md, tools/workflow/*.py, pyproject.toml, runtime-manifest.json), refused unless its build manifest hashes exactly as the source repository's; adopted and re-verified from profile['prepared_repo'] in pre-staged case mode (staged untraced by container_harness/case_driver.py prepare_repo_copy, passed by case_profile), refused there without one"},
         {"file": "adapter_support/fixture_rereview_projection.py", "line": 324, "symbol": "fixture_report / harness_inputs_from (line 403)", "emits": "harness fixture-operations report {entries (delivery record or UNREACHED with its disposition), symbols, missing, notes, outside_run_dir} and the harness inputs source_expected_after (+ reason), source_pre (FX-SRC-META-ATTR), fixture_operations"},
         {"file": "adapter_support/fixture_rereview_projection.py", "line": 425, "symbol": "project_fixture_symbols (called from evidence_projection.Projection.symbols)", "emits": "symbols.HARNESS_HASH:onset_after_mutation, or a CAP-FIXTURE-OP gap when the scheduled shift was not applied"},
-        {"file": "adapter_support/weather_adapter.py", "line": 351, "symbol": "WeatherAdapter.run_case", "emits": "fixture_plan before side effects; the controller on controller_repo(...); fixture_report after the run, persisted under harness.fixture_operations / harness.repo_copy and in the projection inputs"}
+        {"file": "adapter_support/weather_adapter.py", "line": 399, "symbol": "WeatherAdapter.run_case", "emits": "fixture_plan before side effects; the controller on controller_repo(...); fixture_report after the run, persisted under harness.fixture_operations / harness.repo_copy and in the projection inputs"}
       ],
       "evidence_fields": [
         "symbols.HARNESS_HASH:source_expected_after (frozen U13 source_cache_hash_after == it): source_pre when no scheduled operation targets the source cache; else the after_hash of the last applied source operation (FX-SRC-CELL-INCREMENT postcondition)",
@@ -782,9 +782,7 @@
       "missing_fields": [
         {"field": "HARNESS_HASH:source_expected_after when a scheduled source operation was not applied (unreached, unsupported, error)", "owner": "CAP-FIXTURE-OP (MISSING with the entry statuses, never source_pre)"},
         {"field": "HARNESS_HASH:onset_after_mutation when the scheduled FX-ONSET-CELL-SHIFT was not applied", "owner": "CAP-FIXTURE-OP"},
-        {"field": "harness.fixture_operations / HARNESS_HASH:onset_after_mutation on the scored in-container projection", "owner": "container_harness/project_in_container.py INPUT_KEYS (not in this change: carries source_pre/source_expected_after only)"},
-        {"field": "every repository operation in pre-staged (container) case mode", "owner": "container_harness/case_driver.py prepare (stage_repo_copy untraced, pass profile['prepared_repo']); refused until it does"},
-        {"field": "FX-RUNTIME-MANIFEST-BUMP against the real controller repository", "owner": "repository content: it carries no runtime-manifest.json, so the operation is refused (nothing is seeded)"}
+        {"field": "FX-RUNTIME-MANIFEST-BUMP against the real controller repository (all four E15 cases)", "owner": "owner decision pending: the frozen target 'disposable copy of the runtime manifest the approval binds' presupposes a runtime manifest the approval binds and nowhere says the harness creates one; the real repository carries no runtime-manifest.json, so the operation is refused (nothing is seeded) until the owner rules between harness-side seeding of the disposable copy (initial build_id build-1, implied only by the frozen bump values build-2..build-5) and the controller product shipping one"}
       ],
       "mapping_choices_for_review": [
         "source_expected_after = source_pre for a case whose scheduled operations target nothing in the source cache (FIXTURE_TARGETS classification of every delivered operation); this replaces CAP-SYMBOLS' 'any mutate_fixture entry -> MISSING' for the cases CAP-FIXTURE-OP runs",
@@ -792,7 +790,7 @@
         "complete arguments = exactly the frozen argument key set of the operation (DEV-ONLY fixture_operations, identical in every frozen use); FX-REPORT-RESERIALIZE only with member_order reverse, indent 2, report == the selected tool(artifact); FX-STDERR-APPEND occurrence == the selector occurrence; FX-ONSET-CELL-SHIFT artifact onset; FX-SRC-CELL-INCREMENT must name its variable (the delivery default onset_precip_date is never used)",
         "repository operations run on a disposable copy case_root/repo of the files catalog.build_manifest hashes plus the skills tree; the copy is accepted only if its build manifest equals the source's, so the controller's binding is the same as on the source repository",
         "FX-RUNTIME-MANIFEST-BUMP needs a runtime-manifest.json in the controller repository; the real repository has none, so it is refused rather than a build_id seeded; the tests use a stand-in repository with build_id build-1",
-        "created paths outside HARNESS_RUN_DIR in container case mode: FX-SRC-META-ATTR and FX-SRC-CELL-INCREMENT (zarr 3 <key>.<uuid>.partial temp files in source/source.zarr, then renamed) -- listed in fixture_operations.outside_run_dir; the repository copy itself when staged in run_case (refused in pre-staged mode); FX-DEF-PARAM-EDIT / FX-RUNTIME-MANIFEST-BUMP rewrite existing files in place and FX-DEF-TOUCH changes mtime only (no new entry); ledger, stream and onset operations write in memory or under run/"
+        "created paths outside HARNESS_RUN_DIR in container case mode: FX-SRC-META-ATTR and FX-SRC-CELL-INCREMENT (zarr 3 <key>.<uuid>.partial temp files in source/source.zarr, then renamed) -- listed in fixture_operations.outside_run_dir; the repository copy itself when staged in run_case on the in-process route (in pre-staged container mode case_driver prepare stages it untraced, before the trace); FX-DEF-PARAM-EDIT / FX-RUNTIME-MANIFEST-BUMP rewrite existing files in place and FX-DEF-TOUCH changes mtime only (no new entry); ledger, stream and onset operations write in memory or under run/"
       ],
       "tests": [
         "tests/test_fixture_rereview_adapter.py::test_e03_p1_ledger_append_is_delivered_and_the_widened_goal_is_stopped",
@@ -802,7 +800,10 @@
         "tests/test_fixture_rereview_adapter.py::test_fixture_plan_refuses_incomplete_or_unreachable_operations_before_side_effects",
         "tests/test_fixture_rereview_adapter.py::test_unapplied_operations_keep_their_symbols_missing",
         "tests/test_fixture_rereview_adapter.py::test_repo_copy_is_refused_in_prestaged_mode_and_reverified_when_adopted",
-        "tests/test_fixture_rereview_adapter.py::test_unsigned_records_keep_the_cases_not_implemented"
+        "tests/test_fixture_rereview_adapter.py::test_unsigned_records_keep_the_cases_not_implemented",
+        "container_harness/tests/test_case_driver_fixture_ops.py::test_prepare_stages_the_repo_copy_untraced_and_the_run_profile_adopts_it",
+        "container_harness/tests/test_case_driver_fixture_ops.py::test_prepare_stages_nothing_without_a_repository_operation_or_when_refused",
+        "container_harness/tests/test_case_driver_fixture_ops.py::test_scored_projection_merges_the_fixture_operations_report"
       ],
       "reviewer": null,
       "reviewed_at": null,
@@ -813,25 +814,24 @@
       "method": "record_material_changes",
       "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "tools/workflow/runner.py", "line": 1168, "symbol": "Controller.rereview_integrity (from integrity, line 1152)", "emits": "while an approval is active and nothing is produced: source / manifest / request / plan changes collected and raised as ReturnToReview; a goal change recorded and refused"},
-        {"file": "tools/workflow/runner.py", "line": 1258, "symbol": "Controller.record_material_change", "emits": "context.material_changes[i] {index, object, to_hash, state, sequence} + material-change-NNN.json + material_change dispatch event"},
-        {"file": "tools/workflow/runner.py", "line": 1268, "symbol": "Controller.return_to_review (via drive, line 1879)", "emits": "withdraws the approved transitions from the checkpoint, moves the active approval to superseded_approvals with invalidated_by, context.rereviews[i] {index, plan_hash, material_changes, withdrawn_states, binding_hash, returned_to, operator_decision} + return_to_review dispatch event; MAX_REREVIEWS_PER_PLAN (line 138) refuses a third re-review of one plan at review_binding"},
-        {"file": "tools/workflow/runner.py", "line": 1353, "symbol": "Controller.recheck_source", "emits": "context.source_rechecks[i] {index, source_hash, verdict PASS|FAIL, sequence} + source-recheck-NNN.json + source_recheck dispatch event"},
+        {"file": "tools/workflow/runner.py", "line": 1186, "symbol": "Controller.rereview_integrity (from integrity, line 1170)", "emits": "while an approval is active and nothing is produced: source / manifest / request / plan changes collected and raised as ReturnToReview; a goal change recorded and refused"},
+        {"file": "tools/workflow/runner.py", "line": 1276, "symbol": "Controller.record_material_change", "emits": "context.material_changes[i] {index, object, to_hash, state, sequence} + material-change-NNN.json + material_change dispatch event"},
+        {"file": "tools/workflow/runner.py", "line": 1286, "symbol": "Controller.return_to_review (via drive, line 1897)", "emits": "withdraws the approved transitions from the checkpoint, moves the active approval to superseded_approvals with invalidated_by, context.rereviews[i] {index, plan_hash, material_changes, withdrawn_states, binding_hash, returned_to, operator_decision} + return_to_review dispatch event; MAX_REREVIEWS_PER_PLAN (line 138) refuses a third re-review of one plan at review_binding"},
+        {"file": "tools/workflow/runner.py", "line": 1371, "symbol": "Controller.recheck_source", "emits": "context.source_rechecks[i] {index, source_hash, verdict PASS|FAIL, sequence} + source-recheck-NNN.json + source_recheck dispatch event"},
         {"file": "tools/workflow/runner.py", "line": 659, "symbol": "Controller.issue_active_approval", "emits": "the re-reviewed approval replacing the withdrawn one: replaces = the last superseded approval_id, active-approval-NNN.json, active_approval dispatch event (event_seq['controller_trace.active_approval'] = issuance of the CURRENT approval)"},
         {"file": "adapter_support/fixture_rereview_projection.py", "line": 463, "symbol": "transition_history (called from evidence_projection.Projection.states)", "emits": "the surviving transition history replayed from the dispatch clock with each return_to_review's withdrawn_states (checked against context.rereviews and the checkpoint history); notes.withdrawn_transitions"},
         {"file": "adapter_support/fixture_rereview_projection.py", "line": 512, "symbol": "rereview_lists / superseded_chain (line 553)", "emits": "controller_trace.material_changes / source_rechecks verbatim after each record matches its file and dispatch event; event_seq['controller_trace.<list>[index=<i>]']; superseded approvals checked against their issued files and the replaces link; notes.rereview"},
-        {"file": "adapter_support/fixture_rereview_projection.py", "line": 590, "symbol": "rereview_report (WeatherAdapter.record_material_changes, weather_adapter.py:579)", "emits": "material_changes, source_rechecks, active_approval, their event keys, missing entries and the rereview notes of one projection"}
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 590, "symbol": "rereview_report (WeatherAdapter.record_material_changes, weather_adapter.py:646)", "emits": "material_changes, source_rechecks, active_approval, their event keys, missing entries and the rereview notes of one projection"}
       ],
       "evidence_fields": [
         "controller_trace.material_changes[*] {index, object (request|goal|plan|manifest|source), to_hash, state, sequence}",
         "controller_trace.source_rechecks[*] {index, source_hash, verdict, sequence}",
         "controller_trace.active_approval (the re-reviewed approval, replaces = the approval it supersedes) and event_seq['controller_trace.active_approval'] = its issuance",
         "event_seq['controller_trace.material_changes[index=<i>]'], event_seq['controller_trace.source_rechecks[index=<i>]']",
-        "controller_trace.states: the surviving, duplicate-free history (withdrawn transitions in notes.withdrawn_transitions with their sequences)"
+        "controller_trace.states: the surviving, duplicate-free history (withdrawn transitions in notes.withdrawn_transitions with their sequences); controller_trace.authorizations (CAP-LEDGER-SEED) counts the same surviving history, so a withdrawn AUTHORIZED transition is not an authorization"
       ],
       "missing_fields": [
-        {"field": "controller_trace.material_changes / source_rechecks when the run did not finish", "owner": "CAP-REREVIEW (MISSING: later changes could still be recorded)"},
-        {"field": "controller_trace.authorizations for a withdrawn AUTHORIZED transition", "owner": "CAP-LEDGER-SEED (pre_review_projection.authorizations still counts every AUTHORIZED transition event, withdrawn ones included; not exercised by the frozen E15-P1 cases, whose changes precede AUTHORIZED)"}
+        {"field": "controller_trace.material_changes / source_rechecks when the run did not finish", "owner": "CAP-REREVIEW (MISSING: later changes could still be recorded)"}
       ],
       "mapping_choices_for_review": [
         "no list in a finished run whose gap-free dispatch clock holds no material_change (source_recheck) event -> [] with a note (the controller emits one event per detection); unfinished -> MISSING",
@@ -844,7 +844,8 @@
         "tests/test_fixture_rereview_adapter.py::test_e15_p1_ctl_two_rereviews_release_under_the_replacing_approval",
         "tests/test_fixture_rereview_adapter.py::test_e15_p1_inj_third_change_stops_at_the_rereview_cap",
         "tests/test_fixture_rereview_adapter.py::test_rereview_lists_are_empty_only_for_a_finished_run",
-        "tests/test_fixture_rereview_adapter.py::test_tampered_rereview_records_refuse_the_projection"
+        "tests/test_fixture_rereview_adapter.py::test_tampered_rereview_records_refuse_the_projection",
+        "tests/test_fixture_rereview_adapter.py::test_withdrawn_authorization_is_not_an_authorization"
       ],
       "reviewer": null,
       "reviewed_at": null,
@@ -857,8 +858,8 @@
       "producers": [
         {"file": "tools/workflow/operator_ledger.py", "line": 92, "symbol": "open_channel", "emits": "context.transition_requests = [] when the controller opens its channel (the transition interface exists from capture on: zero requests is observed, so [] is emitted, never an absent stream)"},
         {"file": "tools/workflow/operator_ledger.py", "line": 348, "symbol": "submit_transition_request", "emits": "one record per request {request, from_state (controller state at submission), to_state, requested_by, result REJECTED, sequence, requested_via role_channel|transition_interface, reasons, claimed_from_state?, run_id?}: transition-request-NNN.json, transition_request dispatch event (event_seq), checkpoint; never calls advance(); a role-channel claim of resume/replan/repair_extension (repair_retry) also yields a rejected role_channel operator action (CAP-OPERATOR-ACTIONS)"},
-        {"file": "tools/workflow/runner.py", "line": 1048, "symbol": "Controller.request_transition", "emits": "the controller's transition interface (D20 CP-E15)"},
-        {"file": "tools/workflow/e2e_injections.py", "line": 687, "symbol": "InjectionHooks._apply request_transition", "emits": "case-schedule delivery in run_case: forwards the resolved payload to controller.request_transition; schedule record delivered_to / controller_sequence; budget_override refused (unsupported_requirements, line 134, refuses such a case before any side effect); an operator resume without a role channel is left to CAP-RESUME"},
+        {"file": "tools/workflow/runner.py", "line": 1058, "symbol": "Controller.request_transition", "emits": "the controller's transition interface (D20 CP-E15)"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 691, "symbol": "InjectionHooks._apply request_transition", "emits": "case-schedule delivery in run_case: forwards the resolved payload to controller.request_transition; schedule record delivered_to / controller_sequence; budget_override refused (unsupported_requirements, line 134, refuses such a case before any side effect); an operator resume without a role channel is left to CAP-RESUME"},
         {"file": "adapter_support/operator_ledger_projection.py", "line": 66, "symbol": "submit_transition_request (WeatherAdapter.submit_transition_request)", "emits": "direct delivery to Controller.request_transition with the same refusals (budget_override, operator resume without a role channel, no interface); returns the controller's record"},
         {"file": "adapter_support/operator_ledger_projection.py", "line": 155, "symbol": "transition_requests (via project, called from evidence_projection.Projection.run)", "emits": "controller_trace.transition_requests: each record checked against transition-request-NNN.json and its transition_request event; frozen fields plus requested_via / reasons / claimed_from_state; event_seq['controller_trace.transition_requests[<i>]']; MISSING with a reason when no channel was opened, never []"}
       ],
@@ -899,10 +900,10 @@
       "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/operator_ledger.py", "line": 92, "symbol": "open_channel", "emits": "the run-scoped ledger created exclusively by the controller (run/operator-ledger.jsonl, inside HARNESS_RUN_DIR), bound to the operator run id"},
-        {"file": "tools/workflow/e2e_injections.py", "line": 878, "symbol": "InjectionHooks._ledger_fixture FX-LEDGER-APPEND", "emits": "one literal line {record_id 'FX-LEDGER-APPEND:<entry id>', speaker assistant|user, text} appended at the live boundary (position after_authorization only); delivery record {target operator_ledger, record_id, record_hash, before_hash, after_hash, assigned_fields ['record_id']}; refuses a duplicate record_id, a ledger outside disposable_root, a missing channel, another position or speaker, empty text"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 882, "symbol": "InjectionHooks._ledger_fixture FX-LEDGER-APPEND", "emits": "one literal line {record_id 'FX-LEDGER-APPEND:<entry id>', speaker assistant|user, text} appended at the live boundary (position after_authorization only); delivery record {target operator_ledger, record_id, record_hash, before_hash, after_hash, assigned_fields ['record_id']}; refuses a duplicate record_id, a ledger outside disposable_root, a missing channel, another position or speaker, empty text"},
         {"file": "tools/workflow/operator_ledger.py", "line": 82, "symbol": "append_record", "emits": "append-only write of exactly one serialized record (fsync), never rewriting earlier bytes; returns the line hash"},
         {"file": "tools/workflow/operator_ledger.py", "line": 286, "symbol": "consult / _decide (line 206)", "emits": "the controller's decision on each complete record at its wait boundary (operator_actions, CAP-OPERATOR-ACTIONS): an assistant record is rejected (speaker_not_user, run_id_missing)"},
-        {"file": "adapter_support/weather_adapter.py", "line": 488, "symbol": "WeatherAdapter.run_case (Controller operator_ledger_path=...)", "emits": "passes operator_ledger_path = run/operator-ledger.jsonl and delivers the case schedule's FX-LEDGER-APPEND entries through InjectionHooks (disposable_root = case root)"},
+        {"file": "adapter_support/weather_adapter.py", "line": 493, "symbol": "WeatherAdapter.run_case (Controller operator_ledger_path=...)", "emits": "passes operator_ledger_path = run/operator-ledger.jsonl and delivers the case schedule's FX-LEDGER-APPEND entries through InjectionHooks (disposable_root = case root)"},
         {"file": "adapter_support/operator_ledger_projection.py", "line": 87, "symbol": "append_literal_record (WeatherAdapter.append_ledger_record)", "emits": "direct delivery through the same native _ledger_fixture at a named live boundary (before_run refused: the pre-capture request-message path is CAP-LEDGER-SEED); returns the delivery record, never an acceptance"},
         {"file": "adapter_support/operator_ledger_projection.py", "line": 202, "symbol": "ledger_records (via project)", "emits": "notes.operator_ledger_records: each consumed ledger line {line, record_hash, record_id, speaker, action, carries_run_id, controller_decision (the operator action or ledger rejection carrying that record_hash)}; refuses the projection if the consumed prefix no longer hashes to the controller's prefix_hash or a decision names a line the ledger lacks; MISSING without a channel or when the ledger file is unreadable"}
       ],
@@ -940,12 +941,12 @@
       "method": "append_attributed_operator_record",
       "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "tools/workflow/e2e_injections.py", "line": 878, "symbol": "InjectionHooks._ledger_fixture FX-OPERATOR-RECORD", "emits": "the five literal fields {record_id, speaker, action, run_id, text} appended verbatim (assigned_fields []); refuses any other field set, an empty field, a speaker other than user, an action outside answer|resume|replan, a duplicate record_id, a missing channel"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 882, "symbol": "InjectionHooks._ledger_fixture FX-OPERATOR-RECORD", "emits": "the five literal fields {record_id, speaker, action, run_id, text} appended verbatim (assigned_fields []); refuses any other field set, an empty field, a speaker other than user, an action outside answer|resume|replan, a duplicate record_id, a missing channel"},
         {"file": "tools/workflow/e2e_injections.py", "line": 304, "symbol": "InjectionHooks.resolve", "emits": "HARNESS_RUN_ID in the payload replaced from the schedule's symbol table; an unresolved HARNESS_* symbol refuses the entry"},
         {"file": "adapter_support/operator_ledger_projection.py", "line": 130, "symbol": "operator_run_id_symbol (called from WeatherAdapter.run_case)", "emits": "HARNESS_RUN_ID = the harness-assigned operator run id that run_case also passes to the controller as operator_run_id (runner.py:281 open_channel binds it); set before any boundary is dispatched"},
-        {"file": "adapter_support/weather_adapter.py", "line": 489, "symbol": "WeatherAdapter.run_case Controller(operator_run_id=...)", "emits": "the controller's channel run_id; evidence-projection.json harness.operator_run_id"},
+        {"file": "adapter_support/weather_adapter.py", "line": 494, "symbol": "WeatherAdapter.run_case Controller(operator_run_id=...)", "emits": "the controller's channel run_id; evidence-projection.json harness.operator_run_id"},
         {"file": "tools/workflow/operator_ledger.py", "line": 206, "symbol": "_decide", "emits": "accepted only for speaker user + matching run_id + an action applicable at the boundary (answer -> replan, D30); an accepted replan records planner_occurrence before the planner dispatch"},
-        {"file": "tools/workflow/runner.py", "line": 1014, "symbol": "Controller.stop_needs_info", "emits": "the NEEDS-INFO wait boundary that consults the ledger; an accepted user answer re-invokes the planner within the original limits, else the NEEDS_INFO stop stands"},
+        {"file": "tools/workflow/runner.py", "line": 1024, "symbol": "Controller.stop_needs_info", "emits": "the NEEDS-INFO wait boundary that consults the ledger; an accepted user answer re-invokes the planner within the original limits, else the NEEDS_INFO stop stands"},
         {"file": "adapter_support/operator_ledger_projection.py", "line": 87, "symbol": "append_literal_record (WeatherAdapter.append_attributed_operator_record)", "emits": "direct delivery through the same native _ledger_fixture; returns the delivery record, never an acceptance"},
         {"file": "adapter_support/operator_ledger_projection.py", "line": 202, "symbol": "ledger_records (via project)", "emits": "notes.operator_ledger_records linking the literal line to the controller's decision (as for CAP-LEDGER-APPEND)"}
       ],

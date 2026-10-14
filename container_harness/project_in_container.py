@@ -9,7 +9,8 @@ adapter projection is ``adapter_support.evidence_projection.project_run`` with
 ``{"observations_path": ...}`` plus, in case mode, the harness inputs run_case held in process
 (``--inputs``: ``weather-adapter.evidence-projection-inputs/1``, written by
 ``WeatherAdapter.run_case`` onto the entry shell's fd 4: launch_observations, processes_root,
-source_pre, authorized_goal, run_provenance). Merging them is what keeps the post-trace
+source_pre, authorized_goal, run_provenance, source_expected_after(_reason) and, for a case with
+fixture operations, fixture_operations). Merging them is what keeps the post-trace
 projection from losing the launch-time hashes, the source_pre/authorized-goal symbols and the
 run provenance the in-process projection had.
 
@@ -35,10 +36,14 @@ INPUT_KEYS = (
     # CAP-SYMBOLS HARNESS_HASH:source_expected_after and, when absent, its owner/reason.
     "source_expected_after",
     "source_expected_after_reason",
+    # CAP-FIXTURE-OP report (fixture_rereview_projection.fixture_report): the delivery records
+    # and HARNESS_HASH:onset_after_mutation for the scored projection (project_fixture_symbols).
+    "fixture_operations",
 )
-# Always written by run_case; source_expected_after is written only when it is known (a case
-# with fixture operations leaves it to CAP-FIXTURE-OP), so it is never "not carried".
-OPTIONAL_INPUT_KEYS = ("source_expected_after",)
+# Always written by run_case, except: source_expected_after only when it is known (a case with
+# an unapplied source operation leaves it to CAP-FIXTURE-OP) and fixture_operations only when
+# the case schedules a fixture operation; neither is then "not carried".
+OPTIONAL_INPUT_KEYS = ("source_expected_after", "fixture_operations")
 
 
 class ForeignInputs(ValueError):

@@ -108,8 +108,11 @@ def approval(occurrence=None, **overrides):
         "controller_accepted": True,
         "approval_committed": True,
         "plan_scope": "initial",
-        "binding_hash": "plan-initial",
-        "initial_binding_hash": "plan-initial",
+        "plan_hash": "plan-initial",
+        "initial_plan_hash": "plan-initial",
+        "parent_plan_hash": None,
+        "binding_hash": "binding-initial",
+        "initial_binding_hash": "binding-initial",
         "parent_binding_hash": None,
     }
     if occurrence is not None:
@@ -350,14 +353,21 @@ def test_approval_occurrence_disagreement_is_harness_error():
 def test_child_of_initial_never_matches_without_real_parent_binding():
     child = entry("child", "after_review_approval", "reviewer", 2, plan_scope="child_of_initial")
     for second in (
-        approval(2, plan_scope="child_of_initial"),  # bare label, no parent binding
-        approval(2, plan_scope="child_of_initial", binding_hash="plan-child"),
-        approval(2, plan_scope="child_of_initial", parent_binding_hash="plan-initial"),
+        approval(2, plan_scope="child_of_initial"),  # bare label, no parent plan
+        approval(2, plan_scope="child_of_initial", plan_hash="plan-child"),
+        approval(2, plan_scope="child_of_initial", parent_plan_hash="plan-initial"),
         approval(
             2,
             plan_scope="child_of_initial",
-            binding_hash="plan-child",
-            parent_binding_hash="unrelated",
+            plan_hash="plan-child",
+            parent_plan_hash="unrelated",
+        ),
+        # A parent BINDING is not a parent plan: the identity is the plan.
+        approval(
+            2,
+            plan_scope="child_of_initial",
+            binding_hash="binding-child",
+            parent_binding_hash="binding-initial",
         ),
     ):
         h = dependent(child)
@@ -371,12 +381,30 @@ def test_child_of_initial_never_matches_without_real_parent_binding():
         approval(
             2,
             plan_scope="child_of_initial",
-            binding_hash="plan-child",
-            parent_binding_hash="plan-initial",
+            plan_hash="plan-child",
+            parent_plan_hash="plan-initial",
         ),
         None,
     )
     assert report(h)["child"]["disposition"] == "DELIVERED"
+
+
+def test_initial_scope_follows_the_plan_identity_not_the_binding():
+    """Frozen: "initial means the first accepted plan identity". A re-bind of the same plan
+    (a runtime-manifest bump changes the binding) stays initial; another plan does not."""
+    two = entry("two", "after_review_approval", "reviewer", 2, plan_scope="initial")
+    h = dependent(two)
+    h("after_review_approval", approval(1), None)
+    h("after_review_approval", approval(2, binding_hash="binding-rebound"), None)
+    assert report(h)["two"]["disposition"] == "DELIVERED"
+    h = dependent(two)
+    h("after_review_approval", approval(1), None)
+    h("after_review_approval", approval(2, plan_hash="plan-other"), None)
+    assert report(h)["two"]["reason"] == "boundary_not_reached"
+    h = dependent(two)
+    h("after_review_approval", approval(1), None)
+    h("after_review_approval", approval(2, plan_hash=None), None)  # unobserved plan
+    assert report(h)["two"]["reason"] == "boundary_not_reached"
 
 
 # ---------------------------------------------------------------- frozen parity
@@ -486,11 +514,11 @@ def to_event(observation):
         event["state"] = target
     elif hook == "after_review_approval":
         # Occurrence is the dispatcher's own accepted count, as in the reference.
-        event.update(role=target, target=target, initial_binding_hash="plan-initial")
+        event.update(role=target, target=target, initial_plan_hash="plan-initial")
         if observation.get("plan_scope") == "child_of_initial":
-            event.update(binding_hash="plan-child", parent_binding_hash="plan-initial")
+            event.update(plan_hash="plan-child", parent_plan_hash="plan-initial")
         else:
-            event.update(binding_hash="plan-initial", parent_binding_hash=None)
+            event.update(plan_hash="plan-initial", parent_plan_hash=None)
     else:
         event["target"] = target
     return hook, event
@@ -635,6 +663,8 @@ def test_committed_approval_emits_one_normalized_boundary(tmp_path, monkeypatch,
     assert event["plan_scope"] == "initial"
     assert event["binding_hash"] == c.binding == event["initial_binding_hash"]
     assert event["parent_binding_hash"] is None
+    assert event["plan_hash"] == c.plan_hash() == event["initial_plan_hash"]
+    assert event["parent_plan_hash"] is None
     assert all(
         event[k] is True
         for k in ("schema_valid", "binding_valid", "controller_accepted", "approval_committed")
@@ -651,6 +681,7 @@ def test_committed_approval_emits_one_normalized_boundary(tmp_path, monkeypatch,
     assert durable["context"]["accepted_approvals"] == {
         "occurrence": 1,
         "initial_binding_hash": c.binding,
+        "initial_plan_hash": c.plan_hash(),
     }
     assert durable["events"][event["transition_index"]]["to"] == "REVIEW_APPROVED"
 
