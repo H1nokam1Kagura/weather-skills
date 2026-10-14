@@ -19,8 +19,10 @@ fingerprints, then prints a gate card: VERDICT PASS / BLOCK / UNVERIFIABLE
 
 import hashlib
 import json
+import os
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -344,6 +346,15 @@ def _runner(script: Path) -> list[str]:
     return ["uv", "run", "--quiet", "--script", str(script)]
 
 
+def _replay_command(script: Path, replay_runner: str) -> list[str]:
+    """``uv`` (default) resolves the script's inline deps, as the agent runs it; ``python``
+    re-runs it with this interpreter, for a caller (the workflow controller) that produced
+    the artifact by running sibling scripts with its own interpreter and has no network."""
+    if replay_runner == "python":
+        return [sys.executable, str(script)]
+    return _runner(script)
+
+
 def _cli_args(args: dict) -> list[str]:
     out = []
     for dest, value in sorted((args or {}).items()):
@@ -369,7 +380,15 @@ def _verified_inputs(step: dict, verified: dict) -> list[Path] | None:
     return paths if all(paths) else None
 
 
-def _replay(gate: Gate, chain: list, kind: str, artifact: Path, verified: dict, rtol: float):
+def _replay(
+    gate: Gate,
+    chain: list,
+    kind: str,
+    artifact: Path,
+    verified: dict,
+    rtol: float,
+    replay_runner: str = "uv",
+):
     if kind == "figure":
         steps, last = chain[:-1], chain[-1]
         target = _verified_inputs(last, verified) if isinstance(last, dict) else None
@@ -437,17 +456,36 @@ def _replay(gate: Gate, chain: list, kind: str, artifact: Path, verified: dict, 
                     f"recorded v{step.get('version')}",
                 )
             out = Path(tmp) / f"replay_step{k + 1}.zarr"
-            cmd = _runner(script) + _cli_args(step.get("args"))
+            cmd = _replay_command(script, replay_runner) + _cli_args(step.get("args"))
             for path in prev:
                 cmd.append(f"--input={path}")
             cmd.append(f"--output={out}")
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=REPLAY_TIMEOUT_SECONDS,
-            )
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=REPLAY_TIMEOUT_SECONDS,
+                )
+            except OSError as exc:
+                gate.add(
+                    "replay",
+                    subject,
+                    UNVERIFIABLE,
+                    f"replay runner {cmd[0]!r} could not be started: {exc.strerror or exc}",
+                    "the recorded step re-runs cleanly",
+                )
+                return
+            except subprocess.TimeoutExpired:
+                gate.add(
+                    "replay",
+                    subject,
+                    UNVERIFIABLE,
+                    f"replay command exceeded {REPLAY_TIMEOUT_SECONDS}s",
+                    "the recorded step re-runs cleanly",
+                )
+                return
             if proc.returncode != 0 or not out.exists():
                 tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
                 gate.add(
@@ -554,8 +592,23 @@ def _emit(artifact, kind, chains, scope, gate, output_format):
 @weather_skill.argument(
     "--format", dest="output_format", choices=["human", "json"], default="human"
 )
+@weather_skill.argument(
+    "--replay-runner",
+    choices=["uv", "python"],
+    default=os.environ.get("WEATHER_SKILLS_REPLAY_RUNNER", "uv"),
+    help="How replay re-runs a recorded step: 'uv' (default; resolves the script's inline "
+    "dependencies) or 'python' (this interpreter; offline callers that ran the steps with it). "
+    "Default from WEATHER_SKILLS_REPLAY_RUNNER when set.",
+)
 def verify_run(
-    input, replay, rtol, search_dir, require_replay=False, output_format="human", **kwargs
+    input,
+    replay,
+    rtol,
+    search_dir,
+    require_replay=False,
+    output_format="human",
+    replay_runner="uv",
+    **kwargs,
 ):
     """Deterministic evaluation gate for a weather-skills artifact (writes only to a temp dir)."""
     artifact = Path(input)
@@ -566,6 +619,12 @@ def verify_run(
     )
     if require_replay:
         scope += " (final data comparison required)"
+    if replay_runner not in ("uv", "python"):
+        gate.add(
+            "usage", "--replay-runner", UNVERIFIABLE, f"replay_runner={replay_runner}", "uv|python"
+        )
+        _emit(artifact, "?", {}, scope, gate, output_format)
+        raise GateUnverifiable("verify-run: VERDICT UNVERIFIABLE", prefix=False)
     if rtol < 0:
         gate.add("usage", "--rtol", UNVERIFIABLE, f"rtol={rtol:g}", "rtol >= 0")
         _emit(artifact, "?", {}, scope, gate, output_format)
@@ -638,7 +697,15 @@ def verify_run(
                 "a single-branch artifact",
             )
         else:
-            _replay(gate, next(iter(valid.values())), kind, artifact, verified, rtol)
+            if replay_runner != "uv":
+                gate.add(
+                    "replay-runner",
+                    artifact.name,
+                    INFO,
+                    f"recorded steps re-run with this interpreter ({replay_runner})",
+                    "uv run --script",
+                )
+            _replay(gate, next(iter(valid.values())), kind, artifact, verified, rtol, replay_runner)
 
     if require_replay and not any(c.kind == "replay" and c.status == PASS for c in gate.checks):
         gate.add(

@@ -277,3 +277,8 @@ def test_direct_skip_to_execution_refused(tmp_path, monkeypatch):
         c.execute_step(0, "AUTHORIZED", "ONSET_CREATED")
     with pytest.raises(Refused):
         c.advance("RELEASED", {"verdict": "PASS"})
+
+
+def test_child_environment_replays_verify_run_steps_with_the_controller_interpreter():
+    # Every skill runs with sys.executable, offline; verify-run must not shell out to `uv`.
+    assert catalog.child_environment()["WEATHER_SKILLS_REPLAY_RUNNER"] == "python"

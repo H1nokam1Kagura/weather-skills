@@ -176,6 +176,9 @@ def child_environment(scratch=None):
         OMP_NUM_THREADS="1",
         OPENBLAS_NUM_THREADS="1",
         MKL_NUM_THREADS="1",
+        # The controller runs every skill with its own interpreter (no network, no uv), so
+        # verify-run replays recorded steps the same way instead of `uv run --script`.
+        WEATHER_SKILLS_REPLAY_RUNNER="python",
     )
     if scratch is not None:
         scratch = safe_path(scratch)
