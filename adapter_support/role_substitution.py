@@ -98,12 +98,40 @@ FROZEN_CLAIMS = (
         "derivable": False,
     },
 )
-# Harness-authored (flagged for review): the frozen cases state only that the substituted
-# repairer "restates the claims verbatim and keeps the registered plan".
+# Repairer baseline response: the frozen text, verbatim, for every pair whose substituted
+# repairer runs unpatched (agent_roles.substituted lists it and no schedule entry replaces it).
+# Source: DEV-ONLY.json <INJ case>.probe_bundles[0].evidence.role_output.repairer[0].response.
+FROZEN_REPAIRER_RESPONSES = {
+    "E13-P1": "Citation for C-WINDOW restated verbatim from the bound definition; science "
+    "unchanged.",
+    "E13-P3": "C-LAST-ELIGIBLE corrected to 2025-12-02 (30-day window); science unchanged.",
+    # Verbatim, including the probe bundle's placeholder plan label "h-plan-1".
+    "E15-P1": "Child plan of h-plan-1 after the third material change; science unchanged.",
+}
+# Harness-authored fallback, used ONLY for a pair with no frozen repairer text (none of the
+# frozen substituted-repairer pairs today: E03-P3 and E07-P1 replace the repairer by schedule).
 REPAIRER_RESPONSE = (
     "Substituted repair: the registered plan is kept and every claim is restated verbatim "
     "from the bound definition."
 )
+
+
+def repairer_response(pair_id):
+    """(text, source): the frozen text for the pair, else the labelled harness fallback."""
+    if pair_id in FROZEN_REPAIRER_RESPONSES:
+        return FROZEN_REPAIRER_RESPONSES[pair_id], "frozen_probe_bundle"
+    return REPAIRER_RESPONSE, "harness_authored_fallback"
+
+
+def pair_of(case):
+    pair = case.get("pair_id") if isinstance(case, dict) else None
+    if isinstance(pair, str) and pair:
+        return pair
+    ident = case.get("id", "") if isinstance(case, dict) else ""
+    ident = ident.removeprefix("DEV-E2E-V2_7-")
+    return ident.rsplit("-", 1)[0] if ident.endswith(("-CTL", "-INJ")) else ident
+
+
 CHECKER_REASONING = "substituted baseline verdict; no model judged this claim"
 # Recorded in place of a system prompt: a substituted reviewer is sent none.
 NO_SYSTEM_PROMPT = "SUBSTITUTED: no system prompt was sent; output from " + SUBSTITUTE_ID
@@ -149,7 +177,7 @@ def frozen_claims():
     return out
 
 
-def static_baseline(native_role, goal):
+def static_baseline(native_role, goal, pair_id=None):
     """Baselines that do not depend on the controller payload (used for the dry run too)."""
     if native_role == "compiler":
         return copy.deepcopy(goal)
@@ -160,7 +188,7 @@ def static_baseline(native_role, goal):
             "plan_claims": frozen_claims(),
         }
         if native_role == "repairer":
-            value["response"] = REPAIRER_RESPONSE
+            value["response"] = repairer_response(pair_id)[0]
         return value
     return None
 
@@ -219,7 +247,7 @@ def _identity_path(keys):
     return mapper
 
 
-def _map_entry(index, spec, goal):
+def _map_entry(index, spec, goal, pair_id):
     selector = spec.get("selector") if isinstance(spec.get("selector"), dict) else {}
     name, occurrence = selector.get("role_or_tool_or_stage"), selector.get("occurrence", 1)
     operation, payload = spec["operation"], spec.get("payload")
@@ -270,7 +298,7 @@ def _map_entry(index, spec, goal):
         elif not (isinstance(payload, dict) and set(payload) == {"plan_hash", "verdicts"}):
             _refuse(f"{where}: evidence_checker replacement must be {{plan_hash, verdicts}}")
     if goal is not None and operation == "json_patch":
-        baseline = static_baseline(native, goal)
+        baseline = static_baseline(native, goal, pair_id)
         if baseline is not None:
             try:
                 json_patch(baseline, payload)
@@ -315,7 +343,7 @@ def substitution_plan(case, goal=None):
                 f"schedule entry {index}: {name} is not a substituted-only role in this case; "
                 "a live role's output is never replaced"
             )
-        payload, mapping = _map_entry(index, spec, goal)
+        payload, mapping = _map_entry(index, spec, goal, pair_of(case))
         native_schedule.append({**copy.deepcopy(spec), "payload": payload})
         entries.append(
             {
@@ -370,6 +398,7 @@ class SubstitutedRoles:
         if compilers and compilers != set(COMPILER_SELECTORS):
             raise AdapterRefusal("compilers are substituted all three or not at all")
         self.case_id = case["id"]
+        self.pair_id = pair_of(case)
         self.goal = copy.deepcopy(goal)
         self.allowed = frozenset(NATIVE_ROLE[r] for r in roles["substituted"])
         self.receipts = []
@@ -427,7 +456,7 @@ class SubstitutedRoles:
 
     def baseline(self, role, payload):
         if role == "compiler":
-            return static_baseline(role, self.goal)
+            return static_baseline(role, self.goal, self.pair_id)
         if role in {"planner", "repairer"}:
             request = payload.get("review_evidence_request")
             if not isinstance(request, dict):
@@ -445,7 +474,7 @@ class SubstitutedRoles:
                 )
             if any(c["quote"] not in source.get("text", "") for c in FROZEN_CLAIMS):
                 raise SubstitutionUnavailable("bound definition text lacks a frozen quote")
-            return static_baseline(role, self.goal)
+            return static_baseline(role, self.goal, self.pair_id)
         if role == "reviewer":
             evidence = payload.get("review_evidence")
             if not isinstance(evidence, dict):

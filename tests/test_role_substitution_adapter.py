@@ -318,6 +318,28 @@ def test_e13_p1_inj_non_verbatim_quote_routes_to_the_substituted_repairer(e13):
         "A candidate at day t requires t through t+19 inclusive."
     )
     assert inj.evidence["controller_trace"]["final_state"] == "RELEASED"
+    (repair,) = [f["output"] for f in role_files(inj.run) if f["receipt"]["role"] == "repairer"]
+    assert repair["response"] == rs.FROZEN_REPAIRER_RESPONSES["E13-P1"]
+
+
+def test_repairer_baseline_response_is_the_frozen_probe_text(frozen):
+    """Every pair whose substituted repairer runs unpatched gets its frozen text verbatim."""
+    unpatched = set()
+    for case in frozen.values():
+        roles = case["agent_roles"]
+        replaced = any(
+            s["selector"].get("role_or_tool_or_stage") == "repairer"
+            for s in case["injection_schedule"]
+        )
+        if "repairer" in roles.get("substituted", []) and not roles.get("live") and not replaced:
+            unpatched.add(case["pair_id"])
+    assert unpatched == set(rs.FROZEN_REPAIRER_RESPONSES)
+    for pair, text in rs.FROZEN_REPAIRER_RESPONSES.items():
+        bundle = frozen[f"{PREFIX}{pair}-INJ"]["probe_bundles"][0]["evidence"]["role_output"]
+        assert bundle["repairer"][0]["response"] == text
+        assert rs.repairer_response(pair) == (text, "frozen_probe_bundle")
+        assert rs.pair_of(frozen[f"{PREFIX}{pair}-CTL"]) == pair
+    assert rs.repairer_response("LOCAL")[1] == "harness_authored_fallback"
 
 
 def test_e01_p1_ctl_all_substituted_roles_release_with_distinct_sessions(lab, frozen):
