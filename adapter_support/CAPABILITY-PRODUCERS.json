@@ -2,7 +2,7 @@
   "schema": "weather-adapter.capability-producers/1",
   "authority": "Owner ruling D4 (CR-09): every declared capability requires a reviewed capability-to-producer record; an empty signal list is never emitted as exhaustive evidence. Source: simkit/handoffs/completion-20261012/decisions/OWNER-RULINGS.json.",
   "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids and symbols.HARNESS_CONTROLLER_PID as a harness-observations input file. The projection accepts and merges it; CAP-EXHAUSTIVE-WRITES and CAP-SIGNAL-CAPTURE are NOT declared by carrying those values (statuses unchanged until the traced harness is reviewed).",
-  "base": "controller 0e862c8 (feat/simkit-completion-snowyowl); line numbers refer to that base",
+  "base": "feat/simkit-w4-pregates-snowyowl (wave 4); line numbers refer to the commit that last edited each record (git log -L)",
   "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED and reviewer is a non-empty string. reviewer/reviewed_at are left null for the coordinator. PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
   "frozen_shapes": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json structures (frozen v2.7, read-only)",
   "tests_file": "tests/test_evidence_projection_v27.py",
@@ -10,7 +10,7 @@
     "CAP-RECEIPTS": {
       "d4_gated": true,
       "method": "capture_evidence",
-      "status": "PARTIAL",
+      "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/runner.py", "line": 384, "symbol": "Controller.dispatch_event", "emits": "controller-global sequence, resume_phase, run_id; dispatch-event-NNNNNN.json hashed into checkpoint evidence"},
         {"file": "tools/workflow/runner.py", "line": 524, "symbol": "Controller.ask", "emits": "dispatch_attempt / invocation_prepared / dispatch_returned / dispatch_failed; receipt.controller_dispatch {attempt_id, sequence, occurrence, resume_phase}"},
@@ -21,37 +21,43 @@
         {"file": "tools/workflow/runner.py", "line": 440, "symbol": "Controller.advance", "emits": "transition events (state clocks)"},
         {"file": "tools/workflow/runner.py", "line": 1262, "symbol": "Controller.finish", "emits": "terminal event and result.json terminal"},
         {"file": "tools/workflow/runner.py", "line": 239, "symbol": "Controller.checkpoint", "emits": "spent, budget, elapsed_s, total_seconds, repairs_used, max_repairs, resumes"},
-        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "HarnessLaunchObserver", "emits": "harness-computed *_hash_at_launch (before_tool) and gate artifact_content_hash (after_tool)"}
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "HarnessLaunchObserver", "emits": "harness-computed *_hash_at_launch (before_tool) and gate artifact_content_hash (after_tool)"},
+        {"file": "tools/workflow/trace_records.py", "line": 21, "symbol": "record_initial_state (called from Controller.run, runner.py:1683)", "emits": "initial_state dispatch event {state, controller_pid} as the first event of a fresh run: event_seq['controller_trace.states[CAPTURED]']"},
+        {"file": "tools/workflow/trace_records.py", "line": 64, "symbol": "retain_compiled_goal (called from runner.py:1847)", "emits": "failed goal check {verdict FAIL, failed_fields, compiler_occurrence, gate, reason} in context.goal_check + goal-check.json + goal_check dispatch event"},
+        {"file": "tools/workflow/recovery.py", "line": 97, "symbol": "new_ledger / ledger (bound by Controller.bind_recovery for every run)", "emits": "counters.automatic_resumes_used, limits.max_automatic_resumes, interruptions"},
+        {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "argv_flags", "emits": "process_receipts[*].flags from the parser-accepted controller argv"},
+        {"file": "tools/workflow/runner.py", "line": 642, "symbol": "Controller.issue_active_approval", "emits": "native active approval (approval_id, reviewer_occurrence, reviewer_session_id, hashes, binding_hash, replaces) + active-approval-NNN.json + active_approval dispatch event"}
       ],
       "evidence_fields": [
         "invocation_receipts[*] {role (compiler occurrence k -> compiler_k, occurrence 1), session_id, occurrence (receipt ordinal per role), phase, seq (= dispatch_returned sequence), verdict (reviewer output / verifier_verdicts / checker receipt)}",
-        "process_receipts[*] {tool, artifact, argv (controller command minus interpreter and catalogued script), command, start, end, exit_code, pid, parent_pid, phase, producing, wall_seconds, output_bytes, approval_*, *_hash_at_launch}",
-        "event_seq (states, receipts, process start/end, gate_reports, active_approval, terminal, plan_validations, claim_checks) + _absent for keys a finished gap-free sequence rules out",
         "gate_reports['<tool>(<artifact>)'] (controller-accepted reports, else the tool file report) + artifact_content_hash",
         "artifacts.<id> {present, content_hash (harness tree_hash at projection), path}",
-        "budget_ledger.final {consumed_model_usd, elapsed_seconds, repair_attempts_used, resume_attempts_used, combined_process_output_bytes, limits {max_model_usd, max_total_seconds, max_repair_attempts}}; launch_checks",
-        "controller_trace.states, final_state, plan_validations (+ plan as contract step list), authorizations, goal_check (PASS only)"
+        "process_receipts[*] {tool, artifact, argv (controller command minus interpreter and catalogued script), flags, command, start, end, exit_code, pid, parent_pid, phase, producing, wall_seconds, output_bytes, approval_*, *_hash_at_launch}",
+        "event_seq (states incl. the initial CAPTURED state, receipts, process start/end, gate_reports, active_approval (native issuance event), terminal, plan_validations, claim_checks, operator_actions) + _absent for keys a finished gap-free sequence rules out",
+        "budget_ledger.final {consumed_model_usd, elapsed_seconds, repair_attempts_used, resume_attempts_used, automatic_resumes_used, combined_process_output_bytes, limits {max_model_usd, max_total_seconds, max_repair_attempts, max_resume_attempts}}; launch_checks; at_checkpoint absent when the run recorded no interruption",
+        "controller_trace.states, final_state, plan_validations (+ plan as contract step list), goal_check (PASS from GOAL_CHECKED, FAIL with failed_fields from the native record)"
       ],
       "missing_fields": [
-        {"field": "event_seq['controller_trace.states[CAPTURED]']", "owner": "controller (no dispatch event for the initial state)"},
-        {"field": "process_receipts[*].flags", "owner": "controller (parsed preflight map is not recorded per launch in contract form)"},
-        {"field": "budget_ledger.final.automatic_resumes_used", "owner": "CAP-AUTO-RESUME (resume package)"},
-        {"field": "budget_ledger.final.limits.max_resume_attempts", "owner": "CAP-RESUME (limit not recorded in the checkpoint)"},
-        {"field": "budget_ledger.at_checkpoint", "owner": "CAP-RESUME"},
-        {"field": "controller_trace.goal_check on a failed goal check", "owner": "controller (failed fields only in message text; never parsed)"}
+        {"field": "budget_ledger.at_checkpoint (only when the run recorded an interruption)", "owner": "CAP-RESUME (no counter snapshot at the interruption checkpoint; only interrupt/resume cases have one)"}
       ],
       "mapping_choices_for_review": [
         "invocation occurrence = receipt ordinal per role; native attempt occurrence kept as native_attempt_occurrence",
-        "active_approval.approval_id = committed review binding hash (no native approval id)",
         "gate_reports clock = exit sequence of the process whose stdout is the report",
         "a guard-stopped process projects exit_code/end/wall_seconds null; its stop clock is stopped_at",
-        "role-CLI processes launched inside an open role dispatch window are excluded from process_receipts and listed in harness_observations.role_transport_processes (not exercised by tests: test roles use a stub transport)"
+        "role-CLI processes launched inside an open role dispatch window are excluded from process_receipts and listed in harness_observations.role_transport_processes (not exercised by tests: test roles use a stub transport)",
+        "the CAPTURED clock is an initial_state event emitted at the start of Controller.run (the state is entered at construction, where no event exists); emitted only when it would be the first event, so it precedes every other clock",
+        "flags = option token -> its value token from the parser-accepted argv; a zero-value option -> true; a repeated option -> list of values in argv order (matches verify-run --require-replay store_true / --search-dir append); bbox stays the controller's slash form ('5/36.5/-5/42'), so a frozen comparison against '5,36.5,-5,42' (E01-P2 V24-DATA-FIDELITY) will not match: contract-format question, not reformatted",
+        "budget_ledger.final.limits.max_resume_attempts = recovery limits.max_automatic_resumes (UC-15-resume-r2: the automatic-resume limit)",
+        "dropped (D4 review D-BS-1): 'active_approval.approval_id = committed review binding hash' - the native approval id is projected"
       ],
       "tests": [
         "test_released_map_run_passes_frozen_v25_validators_and_v24_has_no_fail",
         "test_released_projection_maps_native_records_without_filling",
         "test_tampered_or_inconsistent_native_evidence_refuses_projection",
-        "test_run_without_dispatch_evidence_is_refused"
+        "test_run_without_dispatch_evidence_is_refused",
+        "test_receipts_carry_flags_resume_counters_and_the_initial_clock",
+        "test_failed_goal_check_records_its_fields_natively",
+        "test_argv_flags_never_guess_an_irregular_argv"
       ],
       "reviewer": null,
       "reviewed_at": null
@@ -59,26 +65,41 @@
     "CAP-SYMBOLS": {
       "d4_gated": true,
       "method": "resolve_symbol",
-      "status": "PARTIAL",
+      "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/runner.py", "line": 239, "symbol": "Controller.checkpoint", "emits": "request_hash, build_hash, plan, root, source"},
         {"file": "tools/workflow/runner.py", "line": 780, "symbol": "Controller.record_plan_version", "emits": "plan_versions[k].plan_hash (HARNESS_PLAN_HASH:vN)"},
         {"file": "tools/workflow/processes.py", "line": 342, "symbol": "Processes.run launch record", "emits": "pid, parent_pid (HARNESS_PID:<tool>, HARNESS_CONTROLLER_PID)"},
         {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"},
         {"file": "tools/workflow/claim_gates.py", "line": 35, "symbol": "bind_definition_source", "emits": "definition source hash (HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling, D1)"},
-        {"file": "adapter_support/weather_adapter.py", "line": null, "symbol": "WeatherAdapter.prepare_fixture", "emits": "source_pre (harness tree_hash before the run)"}
+        {"file": "adapter_support/weather_adapter.py", "line": null, "symbol": "WeatherAdapter.prepare_fixture", "emits": "source_pre (harness tree_hash before the run)"},
+        {"file": "tools/workflow/trace_records.py", "line": 21, "symbol": "record_initial_state", "emits": "controller_pid (HARNESS_CONTROLLER_PID when no child process was launched)"},
+        {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "expected_source_after (run_case)", "emits": "HARNESS_HASH:source_expected_after = source_pre when the case declares no fixture operation"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "Projection.symbols", "emits": "HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling from the captured review snapshot source (cross-checked with the bound definition); HARNESS_SOURCE_CACHE from the checkpoint source"}
       ],
-      "evidence_fields": ["symbols{HARNESS_RUN_DIR, HARNESS_REQUEST_HASH(:current), HARNESS_MANIFEST_HASH:current, HARNESS_GOAL_HASH:current, HARNESS_GOAL_HASH:authorized (harness-supplied variant goal via the controller digest), HARNESS_PLAN_HASH:current/vN, HARNESS_HASH:source/source_pre/source_expected_after (when supplied), HARNESS_CONTROLLER_PID, HARNESS_PID:<tool> (single launch only), HARNESS_RESOLVED_ARTIFACT_PATH:onset/map, HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling}"],
+      "evidence_fields": [
+        "symbols{HARNESS_RUN_DIR, HARNESS_SOURCE_CACHE, HARNESS_REQUEST_HASH(:current), HARNESS_MANIFEST_HASH:current, HARNESS_GOAL_HASH:current, HARNESS_GOAL_HASH:authorized (harness-supplied variant goal via the controller digest), HARNESS_PLAN_HASH:current/vN, HARNESS_HASH:source/source_pre/source_expected_after, HARNESS_CONTROLLER_PID, HARNESS_PID:<tool> (single launch only), HARNESS_RESOLVED_ARTIFACT_PATH:onset/map, HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling}"
+      ],
       "missing_fields": [
-        {"field": "HARNESS_CANDIDATE_LABEL:*", "owner": "CAP-SHADOW"},
-        {"field": "HARNESS_GOAL_HASH (bare)", "owner": "contract owner (meaning unspecified)"},
-        {"field": "HARNESS_HASH:onset_after_mutation, HARNESS_HASH:onset_partial_at_interrupt", "owner": "CAP-FIXTURE-OP / CAP-MIDPROCESS"},
-        {"field": "HARNESS_HASH:source_expected_after", "owner": "run_case does not yet derive it from the case fixture operations"}
+        {"field": "HARNESS_CANDIDATE_LABEL:*, HARNESS_DECISION_FINGERPRINT:*", "owner": "CAP-SHADOW (read only through role_output.shadow_policy vocabularies / shadow cases)"},
+        {"field": "HARNESS_HASH:onset_after_mutation", "owner": "CAP-FIXTURE-OP (one case)"},
+        {"field": "HARNESS_HASH:onset_partial_at_interrupt", "owner": "CAP-MIDPROCESS (one case)"},
+        {"field": "HARNESS_HASH:source_expected_after for a case with a mutate_fixture entry", "owner": "CAP-FIXTURE-OP (records the expected hash when it applies the operation)"},
+        {"field": "HARNESS_RUN_ID (injection payloads)", "owner": "CAP-RESUME / CAP-FIXTURE-OP (payload symbols delivered by InjectionHooks; every case using it requires one of them)"}
       ],
-      "notes": "HARNESS_CONTROLLER_PID is the in-process controller (shared with the harness); open question in P0-P3-P7-P8.",
-      "tests": ["test_symbol_resolver_is_a_closed_native_table", "test_released_projection_maps_native_records_without_filling"],
+      "notes": "Bare HARNESS_GOAL_HASH is not a symbol: it is the prefix of run_evidence captured_identities.bindings (score.py: symbols starting with it), satisfied by :current/:authorized. HARNESS_CONTROLLER_PID is the in-process controller (shared with the harness); open question in P0-P3-P7-P8. A HARNESS_PID:<tool> with more than one launch stays unresolved (only probe bundles use those).",
+      "tests": [
+        "test_symbol_resolver_is_a_closed_native_table",
+        "test_released_projection_maps_native_records_without_filling",
+        "test_symbols_resolve_expected_source_and_definition_from_the_capture",
+        "test_receipts_carry_flags_resume_counters_and_the_initial_clock"
+      ],
       "reviewer": null,
-      "reviewed_at": null
+      "reviewed_at": null,
+      "mapping_choices_for_review": [
+        "HARNESS_HASH:source_expected_after = source_pre for a case whose injection_schedule has no mutate_fixture entry (harness expectation from the case itself); any mutate_fixture entry leaves it MISSING (CAP-FIXTURE-OP)",
+        "HARNESS_SOURCE_HASH:definition.* falls back to the controller's bound definition record when no review was captured (noted as definition_symbol_resolved_from)"
+      ]
     },
     "CAP-REASON-MAP": {
       "d4_gated": true,
@@ -119,13 +140,28 @@
         {"file": "tools/workflow/review_evidence.py", "line": 190, "symbol": "capture", "emits": "review-capture-NNN.json {payload, stdin, stdin_hash, input_hash, review_evidence envelope, dispatch_status}"},
         {"file": "tools/workflow/review_evidence.py", "line": 134, "symbol": "envelope", "emits": "request/goal/plan/manifest/source hashes, plan_claims, sources"},
         {"file": "tools/workflow/claim_gates.py", "line": 35, "symbol": "bind_definition_source", "emits": "D1 bound source under 'definition:agrhymet-sos-rolling'"},
-        {"file": "tools/workflow/runner.py", "line": 440, "symbol": "Controller.advance", "emits": "accepted_review + committed_transition after the durable REVIEW_APPROVED commit"}
+        {"file": "tools/workflow/runner.py", "line": 440, "symbol": "Controller.advance", "emits": "accepted_review + committed_transition after the durable REVIEW_APPROVED commit"},
+        {"file": "tools/workflow/runner.py", "line": 642, "symbol": "Controller.issue_active_approval", "emits": "native active approval record, active-approval-NNN.json and its active_approval dispatch event (event_seq['controller_trace.active_approval'])"}
       ],
-      "evidence_fields": ["harness_observations.review_snapshots[*] {reviewer_occurrence (receipt ordinal), request_hash, goal_hash, plan_hash, manifest_hash, source_hash, plan_claims, sources}", "harness_observations.review_dispatch_failures (failed dispatches; never snapshots or receipts)", "controller_trace.active_approval"],
-      "missing_fields": [],
-      "tests": ["test_review_snapshots_one_per_reviewer_receipt_with_d1_source", "test_failed_reviewer_dispatch_is_reported_never_a_snapshot_or_receipt"],
+      "evidence_fields": [
+        "harness_observations.review_snapshots[*] {reviewer_occurrence (receipt ordinal), request_hash, goal_hash, plan_hash, manifest_hash, source_hash, plan_claims, sources}",
+        "harness_observations.review_dispatch_failures (failed dispatches; never snapshots or receipts)",
+        "controller_trace.active_approval {approval_id (native), verdict, reviewer_occurrence, reviewer_session_id, five hashes, binding_hash, replaces?}, cross-checked against the accepted capture, the committed transition and the reviewer receipt",
+        "one reviewer_occurrence numbering (receipt ordinal) across review_snapshots, claim_checks, active_approval and invocation_receipts"
+      ],
+      "missing_fields": [
+        {"field": "symbols['HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling'] (resolution 'from the captured source')", "owner": "CAP-SYMBOLS (resolved there from the captured snapshot source on this branch; not produced by capture_bound_sources)"}
+      ],
+      "tests": [
+        "test_review_snapshots_one_per_reviewer_receipt_with_d1_source",
+        "test_failed_reviewer_dispatch_is_reported_never_a_snapshot_or_receipt",
+        "test_active_approval_is_the_native_record",
+        "test_failed_then_returned_reviewer_is_renumbered_to_the_receipt_ordinal",
+        "test_claim_checks_and_evidence_checker_project_one_reviewer_numbering"
+      ],
       "reviewer": null,
-      "reviewed_at": null
+      "reviewed_at": null,
+      "notes": "Frozen manifest method name is record_review_snapshots; this adapter's method is capture_bound_sources (the frozen runner reads capability ids only). snapshot() trusts the envelope's request/goal/plan hashes (hash-pinned capture file); the diagnostic path recomputes them."
     },
     "CAP-RUN-PROVENANCE": {
       "d4_gated": true,
@@ -162,12 +198,26 @@
       "method": "seed_ledger",
       "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "tools/workflow/contracts.py", "line": 166, "symbol": "request_goal", "emits": "validates the seeded operator ledger: user-only authorization, verbatim quotes, goal_hash, CR-02 unattributed nulls"}
+        {"file": "tools/workflow/contracts.py", "line": 166, "symbol": "request_goal", "emits": "validates the seeded operator ledger: user-only authorization, verbatim quotes, goal_hash, CR-02 unattributed nulls"},
+        {"file": "tools/workflow/runner.py", "line": 1946, "symbol": "Controller.advance('AUTHORIZED', request.authorization)", "emits": "the AUTHORIZED transition and its dispatch event: the authorization decision the controller acted on"}
       ],
-      "evidence_fields": ["workflow.request/1 from source_ledger + request_delta", "harness seeded-ledger.json {request, derivation, ledger_records}", "controller_trace.authorizations (from the observed request)"],
+      "evidence_fields": [
+        "workflow.request/1 from source_ledger + request_delta",
+        "harness seeded-ledger.json {request, derivation, ledger_records}",
+        "controller_trace.authorizations: one record per AUTHORIZED transition (evidence must equal the request authorization) {source, speaker, goal_hash, message_id, quote, authorized_at}; [] when a finished run never authorized; MISSING when the run did not finish"
+      ],
       "missing_fields": [],
-      "mapping_choices_for_review": ["quote rule: whole scenario message per attributed field; null values unattributed except PROHIBITION_FIELDS (baseline); derivation.flagged_for_review=true"],
-      "tests": ["test_ledger_seed_applies_the_delta_once_and_refuses_unsupported_inputs", "test_data_profile_run_with_null_title_releases_without_a_map"],
+      "mapping_choices_for_review": [
+        "quote rule: whole scenario message per attributed field; null values unattributed except PROHIBITION_FIELDS (baseline); derivation.flagged_for_review=true",
+        "authorizations source = operator_ledger: the AUTHORIZED transition evidence is exactly the captured request's authorization record (the seeded operator source ledger, validated by request_goal); any other evidence refuses the projection",
+        "operator-ledger resume authorizations are not authorizations records (no goal_hash): they are controller_trace.operator_actions / resume"
+      ],
+      "tests": [
+        "test_ledger_seed_applies_the_delta_once_and_refuses_unsupported_inputs",
+        "test_data_profile_run_with_null_title_releases_without_a_map",
+        "test_authorizations_are_the_controllers_decisions",
+        "test_unfinished_run_keeps_authorizations_missing"
+      ],
       "reviewer": null,
       "reviewed_at": null
     },
@@ -217,6 +267,100 @@
       "missing_fields": [{"field": "filesystem_snapshot.created_paths", "owner": "container harness (MISSING without the observations input, or when the harness reports it missing, e.g. tracer death or io_uring)"}],
       "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). The value is carried when supplied, but the capability is not declared: no method is implemented and status stays NOT_DECLARED until the traced harness is reviewed.",
       "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-EVIDENCE-CHECKER": {
+      "d4_gated": true,
+      "method": "invoke_evidence_checker",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/runner.py", "line": 1330, "symbol": "Controller.claim_check", "emits": "after gate 1 PASS with judged claims: ask('evidence_checker', checker_payload) before any reviewer payload; receipt verdict = worst ruled verdict, receipt occurrence"},
+        {"file": "tools/workflow/claim_gates.py", "line": 193, "symbol": "checker_payload / validate_checker_output / worst", "emits": "detached judged-claims payload; output bound to plan_hash, every judged claim ruled once in SUPPORTED|INSUFFICIENT|CONTRADICTED"},
+        {"file": "tools/workflow/agents.py", "line": 212, "symbol": "Roles.ask session check", "emits": "a reused session id is refused: each invocation is its own session"},
+        {"file": "tools/workflow/runner.py", "line": 721, "symbol": "Controller.ask", "emits": "role-NNN-evidence_checker.json, dispatch_returned clock"},
+        {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "evidence_checker_report", "emits": "receipts, role_output.evidence_checker, own_session, placement (checker < claim check < presented reviewer)"}
+      ],
+      "evidence_fields": [
+        "invocation_receipts[role=evidence_checker] {occurrence (receipt ordinal), session_id, phase, seq, verdict}",
+        "role_output.evidence_checker[k] verbatim {plan_hash, verdicts[{claim_id, verdict, reasoning}]}",
+        "controller_trace.claim_checks[*].evidence_checker_occurrence linkage (checked: plan_hash, per-claim checker_verdict, clock order)"
+      ],
+      "missing_fields": [
+        {"field": "all fields when claim gates are disabled (no definition source)", "owner": "harness configuration (run_case always binds the definition source); reported MISSING, never []"}
+      ],
+      "notes": "Live or substituted checker output arrives through the role transport or after_role hooks (CAP-LIVE-ROLE / CAP-ROLE-SUBSTITUTE); this method projects what the controller recorded. No checker runs when gate 1 fails or every claim is derivable (evidence_checker_occurrence null). kong_roles / relay_roles session uniqueness not re-verified here.",
+      "mapping_choices_for_review": ["own_session = the receipt's session id appears on no other receipt"],
+      "tests": [
+        "test_claim_checks_and_evidence_checker_project_one_reviewer_numbering",
+        "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
+        "test_tampered_claim_check_or_operator_record_refuses_projection"
+      ],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-PRE-REVIEW-GATES": {
+      "d4_gated": true,
+      "method": "record_claim_checks",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/claim_gates.py", "line": 246, "symbol": "build_record", "emits": "exactly the v2_4.claim_checks field set: citation gate, controller computation of derivable claims, checker verdicts, decision"},
+        {"file": "tools/workflow/runner.py", "line": 1330, "symbol": "Controller.claim_check", "emits": "claim-check-NNN.json, context.review_evidence.claim_checks, claim_check dispatch event {index, plan_hash, decision, record_hash}; reviewer_occurrence = capture counter + 1 when presented"},
+        {"file": "tools/workflow/review_evidence.py", "line": 190, "symbol": "capture", "emits": "review-capture-NNN.json per reviewer dispatch attempt (native counter, RETURNED|FAILED)"},
+        {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "claim_checks / reviewer_attempts", "emits": "verified projection; native reviewer attempt renumbered to the reviewer receipt ordinal"}
+      ],
+      "evidence_fields": [
+        "controller_trace.claim_checks[*] {index, plan_hash, manifest_hash, source_hash, citation_gate, evidence_checker_occurrence, claims[{claim_id, text, citations, derivable, basis, citation_verdict, checker_verdict, computed, verdict}], decision, reviewer_occurrence (receipt ordinal), native_reviewer_attempt}",
+        "event_seq['controller_trace.claim_checks[index=<i>]'] = the claim_check dispatch event"
+      ],
+      "missing_fields": [
+        {"field": "controller_trace.claim_checks when claim gates are disabled", "owner": "harness configuration (run_case always binds the definition source); MISSING, never []"}
+      ],
+      "notes": "citation_gate / citation_verdict are controller labels, recorded but never evidence (v2.5 UC-14-resolution); a note says so in every projection that carries claim checks.",
+      "mapping_choices_for_review": [
+        "reviewer_occurrence = receipt ordinal of the review capture's returned receipt (one numbering with snapshots, active_approval and receipts); native value kept as native_reviewer_attempt",
+        "presented to a reviewer dispatch that returned no receipt: reviewer_occurrence null + reviewer_dispatch_status + a MISSING entry for that path (no receipt-ordinal occurrence exists; copying the native attempt would collide with a later returned review). The frozen shared pre-review assertions FAIL a presented record without an occurrence; the run itself stops at the review gate"
+      ],
+      "tests": [
+        "test_claim_checks_and_evidence_checker_project_one_reviewer_numbering",
+        "test_failed_then_returned_reviewer_is_renumbered_to_the_receipt_ordinal",
+        "test_failed_reviewer_dispatch_is_reported_never_a_snapshot_or_receipt",
+        "test_claim_gate_block_projects_a_routed_record_and_no_review",
+        "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
+        "test_tampered_claim_check_or_operator_record_refuses_projection"
+      ],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-OPERATOR-ACTIONS": {
+      "d4_gated": true,
+      "method": "record_operator_actions",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/operator_ledger.py", "line": 91, "symbol": "open_channel", "emits": "run-scoped ledger created empty by the controller; context.operator_actions = [] (observed empty)"},
+        {"file": "tools/workflow/operator_ledger.py", "line": 202, "symbol": "_decide / consult", "emits": "one decision per complete ledger record at each wait boundary: accepted only for source operator_ledger + speaker user + run_id + applicable action"},
+        {"file": "tools/workflow/operator_ledger.py", "line": 160, "symbol": "record_claim (via submit_transition_request)", "emits": "role_channel claims, always rejected"},
+        {"file": "tools/workflow/operator_ledger.py", "line": 146, "symbol": "_commit_action", "emits": "operator-action-NNN.json, operator_action dispatch event keyed by record_id, checkpoint"},
+        {"file": "adapter_support/weather_adapter.py", "line": null, "symbol": "WeatherAdapter.run_case", "emits": "passes operator_ledger_path = harness/operator-ledger.jsonl so the controller opens its channel"},
+        {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "operator_actions / channel_note", "emits": "verified projection (file, event, decision clock), consultation boundaries, unconsumed ledger records"}
+      ],
+      "evidence_fields": [
+        "controller_trace.operator_actions[*] {record_id, source, speaker, action, accepted, planner_occurrence (accepted replan: the planner receipt ordinal it dispatches), reasons, boundary}",
+        "event_seq['controller_trace.operator_actions[record_id=<id>]'] = the operator_action dispatch event"
+      ],
+      "missing_fields": [
+        {"field": "controller_trace.operator_actions when no channel was opened", "owner": "harness configuration (run_case always opens it); MISSING, never []"}
+      ],
+      "notes": "Records the controller cannot attribute (no or duplicate record_id) are channel ledger_rejections, counted in the projection note, not contract records. No artifact_text claim detector exists: the controller never acts on operator claims in artifact text, so there is nothing to record (no frozen case reads source=artifact_text). role_channel records exist only through submit_transition_request (CAP-TRANSITION-REQUEST). A null speaker/action recorded by the controller is kept and reported as a MISSING path.",
+      "mapping_choices_for_review": [
+        "records appended to the ledger but never consulted by run end are not operator actions; counted as unconsumed_complete_records in notes"
+      ],
+      "tests": [
+        "test_operator_actions_from_a_real_ledger_answer",
+        "test_released_projection_maps_native_records_without_filling",
+        "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
+        "test_tampered_claim_check_or_operator_record_refuses_projection"
+      ],
       "reviewer": null,
       "reviewed_at": null
     },

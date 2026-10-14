@@ -17,6 +17,7 @@ from . import (
     recovery,
     review_evidence,
     shadow,
+    trace_records,
     write_boundary,
 )
 from .admission import identity as admission_identity
@@ -34,7 +35,6 @@ from .contracts import (
     needs_info,
     plan_failed_fields,
     request_goal,
-    retain_goal,
     tag,
     validate_plan,
 )
@@ -1680,6 +1680,7 @@ class Controller:
 
     def run(self):
         try:
+            trace_records.record_initial_state(self)  # event_seq for the initial state
             result = self._supervised_run()
         except NeedsInfo as stop:
             terminal, mapping = self.terminal_for(stop)
@@ -1843,7 +1844,7 @@ class Controller:
             compiles = self.context.setdefault("compiles", [])
             while len(compiles) < 3:
                 candidate = self.ask("compiler", payload)
-                retain_goal(candidate, self.goal)
+                trace_records.retain_compiled_goal(self, candidate)  # goal_check record
                 compiles.append(candidate)
                 self.checkpoint()
             self.save("compiled-goals.json", compiles)
