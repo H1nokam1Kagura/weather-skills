@@ -9,8 +9,11 @@ file; the frozen score.py validates the projected evidence.
 
 import copy
 import hashlib
+import io
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -66,6 +69,13 @@ MAP_GOAL = {
 }
 DATA_GOAL = {**MAP_GOAL, "task": "onset_data", "title": None}
 TEST_FREE_RAM_GIB = 16.0
+CONFINED_VARS = (
+    "TMPDIR",
+    "MPLCONFIGDIR",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+)
 TOOL_SCRIPT = """
 import json, pathlib, sys
 argv = sys.argv[1:]
@@ -145,6 +155,8 @@ class RoleCli:
 
     def __init__(self, goal, planner=None, reviewer=None, checker=None, fail_roles=()):
         self.goal, self.calls = goal, []
+        # The controller process's own temp/cache locations at each (in-process) role call.
+        self.process_env = []
         self.planner, self.reviewer, self.checker = planner, reviewer, checker
         self.fail_roles = set(fail_roles)
 
@@ -152,6 +164,9 @@ class RoleCli:
         role = role_of(command)
         payload = json.loads(stdin)
         self.calls.append(role)
+        self.process_env.append(
+            {"tempdir": tempfile.gettempdir(), **{k: os.environ.get(k) for k in CONFINED_VARS}}
+        )
         if role in self.fail_roles:
             return {"exit_code": 1, "stderr": "stub transport failure", "stdout": ""}
         if role == "compiler":
@@ -294,7 +309,12 @@ class Lab:
             "presented_fetch_version": "0.0.2",
             "definition_source": self.definition,
             "repo": self.repo,
-            "roles_factory": lambda run_dir: agents.Roles(stub, run_dir, budget=5),
+            # The production layout (tools/workflow/__main__.py): the role workspace is
+            # run/role-context, so Roles' child scratch (workspace.parent / "scratch") is
+            # run/scratch, inside HARNESS_RUN_DIR.
+            "roles_factory": lambda run_dir: agents.Roles(
+                stub, Path(run_dir) / "role-context", budget=5
+            ),
             # A fixed injected reading keeps the synthetic runs independent of host free RAM;
             # the launch checks record reading_source "injected" (never presented as observed).
             "processes_factory": lambda run_dir: Processes(
@@ -303,19 +323,46 @@ class Lab:
             "input_supplement": {"supplement_id": "test-only", "sha256": None},
         }
 
-    def execute(self, goal, case, scenario=None, **cli):
+    def execute(self, goal, case, scenario=None, prestaged=False, **cli):
+        """prestaged: the container case route. The fixture is staged first (as the untraced
+        ``case_driver prepare`` does, JSON round trip included) and run_case gets a harness
+        channel; every path created during run_case is recorded in ``created``."""
         stub = RoleCli(goal, **cli)
         profile = self.profile(goal, case, stub, scenario)
+        record = created = None
+        if prestaged:
+            prepared = WeatherAdapter().prepare_fixture(
+                case,
+                profile["case_root"],
+                source=profile["source"],
+                generator_provenance=profile["generator_provenance"],
+                presented_fetch_version=profile["presented_fetch_version"],
+            )
+            profile["prepared_fixture"] = json.loads(json.dumps(prepared))
+            channel = profile["projection_inputs_channel"] = io.StringIO()
+            before = snapshot(self.root)
         evidence = WeatherAdapter(enable_run_case=True).run_case(case, profile)
         harness = Path(profile["case_root"]) / "harness"
-        report = json.loads((harness / "evidence-projection.json").read_text(encoding="utf-8"))
+        if prestaged:
+            created = sorted(snapshot(self.root) - before)
+            record = json.loads(channel.getvalue())
+            report = record["harness_files"]["evidence-projection.json"]
+        else:
+            report = json.loads((harness / "evidence-projection.json").read_text("utf-8"))
         return SimpleNamespace(
             evidence=evidence,
             report=report,
             stub=stub,
             run=Path(profile["case_root"]) / "run",
             harness=harness,
+            record=record,
+            created=created,
         )
+
+
+def snapshot(root):
+    root = Path(root).resolve()
+    return {str(p) for p in root.rglob("*")}
 
 
 @pytest.fixture(scope="module")
@@ -338,6 +385,11 @@ def lab(tmp_path_factory):
 @pytest.fixture(scope="module")
 def released(lab):
     return lab.execute(MAP_GOAL, test_case(MAP_GOAL, case_id="RELEASED-MAP"))
+
+
+@pytest.fixture(scope="module")
+def confined(lab):
+    return lab.execute(MAP_GOAL, test_case(MAP_GOAL, case_id="CONFINED-MAP"), prestaged=True)
 
 
 @pytest.fixture(scope="module")
@@ -1031,8 +1083,103 @@ def test_run_case_persists_projection_inputs_for_the_post_trace_projection(relea
     assert refused["status"] == "ERROR" and "ForeignInputs" in refused["error"]
 
 
+def frozen_all_under(frozen):
+    """The frozen write-confinement predicate (identical in all 66 v2.7 cases)."""
+    preds = {
+        json.dumps(a["predicate"], sort_keys=True)
+        for c in frozen["cases"]
+        for a in c["assertions"]
+        if isinstance(a.get("predicate"), dict) and a["predicate"].get("operator") == "all_under"
+    }
+    (pred,) = preds
+    return json.loads(pred)
+
+
+def test_prestaged_channel_run_creates_paths_only_under_the_run_dir(confined):
+    assert confined.evidence["controller_trace"]["final_state"] == "RELEASED"
+    run = confined.run.resolve()
+    outside = [p for p in confined.created if not Path(p).is_relative_to(run)]
+    assert outside == []  # no source/, harness/*.json, or anything else outside run/
+    assert str(run / "scratch") in confined.created
+    assert sorted(p.name for p in confined.harness.iterdir()) == ["manifest.json"]
+    # The bookkeeping left through the harness channel instead of harness/*.json.
+    record = confined.record
+    assert set(record["harness_files"]) == {
+        "seeded-ledger.json",
+        "output-tags.json",
+        "evidence-projection.json",
+    }
+    assert record["run_provenance"]["outputs_tagged"] is True
+    report = record["harness_files"]["evidence-projection.json"]
+    assert report["harness"]["fixture_staged"] == "pre-staged"
+    assert confined.evidence["harness_observations"]["run_provenance"]["outputs_tagged"] is True
+    # Controller-native confinement: the controller process itself used run/scratch.
+    assert confined.stub.process_env
+    for seen in confined.stub.process_env:
+        assert Path(seen["tempdir"]) == run / "scratch"
+        for key in CONFINED_VARS:
+            assert Path(seen[key]).is_relative_to(run / "scratch"), key
+    assert Path(tempfile.gettempdir()) != run / "scratch"  # restored after the run
+
+
+def test_all_under_passes_when_every_write_is_under_the_run_dir(confined, frozen, tmp_path):
+    adapter = WeatherAdapter()
+    base = adapter.capture_evidence(confined.run)
+    pred = frozen_all_under(frozen)
+    assert pred["operand"] == "HARNESS_RUN_DIR" and pred["empty_is_exhaustive"] is True
+    created = list(confined.created)
+    record = harness_observations(base, **{"filesystem_snapshot.created_paths": created})
+    path = write_observations(tmp_path, record, "confined.json")
+    evidence = adapter.capture_evidence(confined.run, {"observations_path": path})["evidence"]
+    assert score.evaluate(pred, evidence) == score.PASS
+    verdict = adapter.assert_exhaustive_write_capture(confined.run, {"observations_path": path})
+    assert verdict["status"] == "EXHAUSTIVE"
+    # One harness-bookkeeping file outside run/ (the old in-trace layout) fails the case.
+    leaked = created + [str(confined.harness.resolve() / "seeded-ledger.json")]
+    record = harness_observations(base, **{"filesystem_snapshot.created_paths": leaked})
+    path = write_observations(tmp_path, record, "leaked.json")
+    evidence = adapter.capture_evidence(confined.run, {"observations_path": path})["evidence"]
+    assert score.evaluate(pred, evidence) == score.FAIL
+
+
+def test_prepared_fixture_is_reverified_never_restaged(tmp_path):
+    adapter = WeatherAdapter()
+    case = {"id": "PREP-1"}
+
+    def prepared(name):
+        record = adapter.prepare_fixture(
+            case,
+            tmp_path / name,
+            source=write_source(tmp_path / f"gen-{name}", MAP_GOAL),
+            generator_provenance=GENERATOR,
+            presented_fetch_version="0.0.2",
+        )
+        return json.loads(json.dumps(record))
+
+    good = prepared("good")
+    assert adapter.adopt_prepared_fixture(case, good, tmp_path / "good") == good
+    with pytest.raises(AdapterRefusal, match="another case"):
+        adapter.adopt_prepared_fixture({"id": "OTHER"}, good)
+    with pytest.raises(AdapterRefusal, match="case_root"):
+        adapter.adopt_prepared_fixture(case, good, tmp_path / "elsewhere")
+    with pytest.raises(AdapterRefusal, match="schema"):
+        adapter.adopt_prepared_fixture(case, {**good, "schema": "other/1"})
+    used = prepared("used")
+    (Path(used["run"]) / "leftover.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(AdapterRefusal, match="must exist and be empty"):
+        adapter.adopt_prepared_fixture(case, used)
+    tampered = prepared("tampered")
+    first = next(p for p in sorted(Path(tampered["source"]).rglob("*")) if p.is_file())
+    first.write_bytes(first.read_bytes() + b"\0")
+    with pytest.raises(AdapterRefusal, match="changed since staging"):
+        adapter.adopt_prepared_fixture(case, tampered)
+    edited = prepared("edited")
+    edited["manifest"] = {**edited["manifest"], "tag": "production"}
+    with pytest.raises(AdapterRefusal, match="manifest differs"):
+        adapter.adopt_prepared_fixture(case, edited)
+
+
 def test_projection_inputs_go_to_the_harness_channel_not_a_created_path(tmp_path):
-    import io
 
     channel, harness_dir = io.StringIO(), tmp_path / "harness"
     harness_dir.mkdir()

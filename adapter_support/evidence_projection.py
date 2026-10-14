@@ -1433,8 +1433,10 @@ class HarnessLaunchObserver:
 # --------------------------------------------------------------------------- run provenance
 
 
-def tag_outputs(run_dir, harness_dir, artifact_paths):
-    """Harness-side output tags (UC-12), written only to the harness directory."""
+def tag_outputs(run_dir, harness_dir, artifact_paths, write=True):
+    """Harness-side output tags (UC-12), written only to the harness directory. ``write``
+    False returns the record without creating a file (traced container route: the record
+    leaves through a harness-opened descriptor instead)."""
     outputs = [Path(run_dir) / "result.json"] + [Path(p) for p in artifact_paths]
     tagged = []
     for path in outputs:
@@ -1447,13 +1449,15 @@ def tag_outputs(run_dir, harness_dir, artifact_paths):
                 {"path": str(path), "content_hash": catalog.tree_hash(path), "tag": "synthetic"}
             )
     record = {"schema": "weather-adapter.output-tags/1", "outputs": tagged}
+    if not write:
+        return record
     target = Path(harness_dir) / "output-tags.json"
     with target.open("x", encoding="utf-8") as stream:
         json.dump(record, stream, indent=2)
     return record
 
 
-def run_provenance(run_dir, harness_dir, markers):
+def run_provenance(run_dir, harness_dir, markers, tags=None):
     """EC:v2_4.run_provenance under owner ruling D3, from harness records and a scan.
 
     outputs_tagged: the harness tag file covers every collected output with a matching hash
@@ -1465,7 +1469,8 @@ def run_provenance(run_dir, harness_dir, markers):
     """
     harness = Path(harness_dir)
     manifest = harness / "manifest.json"
-    tags = _read_json(harness / "output-tags.json")
+    if tags is None:  # ``tags``: the tag record itself when it was not written to a file
+        tags = _read_json(harness / "output-tags.json")
     outputs_tagged = bool(tags["outputs"]) and all(
         (file_sha256(o["path"]) if Path(o["path"]).is_file() else catalog.tree_hash(o["path"]))
         == o["content_hash"]

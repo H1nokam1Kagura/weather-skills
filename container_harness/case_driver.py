@@ -6,12 +6,15 @@ usage (inside the harness image, cwd /opt/ctl):
         missing capability => NOT_IMPLEMENTED, never attempted. Prints ADMISSION.json to stdout
         (no bind mounts: the host captures stdout). Never executes a case.
     python -m container_harness.case_driver stage CASE_ID /work      (untraced, uid 1000)
-        Generates the synthetic fixture with the pinned generator into /work/gen; writes nothing
-        into the case root (the adapter's prepare_fixture creates it inside the traced run).
+        Generates the synthetic fixture with the pinned generator into /work/gen.
+    python -m container_harness.case_driver prepare CASE_ID /work    (untraced, uid 1000)
+        The adapter's prepare_fixture stages the case root (source/, harness/manifest.json,
+        empty run/) before the trace; record in /work/prepared-fixture.json.
     python -m container_harness.case_driver run CASE_ID /work        (traced root, uid 1000)
         THE traced controller process: the frozen runner dispatches the one case to
-        WeatherAdapter(enable_run_case=True).run_case, which re-checks admission, stages the
-        owned fixture, runs the real Controller and projects what it recorded. The runner record
+        WeatherAdapter(enable_run_case=True).run_case, which re-checks admission, re-verifies
+        the pre-staged fixture, runs the real Controller and projects what it recorded; it
+        creates nothing outside the run directory. The runner record
         goes to fd 3 and run_case's projection inputs to fd 4 (both opened by the root entry
         shell onto /harness-out; never a traced path, so neither is a created path).
     python -m container_harness.case_driver score CASE_ID RECORD EVIDENCE PROJECTION OUT
@@ -267,6 +270,49 @@ def stage(case_id, work):
     return 0
 
 
+PREPARED_NAME = "prepared-fixture.json"
+
+
+def _generator_provenance(spec, pins):
+    return {
+        "synthetic": True,
+        "generator": "simkit.fixtures.onset_synth",
+        "generator_sha256": pins["fixture_generator"]["sha256"],
+        "supplement_id": spec["supplement_id"],
+        "seed": SEED,
+    }
+
+
+def _fetch_version():
+    skill = (CTL / "skills/chirps-fetch/SKILL.md").read_text(encoding="utf-8")
+    return re.search(r'^\s*version:\s*"([^"]+)"', skill, re.M).group(1)
+
+
+def prepare(case_id, work):
+    """Untraced (uid 1000, after ``stage``): the adapter's own prepare_fixture stages the case
+    root (source/source.zarr, harness/manifest.json, empty run/) BEFORE the trace starts, so
+    none of it is a created path of the traced run (frozen all_under HARNESS_RUN_DIR). The
+    record goes to /work/prepared-fixture.json; the traced ``run`` passes it to run_case,
+    which re-verifies it (adopt_prepared_fixture) and stages nothing."""
+    work = Path(work)
+    root, _ = frozen_root()
+    from adapter_support.weather_adapter import WeatherAdapter
+
+    cases, _ratified = load_cases(root)
+    case = next(c for c in cases if c["id"] == case_id)
+    spec, pins = _pins()
+    prepared = WeatherAdapter(enable_run_case=True).prepare_fixture(
+        case,
+        work / "case",
+        source=work / "gen" / "fixture-nc" / "precip.nc",
+        generator_provenance=_generator_provenance(spec, pins),
+        presented_fetch_version=_fetch_version(),
+    )
+    (work / PREPARED_NAME).write_text(json.dumps(prepared, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps({k: prepared[k] for k in ("case_id", "case_root", "run", "source_pre")}))
+    return 0
+
+
 def _record_channel():
     try:
         return os.fdopen(3, "w", encoding="utf-8")
@@ -321,22 +367,25 @@ def run(case_id, work):
             raise RuntimeError(
                 f"{BLOCKED_SUBST}: adapter has no {SUBST_FACTORY}(case, goal, run_dir)"
             )
-        skill = (CTL / "skills/chirps-fetch/SKILL.md").read_text(encoding="utf-8")
-        version = re.search(r'^\s*version:\s*"([^"]+)"', skill, re.M).group(1)
         goal = adapter.select_profile(case, document)["goal"]
+        prepared_path = work / PREPARED_NAME
+        prepared = (
+            json.loads(prepared_path.read_text(encoding="utf-8"))
+            if prepared_path.is_file()
+            else None
+        )
+        if prepared is None and inputs_channel is not None:
+            # In the traced container the fixture must be staged before the trace; staging
+            # here would put source/ and harness/ in created_paths, outside HARNESS_RUN_DIR.
+            raise RuntimeError("no pre-staged fixture (case_driver prepare did not run)")
         profile = {
             "profile_document": document,
             "source_ledger": document["reference_fixture"]["source_ledger"],
             "case_root": work / "case",
             "source": work / "gen" / "fixture-nc" / "precip.nc",
-            "generator_provenance": {
-                "synthetic": True,
-                "generator": "simkit.fixtures.onset_synth",
-                "generator_sha256": pins["fixture_generator"]["sha256"],
-                "supplement_id": spec["supplement_id"],
-                "seed": SEED,
-            },
-            "presented_fetch_version": version,
+            "generator_provenance": _generator_provenance(spec, pins),
+            "presented_fetch_version": _fetch_version(),
+            "prepared_fixture": prepared,
             # No reference definition text ships in the controller repo: passed as absent, so
             # definition-bound review evidence stays MISSING rather than filled.
             "definition_source": None,
@@ -370,6 +419,7 @@ def run(case_id, work):
         }
     run_dir = work / "case" / "run"
     record["controller_ran"] = (run_dir / "checkpoint.json").is_file()
+    record["fixture_prestaged"] = (work / PREPARED_NAME).is_file()
     out.write(json.dumps(record, default=str))
     out.flush()
     return 0
@@ -455,6 +505,8 @@ def main(argv):
         return 0
     if cmd == "stage":
         return stage(argv[2], argv[3])
+    if cmd == "prepare":
+        return prepare(argv[2], argv[3])
     if cmd == "run":
         return run(argv[2], argv[3])
     if cmd == "score":
