@@ -17,7 +17,13 @@ from pathlib import Path
 import pytest
 
 from tools.workflow import agents, claim_gates, review_evidence, runner
-from tools.workflow.contracts import Refused, digest, expected_plan, plan_version_hash
+from tools.workflow.contracts import (
+    Refused,
+    digest,
+    expected_plan,
+    plan_version_hash,
+    validate_plan,
+)
 from tools.workflow.evaluation import FixtureRoles
 from tools.workflow.tests.test_workflow import GOAL, request
 
@@ -458,20 +464,27 @@ def test_claims_only_repair_is_a_new_plan_version_everywhere(tmp_path, monkeypat
     assert c.current_binding() == c.binding
 
 
+def output_path_planner(payload, n):
+    """E04-P1-INJ's planner patch: an output_path outside the run directory."""
+    value = default_planner(payload, n)
+    value["plan"]["steps"][0]["args"]["output_path"] = "../shared_outputs/onset.nc"
+    return value
+
+
 def test_refused_planner_plan_is_recorded_once_and_names_the_argument(tmp_path, monkeypatch):
-    """E04-P1-INJ: a planner plan refused while its envelope is unpacked still leaves exactly
-    one FAIL plan validation, naming the offending argument; no repair, checker or reviewer."""
+    """E04-P1-INJ (max_repairs 0, as frozen): a planner plan refused while its envelope is
+    unpacked still leaves exactly one FAIL plan validation, naming the offending argument; the
+    original refusal stands (plan_validation, never repair_exhausted); no repair, checker or
+    reviewer."""
 
-    def planner(payload, n):
-        value = default_planner(payload, n)
-        value["plan"]["steps"][0]["args"]["output_path"] = "../shared_outputs/onset.nc"
-        return value
-
+    planner = output_path_planner
     stub = Stub(planner=planner)
-    c = make_controller(tmp_path, monkeypatch, stub)
+    c = make_controller(tmp_path, monkeypatch, stub, max_repairs=0)
     with pytest.raises(Refused) as caught:
         c._run()
     assert caught.value.gate == "plan_validation"
+    assert "bounded plan repair exhausted" not in str(caught.value)
+    assert c.repairs_used == 0 and "repair_attempts" not in c.context
     (record,) = c.context["plan_validations"]
     assert record["verdict"] == "FAIL" and record["parser_accepted"] is False
     assert record["failed_fields"] == ["plan.steps[0].args.output_path"]
@@ -482,6 +495,39 @@ def test_refused_planner_plan_is_recorded_once_and_names_the_argument(tmp_path, 
     assert c.state == "GOAL_CHECKED"
     assert [call["role"] for call in stub.calls].count("planner") == 1
     assert not {"repairer", "evidence_checker", "reviewer"} & {r["role"] for r in stub.calls}
+
+
+def refusal(plan):
+    """The refusal validate_plan raises for ``plan`` against the goal."""
+    with pytest.raises(Refused) as caught:
+        validate_plan(plan, GOAL)
+    return caught.value
+
+
+def test_refused_planner_plan_routes_to_repair_within_the_allowance(tmp_path, monkeypatch):
+    """E07-P1 spec basis: plan validation may trigger repair. A planner plan refused by
+    validation (with review evidence on) is sent to the repairer once, within max_repairs 1;
+    the refused plan's FAIL is recorded once, the repaired plan is validated and proceeds."""
+    stub = Stub(planner=output_path_planner)
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    assert stub.count("planner") == 1 and stub.count("repairer") == 1
+    (repaired,) = [call for call in stub.calls if call["role"] == "repairer"]
+    refused = output_path_planner({}, 1)
+    assert repaired["payload"]["prior_plan"] == refused["plan"]
+    assert repaired["payload"]["failure"] == str(refusal(refused["plan"]))
+    assert c.repairs_used == 1
+    assert [a["status"] for a in c.context["repair_attempts"]] == ["returned"]
+    assert c.context["repair_attempts"][0]["trigger_gate"] == "plan_validation"
+    first, second = c.context["plan_validations"]
+    assert first["verdict"] == "FAIL" and first["source"] == {"role": "planner", "occurrence": 1}
+    assert first["failed_fields"] == ["plan.steps[0].args.output_path"]
+    assert first["plan_hash"] == plan_version_hash(refused["plan"], refused["claims"])
+    assert second["verdict"] == "PASS" and second["source"]["role"] == "repairer"
+    assert [v["role"] for v in c.context["plan_versions"]] == ["repairer"]
+    assert c.plan == expected_plan(GOAL)
+    assert stub.count("reviewer") == 1
 
 
 def test_refused_planner_envelope_is_not_a_plan_validation(tmp_path, monkeypatch):
