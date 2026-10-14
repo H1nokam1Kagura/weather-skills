@@ -68,6 +68,9 @@ NATIVE_ROLE = {
 # substitutes it at after_role and the contract wraps it (role_output.verifier[k].
 # returned_output), so no mapping is claimed. shadow_policy/router: no baseline exists.
 SUBSTITUTABLE_SELECTORS = frozenset(NATIVE_ROLE) - {"verifier"}
+# CAP-SHADOW (adapter_support/shadow_projection.py): a substituted shadow_policy answers with the
+# decision its ShadowDriver armed at the controller's after_transition emit (no baseline).
+SHADOW_ROLE = "shadow_policy"
 # accept_review_output (runner.py) accepts exactly this frozen reviewer schema in review
 # evidence mode, so a frozen replacement is already the native shape.
 REVIEWER_KEYS = frozenset(
@@ -468,7 +471,7 @@ class SubstitutedRoles:
             raise AdapterRefusal(
                 "live + substituted roles in one run need a combining transport (not built)"
             )
-        unknown = sorted(set(roles["substituted"]) - set(NATIVE_ROLE))
+        unknown = sorted(set(roles["substituted"]) - set(NATIVE_ROLE) - {SHADOW_ROLE})
         if unknown:
             raise AdapterRefusal(f"no frozen baseline for substituted roles {unknown}")
         compilers = set(roles["substituted"]) & set(COMPILER_SELECTORS)
@@ -477,7 +480,8 @@ class SubstitutedRoles:
         self.case_id = case["id"]
         self.pair_id = pair_of(case)
         self.goal = copy.deepcopy(goal)
-        self.allowed = frozenset(NATIVE_ROLE[r] for r in roles["substituted"])
+        self.allowed = frozenset(NATIVE_ROLE.get(r, r) for r in roles["substituted"])
+        self.shadow = None  # CAP-SHADOW: shadow_projection.ShadowDriver, attached by run_case
         self.receipts = []
         self.sessions = set()
         self.spent = 0.0
@@ -525,6 +529,8 @@ class SubstitutedRoles:
                 "system_prompt": NO_SYSTEM_PROMPT,
                 "system_prompt_hash": review_evidence.text_hash(NO_SYSTEM_PROMPT),
             }
+        if role == SHADOW_ROLE:
+            self.shadow.bind_receipt(receipt)
         if context is not None:
             self.dispatch_observation.update(process_boundary="RETURNED")
         self.sessions.add(session)
@@ -584,6 +590,8 @@ class SubstitutedRoles:
                 "binding_hash": payload["binding_hash"],
                 "scope": "data-replay",
             }
+        if role == SHADOW_ROLE and self.shadow is not None:
+            return self.shadow.decide(payload)
         raise SubstitutionUnavailable(f"no frozen baseline for role {role}")
 
 

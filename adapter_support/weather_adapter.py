@@ -12,7 +12,12 @@ from pathlib import Path
 
 from simkit.adapter import Adapter
 
-from adapter_support import evidence_projection, pre_review_projection, role_substitution
+from adapter_support import (
+    evidence_projection,
+    pre_review_projection,
+    role_substitution,
+    shadow_projection,
+)
 from adapter_support.fixture_staging import stage_fixture
 from tools.workflow import review_evidence
 from tools.workflow.catalog import safe_path, tree_hash
@@ -375,9 +380,15 @@ class WeatherAdapter(Adapter):
         if missing:
             raise AdapterRefusal(f"case requires undeclared capabilities: {missing}")
         variant = self.select_profile(case, profile["profile_document"])
+        # CAP-SHADOW: invocation points, vocabulary and the shadow decision entries (delivered
+        # by shadow_projection, not InjectionHooks), mapped or refused before any side effect.
+        shadow_plan = self.drive_shadow_policy(case)
+        if shadow_plan["configured"] and "CAP-SHADOW" not in self.implemented_capabilities():
+            raise AdapterRefusal("the case configures the shadow policy; CAP-SHADOW is undeclared")
+        scheduled = shadow_projection.schedule_without_shadow(case, shadow_plan)
         # The schedule is mapped or refused here, before any side effect (CAP-ROLE-SUBSTITUTE).
-        role_substitution.refuse_unsupported_schedule(case)
-        schedule_plan = self.substitute_role_output(case, variant["goal"])
+        role_substitution.refuse_unsupported_schedule(scheduled)
+        schedule_plan = self.substitute_role_output(scheduled, variant["goal"])
         max_repairs = self.configure_repair(case)
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
         channel = profile.get("projection_inputs_channel")
@@ -408,7 +419,10 @@ class WeatherAdapter(Adapter):
         roles = profile["roles_factory"](run_dir)
         # The case schedule runs chained behind the launch observer, whose records stay intact.
         schedule_hooks = role_substitution.case_hooks(schedule_plan, roles, prepared["case_root"])
-        observer = evidence_projection.HarnessLaunchObserver(chained=schedule_hooks)
+        shadow_driver = shadow_projection.attach(shadow_plan, roles)
+        observer = evidence_projection.HarnessLaunchObserver(
+            chained=shadow_projection.chain(schedule_hooks, shadow_driver)
+        )
         if schedule_hooks is not None:
             schedule_hooks.prepare(seeded["request"], prepared["source"])
         controller = Controller(
@@ -424,6 +438,7 @@ class WeatherAdapter(Adapter):
             dispatch_evidence_mode=True,
             definition_source=profile["definition_source"],
             operator_ledger_path=operator_ledger,
+            policy_mode=shadow_projection.policy_mode(shadow_plan),
         )
         try:
             controller.run()
@@ -458,6 +473,8 @@ class WeatherAdapter(Adapter):
         }
         if schedule_hooks is not None:
             summary["case_schedule"] = schedule_hooks.report()
+        if shadow_driver is not None:
+            summary["shadow_schedule"] = shadow_driver.report()
         if channel is None:
             # Persisted before projecting, so a post-trace re-projection has them even when
             # the in-process projection refuses.
@@ -559,6 +576,14 @@ class WeatherAdapter(Adapter):
         given), or AdapterRefusal. Delivery is CaseScheduleHooks at the controller's own
         after_role emit; the substituted invocation keeps its receipt and session ID."""
         return role_substitution.substitution_plan(case, goal)
+
+    def drive_shadow_policy(self, case):
+        """CAP-SHADOW: the shadow policy's invocation points and per-state candidate vocabulary
+        for the case's profile (the controller's own policy.SHADOW_STATES and
+        shadow_candidates), the policy mode run_case sets, and the case's shadow decision
+        entries mapped for delivery at after_transition, or AdapterRefusal. The controller
+        asks, validates and records every decision itself (tools/workflow/shadow.py)."""
+        return shadow_projection.shadow_plan(case)
 
     def substituted_roles_factory(self, case, goal, run_dir):
         """Driver hook (container_harness/case_driver.py): the Controller roles for a case

@@ -64,10 +64,10 @@ CATALOG_TOOLS = tuple(catalog.CATALOG)
 # (EC:controller_trace, v2_4.resume, v2_4.interruptions, v2_4.material_changes). Projected
 # verbatim from context[<name>] (the recovery lists: context["recovery"][<name>], see
 # RECOVERY_LEDGER_LISTS) when the native record exists; MISSING (key absent) otherwise,
-# never []. operator_actions has its own checked projection (pre_review_projection).
+# never []. operator_actions has its own checked projection (pre_review_projection);
+# shadow_decisions has its own (shadow_projection.project, CAP-SHADOW).
 PENDING_TRACE_LISTS = {
     "transition_requests": ("CAP-TRANSITION-REQUEST", None),
-    "shadow_decisions": ("CAP-SHADOW", None),
     "resume": ("CAP-RESUME", None),
     "interruptions": ("CAP-INTERRUPT", "index"),
     "diagnoses": ("CAP-DIAGNOSIS", "index"),
@@ -1395,6 +1395,9 @@ def project_run(run_dir, harness=None):
     path = harness.get("observations_path")
     observations = load_harness_observations(path) if path is not None else None
     projection = Projection(native, harness, observations).run()
+    from adapter_support import shadow_projection  # imports this module
+
+    shadow_projection.project(projection, native)
     verdict = write_capture_status(projection)
     projection["notes"].append({"write_capture": verdict})
     filesystem = projection["evidence"]["filesystem_snapshot"]
