@@ -898,11 +898,14 @@ class Controller:
             "rule": "Candidate t requires observations through t+29 inclusive. Plot dates are color scale bounds, not input subsetting. The derived last eligible onset date is intentionally earlier than the input end date.",
         }
 
-    def repair(self, payload, failure):
+    def repair(self, payload, failure, prior_plan=None):
         """Bounded repair. UC-16 parity: the allowance is consumed only when the repairer is
         actually dispatched (Controller.ask, durably with its pending record). A repair refused
         before dispatch is recorded as refused_before_dispatch and consumes nothing, so
-        repairs_used == repairer receipts + dispatched attempts that returned no receipt."""
+        repairs_used == repairer receipts + dispatched attempts that returned no receipt.
+
+        ``prior_plan`` names the refused candidate when it was never accepted as self.plan
+        (a planner plan refused by validation while its envelope was unpacked)."""
         trigger = "review" if self.state == "PLAN_VALIDATED" else "plan_validation"
         if self.repairs_used >= self.max_repairs:
             raise Refused("bounded plan repair exhausted: " + failure, gate="repair_exhausted")
@@ -916,7 +919,7 @@ class Controller:
                 {
                     **payload,
                     "failure": failure,
-                    "prior_plan": self.plan,
+                    "prior_plan": self.plan if prior_plan is None else prior_plan,
                     "date_contract": self.date_contract(),
                     "instruction": "Repair only within this exact task and profile. Explain a factual correction to review if needed; no changes to authorization or scientific scope. If the request cannot be repaired without a human answer, return only needs_info (your question) and an optional response, with no plan.",
                 },
@@ -983,8 +986,10 @@ class Controller:
         try:
             with gated("claim_evidence"):
                 self.accept_plan(answer)
-        except Refused:
-            self.record_refused_plan(answer, "planner")
+        except Refused as exc:
+            refused = self.record_refused_plan(answer, "planner")
+            if refused is not None:
+                exc.refused_plan = refused  # a plan validation refusal: repairable (run loop)
             raise
         self.record_plan_version("planner")
 
@@ -992,16 +997,19 @@ class Controller:
         """A candidate plan refused while its envelope was unpacked (review_evidence.unpack_plan
         runs validate_plan before preflight_plan could record it): record its FAIL validation,
         once, so plan_validations names the refused plan as the repairer path does. A refusal
-        of anything but the plan itself (envelope shape, claims) is not a plan validation."""
+        of anything but the plan itself (envelope shape, claims) is not a plan validation.
+        Returns the refused plan when its validation was recorded, else None."""
         plan = value.get("plan") if isinstance(value, dict) else None
         if "review_evidence" not in self.context or plan is None:
-            return
+            return None
         try:
             validate_plan(plan, self.goal)
         except Refused:
             self.record_plan_validation(
                 plan, role, parser_accepted=False, claims=self.candidate_claims(value)
             )
+            return plan
+        return None
 
     def stop_needs_info(self, role, question, gate, answer, planner_payload=None):
         """D9 CP-B3: an explicit NEEDS_INFO stop; no further role or process is started.
@@ -1948,12 +1956,25 @@ class Controller:
                 "For a repair also include response; retain all envelope fields.",
             }
         if self.state == "GOAL_CHECKED":
+            repaired = False
             if not self.plan:
-                self.accept_planner(plan_payload)
-            try:
-                self.preflight_plan()
-            except Refused as exc:
-                self.repair(plan_payload, str(exc))
+                try:
+                    self.accept_planner(plan_payload)
+                except Refused as exc:
+                    # A planner plan refused by validation (recorded by record_refused_plan) may
+                    # trigger repair like a preflight failure, but only within the allowance:
+                    # otherwise the original refusal stands (failed_gate plan_validation).
+                    # Envelope and claim refusals are not plan validations and are re-raised.
+                    refused = getattr(exc, "refused_plan", None)
+                    if refused is None or self.repairs_used >= self.max_repairs:
+                        raise
+                    self.repair(plan_payload, str(exc), prior_plan=refused)
+                    repaired = True
+            if not repaired:
+                try:
+                    self.preflight_plan()
+                except Refused as exc:
+                    self.repair(plan_payload, str(exc))
             self.binding = self.current_binding()
             self.save("plan.json", {"plan": self.plan, "binding_hash": self.binding})
             self.advance("PLAN_VALIDATED", self.plan)

@@ -406,8 +406,13 @@ def e07(lab, frozen):
 
 def test_e07_p1_frozen_pair_runs_and_the_controller_blocks_the_title_patch(e07, frozen):
     """Both frozen cases now run. The controller's own plan validation refuses the planner's
-    patched title (it departs from the goal-bound typed plan) before any review, so the review
-    and the wrapped repairer are never reached: reported unreached, never applied."""
+    patched title (it departs from the goal-bound typed plan) before any review; per the E07-P1
+    spec basis that refusal triggers the single allowed repair. The wrapped repairer output
+    (entry 2) restores the title and passes validation, and the repaired plan reaches reviewer
+    occurrence 1, which the frozen schedule (entry 1) replaces with REJECT. With the allowance
+    spent the run stops at repair_exhausted before any side effect. That residual (the
+    schedule keys verdicts to the reviewer ordinal, not the plan version) is a documented
+    oracle question, observed here and not tuned for."""
     for kind, result in e07.items():
         entry = frozen_bare_plan(frozen[f"{PREFIX}E07-P1-{kind}"])
         schedule = result.report["harness"]["case_schedule"]
@@ -417,12 +422,25 @@ def test_e07_p1_frozen_pair_runs_and_the_controller_blocks_the_title_patch(e07, 
         trace = result.evidence["controller_trace"]
         assert trace["terminal"] == {
             "outcome": "BLOCKED",
-            "reason": "plan_validation_failed",
-            "failed_gate": "plan_validation",
+            "reason": "repair_exhausted",
+            "failed_gate": "repair_exhausted",
         }
-        assert trace["final_state"] == "GOAL_CHECKED"
-        assert schedule["coverage"]["applied"] == [0] and 2 in schedule["coverage"]["unreached"]
-        assert not any(r["role"] == "repairer" for r in result.checkpoint["role_receipts"])
+        assert trace["final_state"] == "PLAN_VALIDATED"
+        first, second = trace["plan_validations"]
+        assert first["verdict"] == "FAIL"
+        assert first["source"] == {"role": "planner", "occurrence": 1}
+        assert first["failed_fields"] == ["plan.steps[1].args.title", "title"]
+        assert second["verdict"] == "PASS"
+        assert second["source"] == {"role": "repairer", "occurrence": 1}
+        assert schedule["coverage"]["applied"] == [0, 2, 1]
+        assert 3 in schedule["coverage"]["unreached"]
+        roles = [r["role"] for r in result.checkpoint["role_receipts"]]
+        assert roles[3:] == ["planner", "repairer", "evidence_checker", "reviewer"]
+        attempts = result.checkpoint["context"]["repair_attempts"]
+        assert [(a["status"], a["trigger_gate"]) for a in attempts] == [
+            ("returned", "plan_validation")
+        ]
+        assert [r["verdict"] for r in result.evidence["role_output"]["reviewer"]] == ["REJECT"]
         assert_receipts_preserved(result)
         assert no_producing_process(result)
 
