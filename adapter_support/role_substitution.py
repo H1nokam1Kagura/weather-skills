@@ -25,6 +25,11 @@ Three parts, each with one producer:
   role-output entry is mapped from the frozen contract shape onto the native role output, or
   refused (``AdapterRefusal``) before any side effect. Never silently skipped.
 
+Bare-plan wrapping (owner ruling e07_bare_plan_wrapping_2026-10-14): a planner/repairer
+replacement whose frozen payload carries ``plan`` as a bare step list (E07-P1 entry 2) is
+wrapped by the one rule in ``WRAP_RULE``; every derived field and its source is recorded per
+entry and per delivery (receipt ``substitutions[].wrappings``).
+
 CTL and INJ cases use the same double: the baseline outputs, plus whatever the case
 schedules (a CTL case may schedule an empty patch or a replacement too, e.g. E02-P1-CTL,
 E07-P1-CTL). Every mapping choice is listed in CAPABILITY-PRODUCERS.json for review.
@@ -132,6 +137,25 @@ def pair_of(case):
     return ident.rsplit("-", 1)[0] if ident.endswith(("-CTL", "-INJ")) else ident
 
 
+# The single documented wrapping rule for a bare plan step list (owner ruling
+# e07_bare_plan_wrapping_2026-10-14). Recorded verbatim in every wrapping record and in the
+# CAP-ROLE-SUBSTITUTE record of CAPABILITY-PRODUCERS.json.
+WRAP_RULE_ID = "bare-plan-wrap/v1"
+WRAP_RULE = (
+    "A planner/repairer replace_role_output whose frozen payload carries plan as a JSON array "
+    "is wrapped into the native envelope of the output it replaces at the controller's "
+    "after_role point. For a substituted role that output is the stand-in's baseline for this "
+    "invocation (static_baseline(role, goal, pair)); at delivery its hash must equal the "
+    "recorded source_output_hash, and the delivered hash the recorded wrapped_output_hash, "
+    "else the substitution is refused. The array is delivered verbatim as plan.steps. Every "
+    "other key of the typed plan (goal_hash, final) and every other envelope key the replaced "
+    "output carries (schema, plan_claims; response or rationale only when the payload does "
+    "not supply it) is copied unchanged from the replaced output. Payload keys other than "
+    "plan are delivered verbatim and must be native envelope keys of the role (repairer: "
+    "response; planner: rationale). No value is invented: a key the replaced output does not "
+    "carry is never added, and any other payload shape is refused."
+)
+WRAP_EXTRA_KEYS = {"planner": frozenset({"rationale"}), "repairer": frozenset({"response"})}
 CHECKER_REASONING = "substituted baseline verdict; no model judged this claim"
 # Recorded in place of a system prompt: a substituted reviewer is sent none.
 NO_SYSTEM_PROMPT = "SUBSTITUTED: no system prompt was sent; output from " + SUBSTITUTE_ID
@@ -240,6 +264,54 @@ def _plan_envelope_path(path):
     return None
 
 
+def wrap_bare_plan(name, payload, goal, pair_id, where):
+    """WRAP_RULE: (native envelope, wrapping record) for a bare plan step list."""
+    if goal is None:
+        _refuse(
+            f"{where}: bare-plan wrapping derives the envelope from the stand-in baseline, "
+            "which needs the case goal"
+        )
+    extra = set(payload) - {"plan"}
+    if extra - WRAP_EXTRA_KEYS[name]:
+        _refuse(
+            f"{where}: a {name} bare-plan replacement may carry only "
+            f"{sorted(WRAP_EXTRA_KEYS[name])} besides plan; got {sorted(extra)}"
+        )
+    source = static_baseline(name, goal, pair_id)
+    wrapped = copy.deepcopy(source)
+    wrapped["plan"]["steps"] = copy.deepcopy(payload["plan"])
+    delivered = [{"field": "/plan/steps", "source": "frozen payload /plan (verbatim)"}]
+    for key in sorted(extra):
+        wrapped[key] = copy.deepcopy(payload[key])
+        delivered.append({"field": f"/{key}", "source": f"frozen payload /{key} (verbatim)"})
+    derived = [
+        {
+            "field": f"/plan/{key}",
+            "source": f"replaced output /plan/{key}",
+            "value": copy.deepcopy(source["plan"][key]),
+        }
+        for key in sorted(set(source["plan"]) - {"steps"})
+    ]
+    derived += [
+        {"field": f"/{key}", "source": f"replaced output /{key}", "value": copy.deepcopy(value)}
+        for key, value in sorted(source.items())
+        if key != "plan" and key not in extra
+    ]
+    record = {
+        "rule_id": WRAP_RULE_ID,
+        "rule": WRAP_RULE,
+        "owner_ruling": "e07_bare_plan_wrapping_2026-10-14",
+        "source": f"stand-in baseline of the substituted {name} for this invocation "
+        "(the output replaced at after_role)",
+        "source_output_hash": digest(source),
+        "frozen_payload_hash": digest(payload),
+        "wrapped_output_hash": digest(wrapped),
+        "delivered_verbatim": delivered,
+        "derived_fields": derived,
+    }
+    return wrapped, record
+
+
 def _identity_path(keys):
     def mapper(path):
         return path if path.split("/")[1] in keys else None
@@ -258,6 +330,7 @@ def _map_entry(index, spec, goal, pair_id):
         _refuse(f"{where}: compiler_N names one invocation; occurrence must be 1")
     native = NATIVE_ROLE.get(name)
     mapping = "identity (frozen shape is the native shape)"
+    wrapping = None
     if name in COMPILER_SELECTORS:
         if operation == "json_patch":
             payload = _map_paths(payload, _compiler_path, where)
@@ -278,12 +351,15 @@ def _map_entry(index, spec, goal, pair_id):
             and set(payload) <= {"needs_info", "response"}
         ):
             mapping = "identity (frozen repairer needs_info shape is native)"
+        elif isinstance(payload, dict) and isinstance(payload.get("plan"), list):
+            # Owner ruling e07_bare_plan_wrapping_2026-10-14: the one documented rule.
+            payload, wrapping = wrap_bare_plan(name, payload, goal, pair_id, where)
+            mapping = f"bare plan step list -> envelope of the replaced output ({WRAP_RULE_ID})"
         else:
-            # A bare step list cannot become the native typed plan + envelope without
-            # inventing goal_hash, final, schema and plan_claims: refused, never synthesized.
+            # Any other replacement shape: no faithful native mapping, refused, never invented.
             _refuse(
-                f"{where}: a {name} replacement with a plan has no faithful native mapping "
-                "(the controller's plan envelope needs schema, a typed plan and plan_claims)"
+                f"{where}: a {name} replacement of this shape has no faithful native mapping "
+                "(only a bare plan step list is wrapped, by the documented rule)"
             )
     elif name == "reviewer":
         if operation == "json_patch":
@@ -304,7 +380,7 @@ def _map_entry(index, spec, goal, pair_id):
                 json_patch(baseline, payload)
             except UnsupportedInjection as exc:
                 _refuse(f"{where}: patch does not apply to the substituted baseline: {exc}")
-    return payload, mapping
+    return payload, mapping, wrapping
 
 
 def substitution_plan(case, goal=None):
@@ -343,21 +419,22 @@ def substitution_plan(case, goal=None):
                 f"schedule entry {index}: {name} is not a substituted-only role in this case; "
                 "a live role's output is never replaced"
             )
-        payload, mapping = _map_entry(index, spec, goal, pair_of(case))
+        payload, mapping, wrapping = _map_entry(index, spec, goal, pair_of(case))
         native_schedule.append({**copy.deepcopy(spec), "payload": payload})
-        entries.append(
-            {
-                "index": index,
-                "id": spec.get("id"),
-                "hook": "after_role",
-                "selector": copy.deepcopy(selector),
-                "native_role": NATIVE_ROLE[name],
-                "operation": spec["operation"],
-                "frozen_payload_hash": digest(spec.get("payload")),
-                "native_payload_hash": digest(payload),
-                "adapter_mapping": mapping,
-            }
-        )
+        entry = {
+            "index": index,
+            "id": spec.get("id"),
+            "hook": "after_role",
+            "selector": copy.deepcopy(selector),
+            "native_role": NATIVE_ROLE[name],
+            "operation": spec["operation"],
+            "frozen_payload_hash": digest(spec.get("payload")),
+            "native_payload_hash": digest(payload),
+            "adapter_mapping": mapping,
+        }
+        if wrapping is not None:
+            entry["wrapping"] = wrapping
+        entries.append(entry)
     return {
         "capability": CAPABILITY,
         "case_id": case["id"],
@@ -548,9 +625,21 @@ class CaseScheduleHooks:
         if receipt.get("mode") != MODE or receipt.get("role") != event.get("role"):
             raise SubstitutionBindingError("the last receipt is not this substituted invocation")
         expected = receipt["output_hash"]
+        by_index = {e["index"]: e for e in self.plan["entries"]}
+        wrappings = []
         for record in applied:
             if record.get("before_hash") != expected:
                 raise SubstitutionBindingError("substitution chain does not start at the receipt")
+            wrapping = by_index[record["index"]].get("wrapping")
+            if wrapping is not None:
+                # WRAP_RULE: the derived fields came from exactly the output being replaced.
+                if record["before_hash"] != wrapping["source_output_hash"]:
+                    raise SubstitutionBindingError(
+                        "the replaced output is not the recorded bare-plan wrapping source"
+                    )
+                if record.get("after_hash") != wrapping["wrapped_output_hash"]:
+                    raise SubstitutionBindingError("delivered output is not the recorded wrap")
+                wrappings.append({"schedule_index": record["index"], **copy.deepcopy(wrapping)})
             expected = record["after_hash"]
         delivered = digest(event["answer"])
         if delivered != expected:
@@ -569,6 +658,8 @@ class CaseScheduleHooks:
                 if e["index"] == i
             ],
         }
+        if wrappings:
+            substitution["wrappings"] = wrappings
         receipt["output_hash"] = delivered
         receipt.setdefault("substitutions", []).append(substitution)
         if (receipt["invocation_id"], receipt["session_id"]) != identity:  # pragma: no cover

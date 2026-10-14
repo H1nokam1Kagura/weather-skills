@@ -61,7 +61,8 @@ GATE_TOOLS = ("check-artifact", "verify-run")
 CATALOG_TOOLS = tuple(catalog.CATALOG)
 # Records other wave-3 packages are building, keyed by their frozen controller_trace names
 # (EC:controller_trace, v2_4.resume, v2_4.interruptions, v2_4.material_changes). Projected
-# verbatim from context[<name>] when the native record exists; MISSING (key absent) otherwise,
+# verbatim from context[<name>] (the recovery lists: context["recovery"][<name>], see
+# RECOVERY_LEDGER_LISTS) when the native record exists; MISSING (key absent) otherwise,
 # never []. operator_actions has its own checked projection (pre_review_projection).
 PENDING_TRACE_LISTS = {
     "transition_requests": ("CAP-TRANSITION-REQUEST", None),
@@ -75,6 +76,21 @@ PENDING_TRACE_LISTS = {
     "material_changes": ("CAP-REREVIEW", "index"),
     "source_rechecks": ("CAP-REREVIEW", "index"),
 }
+# Lists the controller keeps in its recovery ledger, context["recovery"] (recovery.new_ledger,
+# schema workflow.recovery/1, bound by every run), not at the context top level. Projected
+# from the ledger after its schema is checked; MISSING with a reason only when the ledger is
+# absent or malformed, never [] (EC:absence: an existing empty list IS emitted as []).
+RECOVERY_SCHEMA = "workflow.recovery/1"
+RECOVERY_LEDGER_LISTS = frozenset(
+    {
+        "resume",
+        "interruptions",
+        "diagnoses",
+        "mechanical_repairs",
+        "operator_notifications",
+        "transport_retries",
+    }
+)
 # Container-route harness observations (container_harness/analyze_trace.py SCHEMA). Each
 # accepted field, keyed by its frozen evidence path, with the capability that owns it.
 HARNESS_OBSERVATIONS_SCHEMA = "simkit.container-harness-evidence/1"
@@ -578,9 +594,27 @@ class Projection:
                 out.append({"name": name, "record": _read_json(self.n.root / name)})
         return out
 
+    def recovery_list(self, name):
+        """(list, None) from the recovery ledger, or (None, reason) when it cannot be read."""
+        book = self.n.context.get("recovery")
+        if book is None:
+            return None, "no native recovery ledger in this run"
+        if not isinstance(book, dict) or book.get("schema") != RECOVERY_SCHEMA:
+            return None, f"recovery ledger is malformed (schema is not {RECOVERY_SCHEMA})"
+        value = book.get(name)
+        if not isinstance(value, list):
+            return None, f"recovery ledger is malformed ({name} is not a list)"
+        return value, None
+
     def pending_lists(self, trace):
         for name, (capability, ident) in PENDING_TRACE_LISTS.items():
-            value = self.n.context.get(name)
+            if name in RECOVERY_LEDGER_LISTS:
+                value, reason = self.recovery_list(name)
+                if value is None:
+                    self.gap(f"controller_trace.{name}", capability, reason)
+                    continue
+            else:
+                value = self.n.context.get(name)
             if value is None:
                 self.gap(
                     f"controller_trace.{name}",
