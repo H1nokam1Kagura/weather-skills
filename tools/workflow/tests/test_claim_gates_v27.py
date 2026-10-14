@@ -1,9 +1,11 @@
 """Pre-review claim gates, evidence checker and frozen reviewer shape (SIMKIT v2.7 D1/D7/D10-D12/D19).
 
 Real Controller and Roles; only a deterministic local process stub stands in for the CLI.
-The reference definition text below is the exact text the frozen v2.7 review snapshots bind
-under 'definition:agrhymet-sos-rolling'. It is supplied to the controller as an explicit
-input file, never read from the frozen package at runtime.
+The reference definition text is the exact text the frozen v2.7 review snapshots bind under
+'definition:agrhymet-sos-rolling'. Its ONE copy is the pinned input file the container case
+driver also passes (container_harness/pinned/definitions/agrhymet-sos-rolling.txt, LF-only by
+.gitattributes). It is supplied to the controller as an explicit input file, never read from
+the frozen package at runtime.
 """
 
 import copy
@@ -19,24 +21,15 @@ from tools.workflow.contracts import Refused, expected_plan
 from tools.workflow.evaluation import FixtureRoles
 from tools.workflow.tests.test_workflow import GOAL, request
 
-REFERENCE_DEFINITION = "\n".join(
-    [
-        "id: agrhymet-sos-rolling",
-        "time_basis: rolling daily approximation, not calendar dekads",
-        "trigger: At least 25 mm accumulated across the first 10 consecutive days.",
-        "confirmation: At least 20 mm across the next 20 consecutive days, beginning 10 days "
-        "after the candidate onset date.",
-        "required_complete_window_days: 30",
-        "first_eligible_onset_date: 2025-09-01",
-        "last_eligible_onset_date: 2025-12-02",
-        "date_reasoning: A candidate at day t requires t through t+29 inclusive. December 2 plus "
-        "29 days is December 31. Input end date and last eligible onset date are different "
-        "fields with different meanings.",
-        "plot_scale: September 1 through December 2 is valid for this fixture. It does not "
-        "truncate the rainfall input. Do not treat the input end date as a user-mandated "
-        "plot-scale endpoint.",
-    ]
+REFERENCE_DEFINITION_FILE = (
+    Path(__file__).resolve().parents[3]
+    / "container_harness"
+    / "pinned"
+    / "definitions"
+    / "agrhymet-sos-rolling.txt"
 )
+# Bytes, not text mode: newline translation would change the bound hash.
+REFERENCE_DEFINITION = REFERENCE_DEFINITION_FILE.read_bytes().decode("utf-8")
 # The source hash every frozen v2.7 probe citation carries for this source.
 FROZEN_SOURCE_HASH = "sha256:3db5ec77bcb91aa6eacb9e7e5d09c385e75461866ac369a9ac940df8ab763aa6"
 # Every distinct quote the frozen DEV-ONLY planner/repairer outputs and injection patches cite

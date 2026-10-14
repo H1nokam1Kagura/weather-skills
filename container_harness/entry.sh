@@ -87,6 +87,14 @@ case "$MODE" in
       status abort staging_failed
       exit 4
     fi
+    # The case root (source/, harness/manifest.json, empty run/) is staged here, untraced and
+    # before the baseline, so the traced run creates nothing outside /work/case/run
+    # (frozen v2.7: created_paths all_under HARNESS_RUN_DIR).
+    if ! (cd /opt/ctl && $AS_RUNNER python -m container_harness.case_driver prepare "$CASE_ID" /work \
+          > "$OUT/prepare.stdout" 2> "$OUT/prepare.stderr"); then
+      status abort prepare_failed
+      exit 4
+    fi
     ROOT_CWD=/opt/ctl
     status run_dir /work/case/run
     set -- python -m container_harness.case_driver run "$CASE_ID" /work

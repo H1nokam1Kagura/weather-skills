@@ -1,5 +1,6 @@
 """Audited tool catalogue and parse-only adapter, without invoking skill wrappers."""
 
+import contextlib
 import importlib.metadata
 import importlib.util
 import json
@@ -183,10 +184,62 @@ def child_environment(scratch=None):
     if scratch is not None:
         scratch = safe_path(scratch)
         scratch.mkdir(parents=True, exist_ok=True)
-        env.update(
-            TMP=str(scratch),
-            TEMP=str(scratch),
-            TMPDIR=str(scratch),
-            MPLCONFIGDIR=str(scratch / "matplotlib"),
-        )
+        env.update(scratch_environment(scratch))
     return env
+
+
+def scratch_environment(scratch):
+    """HOME-derived cache/config/temp locations, all under the run's scratch directory.
+
+    Applied to every child (child_environment) and, for the duration of Controller.run, to
+    the controller process itself (confined_process), so neither writes ~/.config/matplotlib,
+    ~/.cache, ~/.local/share/cartopy or /tmp: filesystem_snapshot.created_paths must stay
+    under HARNESS_RUN_DIR (frozen v2.7 all_under, every case). HOME itself is not changed
+    (role transports read their own credentials from it). The read-only pre-seeded
+    CARTOPY_DATA_DIR is left as is: reads create nothing.
+    """
+    scratch = Path(scratch)
+    return {
+        "TMP": str(scratch),
+        "TEMP": str(scratch),
+        "TMPDIR": str(scratch),
+        "MPLCONFIGDIR": str(scratch / "matplotlib"),
+        "XDG_CACHE_HOME": str(scratch / "xdg-cache"),
+        "XDG_CONFIG_HOME": str(scratch / "xdg-config"),
+        # cartopy's writable data_dir (where a missing shapefile download lands)
+        "XDG_DATA_HOME": str(scratch / "xdg-data"),
+    }
+
+
+@contextlib.contextmanager
+def confined_process(scratch):
+    """Controller-native confinement of THIS process's HOME-derived caches and temp files:
+    scratch_environment in os.environ, tempfile.tempdir, and an already-imported cartopy's
+    writable dirs. Everything is restored on exit. matplotlib reads MPLCONFIGDIR when first
+    imported, which for the controller happens inside the run (in-process skill preflight)."""
+    import tempfile
+
+    scratch = safe_path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    values = scratch_environment(scratch)
+    saved_env = {key: os.environ.get(key) for key in values}
+    saved_tempdir = tempfile.tempdir
+    cartopy = sys.modules.get("cartopy")
+    saved_cartopy = None
+    if cartopy is not None and isinstance(getattr(cartopy, "config", None), dict):
+        saved_cartopy = {k: cartopy.config.get(k) for k in ("cache_dir", "data_dir")}
+        cartopy.config["cache_dir"] = scratch / "cartopy_cache_dir"
+        cartopy.config["data_dir"] = Path(values["XDG_DATA_HOME"]) / "cartopy"
+    os.environ.update(values)
+    tempfile.tempdir = str(scratch)
+    try:
+        yield values
+    finally:
+        tempfile.tempdir = saved_tempdir
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        if saved_cartopy is not None:
+            cartopy.config.update(saved_cartopy)

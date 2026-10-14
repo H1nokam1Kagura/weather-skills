@@ -29,6 +29,7 @@ PRODUCERS_FILE = Path(__file__).with_name("CAPABILITY-PRODUCERS.json")
 # run_case's in-process harness inputs, persisted for the post-trace re-projection.
 PROJECTION_INPUTS_SCHEMA = "weather-adapter.evidence-projection-inputs/1"
 PROJECTION_INPUTS_FILE = "evidence-projection-inputs.json"
+FIXTURE_SCHEMA = "weather-adapter.disposable-fixture/1"
 # CAP-LEDGER-SEED quote rule (harness-authored, flagged for review): every non-null goal value
 # is attributed to the whole scenario message; a null value is attributed to it only for a
 # field the scenario states as a prohibition, else seeded explicitly unattributed (CR-02).
@@ -265,9 +266,10 @@ class WeatherAdapter(Adapter):
                 out[key] = value
         return out
 
-    def tag_run_provenance(self, run_dir, harness_dir, markers):
-        """CAP-RUN-PROVENANCE (D3): harness tags plus a scan of what the system read."""
-        return evidence_projection.run_provenance(run_dir, harness_dir, markers)
+    def tag_run_provenance(self, run_dir, harness_dir, markers, tags=None):
+        """CAP-RUN-PROVENANCE (D3): harness tags plus a scan of what the system read.
+        ``tags``: the output-tag record when it was not written to harness/output-tags.json."""
+        return evidence_projection.run_provenance(run_dir, harness_dir, markers, tags=tags)
 
     def select_profile(self, case, profile_document):
         """CAP-PROFILE: the case's profile variant, checked against the controller's own."""
@@ -346,8 +348,18 @@ class WeatherAdapter(Adapter):
 
         ``profile`` is the harness mapping: profile_document, source_ledger, case_root,
         source, generator_provenance, presented_fetch_version, definition_source, repo,
-        roles_factory(run_dir), processes_factory(run_dir), input_supplement, and optionally
-        projection_inputs_channel (see persist_projection_inputs).
+        roles_factory(run_dir), processes_factory(run_dir), input_supplement, and optionally:
+
+        * prepared_fixture: the prepare_fixture record of a fixture the harness already
+          staged (container case mode stages it untraced, before the trace starts); it is
+          re-verified (adopt_prepared_fixture) and nothing is staged here.
+        * projection_inputs_channel: a harness-opened text stream. With it, run_case creates
+          NO file outside the run directory: the seeded ledger, output tags, projection inputs
+          and the in-process projection report leave as one record on the channel
+          (persist_projection_inputs) instead of harness/*.json. Frozen v2.7 confines
+          filesystem_snapshot.created_paths to HARNESS_RUN_DIR (all_under, every case).
+
+        Without either (in-process route) everything is staged and written as before.
         """
         if not self.enable_run_case:
             raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
@@ -362,18 +374,27 @@ class WeatherAdapter(Adapter):
         schedule_plan = self.substitute_role_output(case, variant["goal"])
         max_repairs = self.configure_repair(case)
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
-        prepared = self.prepare_fixture(
-            case,
-            profile["case_root"],
-            source=profile["source"],
-            generator_provenance=profile["generator_provenance"],
-            presented_fetch_version=profile["presented_fetch_version"],
-        )
+        channel = profile.get("projection_inputs_channel")
+        if profile.get("prepared_fixture") is not None:
+            prepared = self.adopt_prepared_fixture(
+                case, profile["prepared_fixture"], profile.get("case_root")
+            )
+        else:
+            prepared = self.prepare_fixture(
+                case,
+                profile["case_root"],
+                source=profile["source"],
+                generator_provenance=profile["generator_provenance"],
+                presented_fetch_version=profile["presented_fetch_version"],
+            )
         run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
-        atomic_json(harness_dir / "seeded-ledger.json", seeded)
+        harness_files = {"seeded-ledger.json": seeded}
+        if channel is None:
+            atomic_json(harness_dir / "seeded-ledger.json", seeded)
         # The controller creates and owns this run-scoped operator ledger (D14/D28); the
-        # harness only appends literal records to it (FX-LEDGER-APPEND). Harness-side path.
-        operator_ledger = harness_dir / "operator-ledger.jsonl"
+        # harness only appends literal records to it (FX-LEDGER-APPEND). It lives in the run
+        # directory: the controller creates it, and frozen v2.7 confines created_paths there.
+        operator_ledger = run_dir / "operator-ledger.jsonl"
         expected_after, expected_reason = pre_review_projection.expected_source_after(
             case, prepared["source_pre"]["value"]
         )
@@ -403,7 +424,10 @@ class WeatherAdapter(Adapter):
         except Exception:  # noqa: BLE001 - the controller recorded its own terminal
             pass
         artifacts = [v for k, v in controller.paths.items() if k != "source"]
-        evidence_projection.tag_outputs(run_dir, harness_dir, artifacts)
+        tags = evidence_projection.tag_outputs(
+            run_dir, harness_dir, artifacts, write=channel is None
+        )
+        harness_files["output-tags.json"] = tags
         provenance_record = prepared["manifest"]["generator_provenance"]
         markers = [provenance_record["generator"], provenance_record["generator_sha256"]]
         processes_root = getattr(processes, "root", None)
@@ -412,31 +436,88 @@ class WeatherAdapter(Adapter):
             "processes_root": None if processes_root is None else str(processes_root),
             "source_pre": prepared["source_pre"]["value"],
             "authorized_goal": variant["goal"],
-            "run_provenance": self.tag_run_provenance(run_dir, harness_dir, markers),
+            "run_provenance": self.tag_run_provenance(run_dir, harness_dir, markers, tags=tags),
             "source_expected_after_reason": expected_reason,
         }
         if expected_after is not None:
             harness_inputs["source_expected_after"] = expected_after
-        # Persisted before projecting, so a post-trace re-projection has them even when the
-        # in-process projection refuses.
-        self.persist_projection_inputs(
-            case, run_dir, harness_dir, harness_inputs, profile.get("projection_inputs_channel")
-        )
-        projection = self.capture_evidence(run_dir, harness_inputs)
-        projection["harness"] = {
+        summary = {
             "case_id": case["id"],
             "input_supplement": profile.get("input_supplement"),
             "source_pre": prepared["source_pre"],
             "seeded_ledger": seeded["derivation"],
             "operator_ledger": str(operator_ledger),
             "source_expected_after": {"value": expected_after, "reason": expected_reason},
+            "fixture_staged": "pre-staged" if profile.get("prepared_fixture") else "run_case",
         }
         if schedule_hooks is not None:
-            projection["harness"]["case_schedule"] = schedule_hooks.report()
-        atomic_json(harness_dir / "evidence-projection.json", projection)
-        return projection["evidence"]
+            summary["case_schedule"] = schedule_hooks.report()
+        if channel is None:
+            # Persisted before projecting, so a post-trace re-projection has them even when
+            # the in-process projection refuses.
+            self.persist_projection_inputs(case, run_dir, harness_dir, harness_inputs)
+            projection = self.capture_evidence(run_dir, harness_inputs)
+            projection["harness"] = summary
+            atomic_json(harness_dir / "evidence-projection.json", projection)
+            return projection["evidence"]
+        # Channel route: one record, written whatever the in-process projection does.
+        report = None
+        try:
+            projection = self.capture_evidence(run_dir, harness_inputs)
+            projection["harness"] = summary
+            report = projection
+            return projection["evidence"]
+        except Exception as exc:
+            report = {"status": "ERROR", "error": repr(exc), "harness": summary}
+            raise
+        finally:
+            harness_files["evidence-projection.json"] = report
+            self.persist_projection_inputs(
+                case, run_dir, harness_dir, harness_inputs, channel, harness_files=harness_files
+            )
 
-    def persist_projection_inputs(self, case, run_dir, harness_dir, inputs, channel=None):
+    def adopt_prepared_fixture(self, case, prepared, case_root=None):
+        """CAP-DISPOSABLE-FIXTURE, pre-staged: accept a prepare_fixture record the harness
+        produced earlier (untraced), after re-verifying it. Nothing is created: the layout,
+        manifest and staged-source hash must still be exactly what staging recorded, and the
+        run directory must exist and be empty. Any difference is a refusal, never a re-stage.
+        """
+        if not isinstance(prepared, dict) or prepared.get("schema") != FIXTURE_SCHEMA:
+            raise AdapterRefusal("prepared fixture has an unknown schema")
+        if prepared.get("case_id") != case.get("id"):
+            raise AdapterRefusal("prepared fixture belongs to another case")
+        root = safe_path(Path(prepared["case_root"]))
+        if case_root is not None and safe_path(Path(case_root)) != root:
+            raise AdapterRefusal("prepared fixture is not at the profile's case_root")
+        layout = {
+            "source": root / "source" / "source.zarr",
+            "source_directory": root / "source",
+            "harness": root / "harness",
+            "run": root / "run",
+        }
+        for key, path in layout.items():
+            if safe_path(Path(prepared[key])) != safe_path(path):
+                raise AdapterRefusal(f"prepared fixture layout differs: {key}")
+        if not layout["run"].is_dir() or any(layout["run"].iterdir()):
+            raise AdapterRefusal("prepared run directory must exist and be empty")
+        if list(layout["source_directory"].iterdir()) != [layout["source"]]:
+            raise AdapterRefusal("prepared source directory must hold only the staged source")
+        try:
+            manifest = json.loads((layout["harness"] / "manifest.json").read_text("utf-8"))
+        except (OSError, ValueError) as exc:
+            raise AdapterRefusal("prepared harness manifest is unreadable") from exc
+        if manifest != prepared.get("manifest"):
+            raise AdapterRefusal("prepared harness manifest differs from the staging record")
+        source_pre = prepared.get("source_pre") or {}
+        if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(
+            layout["source"]
+        ) != source_pre.get("value"):
+            raise AdapterRefusal("staged source changed since staging")
+        return copy.deepcopy(prepared)
+
+    def persist_projection_inputs(
+        self, case, run_dir, harness_dir, inputs, channel=None, harness_files=None
+    ):
         """The in-process harness inputs of run_case, for the post-trace re-projection
         (container_harness/project_in_container.py --inputs).
 
@@ -446,7 +527,10 @@ class WeatherAdapter(Adapter):
         filesystem_snapshot.created_paths, whose frozen allow-list is HARNESS_RUN_DIR
         (all_under, every v2.7 case); the harness/ directory is outside it. Without a channel
         (in-process route) the record is written atomically to
-        harness/evidence-projection-inputs.json.
+        harness/evidence-projection-inputs.json. ``harness_files`` (channel route only): the
+        harness bookkeeping that would otherwise be harness/<name> files, carried verbatim
+        under ``harness_files`` (seeded-ledger.json, output-tags.json,
+        evidence-projection.json).
         """
         record = {
             "schema": PROJECTION_INPUTS_SCHEMA,
@@ -454,6 +538,8 @@ class WeatherAdapter(Adapter):
             "run_dir": str(run_dir),
             **inputs,
         }
+        if harness_files is not None:
+            record["harness_files"] = harness_files
         if channel is not None:
             channel.write(json.dumps(record, allow_nan=False))
             channel.flush()
@@ -563,7 +649,7 @@ class WeatherAdapter(Adapter):
         )
         run.mkdir(exist_ok=False)
         return {
-            "schema": "weather-adapter.disposable-fixture/1",
+            "schema": FIXTURE_SCHEMA,
             "case_id": case["id"],
             "case_root": str(root),
             "source": str(staged),

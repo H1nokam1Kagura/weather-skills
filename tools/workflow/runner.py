@@ -22,7 +22,15 @@ from . import (
 )
 from .admission import identity as admission_identity
 from .admission import record_for
-from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
+from .catalog import (
+    build_manifest,
+    child_environment,
+    confined_process,
+    preflight,
+    safe_path,
+    script,
+    tree_hash,
+)
 from .contracts import (
     GATE_REASONS,
     INCOMPLETE_GATES,
@@ -1679,6 +1687,12 @@ class Controller:
         atomic_json(self.root / "result.json", result)
 
     def run(self):
+        # Controller-native confinement: the controller process's own HOME-derived caches and
+        # temp files live under run/scratch for the whole run, like its children's.
+        with confined_process(self.root / "scratch"):
+            return self._unconfined_run()
+
+    def _unconfined_run(self):
         try:
             trace_records.record_initial_state(self)  # event_seq for the initial state
             result = self._supervised_run()

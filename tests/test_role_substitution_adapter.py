@@ -14,13 +14,24 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from test_evidence_projection_v27 import FROZEN_CASES, FROZEN_CASES_SHA256, MAP_GOAL, Lab
+from test_evidence_projection_v27 import (
+    FROZEN_CASES,
+    FROZEN_CASES_SHA256,
+    GENERATOR,
+    MAP_GOAL,
+    TEST_FREE_RAM_GIB,
+    Lab,
+    ledger,
+    profile_document,
+    write_source,
+)
 
 from adapter_support import role_substitution as rs
 from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter
 from tools.workflow import runner
 from tools.workflow.contracts import digest
 from tools.workflow.persistence import read_checkpoint
+from tools.workflow.processes import Processes
 from tools.workflow.review_evidence import text_hash
 
 PREFIX = "DEV-E2E-V2_7-"
@@ -186,6 +197,64 @@ def test_e02_p1_inj_patched_compilers_fail_the_goal_check_with_receipts_rebound(
     # Contract shape is projected back: compiler_1[0].goal carries the patched field.
     assert inj.evidence["role_output"]["compiler_1"][0]["goal"]["missing_policy"] == "zero_fill"
     assert inj.evidence["role_output"]["compiler_2"] == []
+
+
+def test_e02_p1_ctl_driven_like_case_driver_binds_d1_and_passes_the_planner(lab, frozen, tmp_path):
+    """The container route: case_driver.case_profile (pinned D1 definition, pre-staged fixture,
+    harness channel, substituted roles). Only the repo, the source grid and the process memory
+    reader are the module's stand-ins."""
+    import io
+
+    from container_harness import case_driver as cd
+
+    case = local_case(frozen, "E02-P1-CTL")
+    adapter = WeatherAdapter(enable_run_case=True)
+    document = {
+        **profile_document(MAP_GOAL),
+        "reference_fixture": {"source_ledger": ledger(MAP_GOAL)},
+    }
+    work = tmp_path / "work"
+    work.mkdir()  # the container's /work exists before staging
+    prepared = adapter.prepare_fixture(
+        case,
+        work / "case",
+        source=write_source(tmp_path / "gen", MAP_GOAL),
+        generator_provenance=GENERATOR,
+        presented_fetch_version="0.0.2",
+    )
+    channel = io.StringIO()
+    profile = cd.case_profile(
+        case,
+        adapter,
+        document,
+        work,
+        spec={"supplement_id": "test-only"},
+        pins={"fixture_generator": {"sha256": GENERATOR["generator_sha256"]}},
+        version="0.0.2",
+        live=False,
+        prepared=json.loads(json.dumps(prepared)),
+        inputs_channel=channel,
+        processes_factory=lambda run_dir: Processes(
+            Path(run_dir) / "processes", memory_reader=lambda: TEST_FREE_RAM_GIB
+        ),
+    )
+    assert profile["definition_source"] == cd.DEFINITION_PATH
+    profile["repo"] = lab.repo
+    evidence = adapter.run_case(case, profile)
+    states = evidence["controller_trace"]["states"]
+    assert "PLAN_VALIDATED" in states and "REVIEW_APPROVED" in states
+    assert evidence["controller_trace"]["final_state"] == "RELEASED"
+    bound = read_checkpoint(work / "case" / "run")["context"]["review_evidence"]
+    assert bound["definition_source"]["source_hash"] == rs.FROZEN_DEFINITION_SOURCE_HASH
+    assert json.loads(channel.getvalue())["harness_files"]["evidence-projection.json"]
+    # A pinned file that drifted by one byte is refused, never bound.
+    drifted = tmp_path / "drifted.txt"
+    drifted.write_bytes(cd.DEFINITION_PATH.read_bytes() + b"!")
+    with pytest.raises(RuntimeError, match="not the frozen"):
+        cd.reference_definition(drifted)
+    assert text_hash(cd.DEFINITION_PATH.read_bytes().decode("utf-8")) == (
+        rs.FROZEN_DEFINITION_SOURCE_HASH
+    )
 
 
 @pytest.fixture(scope="module")

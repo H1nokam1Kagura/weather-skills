@@ -400,6 +400,60 @@ def test_unfinished_resumed_lines_are_merged(tmp_path):
     assert ev["filesystem_snapshot"]["created_paths"] == ["/work/run/slow"]
 
 
+def test_confined_case_run_creates_nothing_outside_the_run_dir(tmp_path):
+    """The container case layout after the write-allow-list fix: case root staged before the
+    baseline, controller caches under run/scratch. Every created path is under run/, which is
+    what the frozen all_under(created_paths, HARNESS_RUN_DIR) needs."""
+    cap = Capture(tmp_path)
+    cap.status.update(run_dir="/work/case/run", root_cwd="/opt/ctl")
+    cap.baseline += [
+        "/opt",
+        "/opt/ctl",
+        "/work/case",
+        "/work/case/run",
+        "/work/case/source",
+        "/work/case/source/source.zarr",
+        "/work/case/harness",
+        "/work/case/harness/manifest.json",
+        "/work/prepared-fixture.json",
+    ]
+    run = "/work/case/run"
+    lines = [
+        'execve("/usr/local/bin/python", ["python", "-m", "case_driver"], 0x7f /* 9 vars */) = 0',
+        'openat(AT_FDCWD</opt/ctl>, "/work/prepared-fixture.json", O_RDONLY|O_CLOEXEC)'
+        " = 3</work/prepared-fixture.json>",
+        f'mkdir("{run}/artifacts", 0777) = 0',
+        f'mkdir("{run}/scratch", 0777) = 0',
+        f'mkdir("{run}/scratch/matplotlib", 0777) = 0',
+        f'openat(AT_FDCWD</opt/ctl>, "{run}/scratch/tmpab12cd", O_RDWR|O_CREAT|O_EXCL, 0600)'
+        f" = 3<{run}/scratch/tmpab12cd>",
+        f'unlink("{run}/scratch/tmpab12cd") = 0',
+        f'openat(AT_FDCWD</opt/ctl>, "{run}/checkpoint.json.tmp", O_WRONLY|O_CREAT|O_TRUNC, 0666)'
+        f" = 3<{run}/checkpoint.json.tmp>",
+        f'rename("{run}/checkpoint.json.tmp", "{run}/checkpoint.json") = 0',
+    ]
+    for line in lines:
+        cap(ROOT, line)
+    child(cap, ROOT, 101)
+    cap(101, f'mkdir("{run}/scratch/xdg-data", 0777) = 0')
+    cap.exit(101)
+    ev = cap.exit(ROOT).write()
+    created = ev["filesystem_snapshot"]["created_paths"]
+    assert created and all(p.startswith(run + "/") for p in created)
+    assert ev["harness_notes"]["created_outside_run_dir"] == []
+    # The pre-fix layout (bookkeeping and HOME caches inside the trace) is reported outside.
+    cap = start(Capture(tmp_path / "old"))
+    cap.status.update(run_dir=run)
+    cap.baseline += ["/work/case", run, "/home", "/home/runner"]
+    cap(ROOT, 'mkdir("/work/case/harness", 0777) = 0')
+    cap(ROOT, 'mkdir("/home/runner/.config", 0777) = 0')
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_notes"]["created_outside_run_dir"] == [
+        "/home/runner/.config",
+        "/work/case/harness",
+    ]
+
+
 RELAY = "172.30.0.1:18080"
 NET_LINES = [
     (101, "socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_TCP) = 3<socket:[4242]>"),
