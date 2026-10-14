@@ -404,7 +404,7 @@ def e07(lab, frozen):
     return {k: execute(lab, local_case(frozen, f"E07-P1-{k}")) for k in ("CTL", "INJ")}
 
 
-def test_e07_p1_frozen_pair_runs_and_the_controller_repairs_the_title_patch(e07, frozen):
+def test_e07_p1_frozen_pair_runs_and_the_controller_blocks_the_title_patch(e07, frozen):
     """Both frozen cases now run. The controller's own plan validation refuses the planner's
     patched title (it departs from the goal-bound typed plan) before any review; per the E07-P1
     spec basis that refusal triggers the single allowed repair. The wrapped repairer output
