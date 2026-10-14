@@ -1491,10 +1491,16 @@ SIGNED_ADMITTED = {
 }
 
 
+# Committed d4_gated records awaiting their independent D4 review: unsigned (reviewer,
+# reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing it.
+PENDING_D4_REVIEW = {"CAP-FIXTURE-OP", "CAP-REREVIEW"}
+
+
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
     adapter = WeatherAdapter()
     implemented = adapter.implemented_capabilities()
     gated = {c for c, r in adapter.producers["capabilities"].items() if r.get("d4_gated")}
+    gated -= PENDING_D4_REVIEW  # undeclared by design until signed
     admitted = set()
     for case in frozen["cases"]:
         missing = set(case["adapter_requirements"]) - implemented
@@ -1573,6 +1579,11 @@ def test_committed_d4_signatures_are_complete_and_pinned():
     adapter = WeatherAdapter()
     for capability, record in adapter.producers["capabilities"].items():
         if record.get("d4_gated") is not True:
+            continue
+        if capability in PENDING_D4_REVIEW:
+            # Wholly unsigned, never partly signed, and therefore not declared.
+            assert all(record[k] is None for k in ("reviewer", "reviewed_at", "reviewed_commit"))
+            assert capability not in adapter.implemented_capabilities(), capability
             continue
         assert record["status"] == "PRODUCER_MAPPED", capability
         assert re.fullmatch(r"[0-9a-f]{40}", record["reviewed_commit"]), capability

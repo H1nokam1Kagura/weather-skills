@@ -633,6 +633,99 @@
       "reviewed_commit": "8b7a8c40e4edaa8129ddeff9e635b8c07b85c3dd",
       "review_verdict": "APPROVE_WITH_NOTES",
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REREVIEW.md"
+    },
+    "CAP-FIXTURE-OP": {
+      "d4_gated": true,
+      "method": "apply_fixture_operation",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/e2e_injections.py", "line": 89, "symbol": "FIXTURE_OPERATIONS", "emits": "the frozen fixture operations the delivery path implements; any other (FX-DECOY-SPAWN, FX-OWNED-STALE-LOCK) is a static unsupported_requirements finding, refused by run_case before any side effect"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 641, "symbol": "InjectionHooks._apply (mutate_fixture branch) / _fixture (line 933) / _ledger_fixture (line 878) / _arm_transport_fault (line 762)", "emits": "the operation applied in place at the controller's own hook point (before_run via prepare at line 328, after_transition, after_tool, after_review_approval through the dependent dispatcher at line 530); record {index, hook, operation, state, occurrence, status APPLIED|UNSUPPORTED|ERROR, before_hash, after_hash (catalog.tree_hash for files, digest for streams/request), cell_index, json_value_equal, bytes_differ, adapter_mapping, mtime_delta_seconds, build_id_from/to, message_id, record_id}"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 869, "symbol": "InjectionHooks._owned (disposable_root = run_case's case_root)", "emits": "refuses any fixture write outside the disposable case root or through a link"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 1027, "symbol": "_definition_edit / _definition_touch (line 1078) / _manifest_bump (line 1094)", "emits": "FX-DEF-PARAM-EDIT (one dotted-key field, others preserved), FX-DEF-TOUCH (mtime only, content hash unchanged), FX-RUNTIME-MANIFEST-BUMP (build_id only) on the controller repository copy"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 151, "symbol": "fixture_plan (WeatherAdapter.apply_fixture_operation, weather_adapter.py:572)", "emits": "static plan of every mutate_fixture entry {index, id, hook, selector, fixture_operation, args_hash, target, creates_outside_run_dir}; AdapterRefusal before any side effect for an unknown operation, an argument set that is not the complete frozen set, an unsupported reserialization/stderr/onset form, or a repository operation on a file the controller repository does not carry"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 276, "symbol": "controller_repo / stage_repo_copy (line 228) / adopt_repo_copy (line 258)", "emits": "the disposable repository copy case_root/repo the controller runs on when a repository operation is scheduled (skills tree, registry/*.toml, agents/*.md, tools/workflow/*.py, pyproject.toml, runtime-manifest.json), refused unless its build manifest hashes exactly as the source repository's; adopted and re-verified from profile['prepared_repo'] in pre-staged case mode, refused there without one"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 324, "symbol": "fixture_report / harness_inputs_from (line 403)", "emits": "harness fixture-operations report {entries (delivery record or UNREACHED with its disposition), symbols, missing, notes, outside_run_dir} and the harness inputs source_expected_after (+ reason), source_pre (FX-SRC-META-ATTR), fixture_operations"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 425, "symbol": "project_fixture_symbols (called from evidence_projection.Projection.symbols)", "emits": "symbols.HARNESS_HASH:onset_after_mutation, or a CAP-FIXTURE-OP gap when the scheduled shift was not applied"},
+        {"file": "adapter_support/weather_adapter.py", "line": 351, "symbol": "WeatherAdapter.run_case", "emits": "fixture_plan before side effects; the controller on controller_repo(...); fixture_report after the run, persisted under harness.fixture_operations / harness.repo_copy and in the projection inputs"}
+      ],
+      "evidence_fields": [
+        "symbols.HARNESS_HASH:source_expected_after (frozen U13 source_cache_hash_after == it): source_pre when no scheduled operation targets the source cache; else the after_hash of the last applied source operation (FX-SRC-CELL-INCREMENT postcondition)",
+        "symbols.HARNESS_HASH:source_pre = the FX-SRC-META-ATTR after_hash when that before_run operation was applied (frozen postcondition 'recorded as HARNESS_HASH:source_pre before CAPTURED')",
+        "symbols.HARNESS_HASH:onset_after_mutation = the FX-ONSET-CELL-SHIFT after_hash",
+        "evidence-projection.json harness.fixture_operations {entries[*] {index, fixture_operation, target, status, before_hash, after_hash, ...}, symbols, missing, outside_run_dir} and harness.repo_copy; notes.fixture_operations",
+        "the controller's own evidence of each operation's effect: request.messages (FX-LEDGER-APPEND before_run), operator-ledger.jsonl (FX-LEDGER-APPEND later / FX-OPERATOR-RECORD), gate_reports (FX-REPORT-RESERIALIZE), build_hash / HARNESS_MANIFEST_HASH:current (repository operations)"
+      ],
+      "missing_fields": [
+        {"field": "HARNESS_HASH:source_expected_after when a scheduled source operation was not applied (unreached, unsupported, error)", "owner": "CAP-FIXTURE-OP (MISSING with the entry statuses, never source_pre)"},
+        {"field": "HARNESS_HASH:onset_after_mutation when the scheduled FX-ONSET-CELL-SHIFT was not applied", "owner": "CAP-FIXTURE-OP"},
+        {"field": "harness.fixture_operations / HARNESS_HASH:onset_after_mutation on the scored in-container projection", "owner": "container_harness/project_in_container.py INPUT_KEYS (not in this change: carries source_pre/source_expected_after only)"},
+        {"field": "every repository operation in pre-staged (container) case mode", "owner": "container_harness/case_driver.py prepare (stage_repo_copy untraced, pass profile['prepared_repo']); refused until it does"},
+        {"field": "FX-RUNTIME-MANIFEST-BUMP against the real controller repository", "owner": "repository content: it carries no runtime-manifest.json, so the operation is refused (nothing is seeded)"}
+      ],
+      "mapping_choices_for_review": [
+        "source_expected_after = source_pre for a case whose scheduled operations target nothing in the source cache (FIXTURE_TARGETS classification of every delivered operation); this replaces CAP-SYMBOLS' 'any mutate_fixture entry -> MISSING' for the cases CAP-FIXTURE-OP runs",
+        "an unreached source operation leaves source_expected_after MISSING (its postcondition hash was never observed), even though the source is then expected unchanged",
+        "complete arguments = exactly the frozen argument key set of the operation (DEV-ONLY fixture_operations, identical in every frozen use); FX-REPORT-RESERIALIZE only with member_order reverse, indent 2, report == the selected tool(artifact); FX-STDERR-APPEND occurrence == the selector occurrence; FX-ONSET-CELL-SHIFT artifact onset; FX-SRC-CELL-INCREMENT must name its variable (the delivery default onset_precip_date is never used)",
+        "repository operations run on a disposable copy case_root/repo of the files catalog.build_manifest hashes plus the skills tree; the copy is accepted only if its build manifest equals the source's, so the controller's binding is the same as on the source repository",
+        "FX-RUNTIME-MANIFEST-BUMP needs a runtime-manifest.json in the controller repository; the real repository has none, so it is refused rather than a build_id seeded; the tests use a stand-in repository with build_id build-1",
+        "created paths outside HARNESS_RUN_DIR in container case mode: FX-SRC-META-ATTR and FX-SRC-CELL-INCREMENT (zarr 3 <key>.<uuid>.partial temp files in source/source.zarr, then renamed) -- listed in fixture_operations.outside_run_dir; the repository copy itself when staged in run_case (refused in pre-staged mode); FX-DEF-PARAM-EDIT / FX-RUNTIME-MANIFEST-BUMP rewrite existing files in place and FX-DEF-TOUCH changes mtime only (no new entry); ledger, stream and onset operations write in memory or under run/"
+      ],
+      "tests": [
+        "tests/test_fixture_rereview_adapter.py::test_e03_p1_ledger_append_is_delivered_and_the_widened_goal_is_stopped",
+        "tests/test_fixture_rereview_adapter.py::test_e05_p1_definition_edit_blocks_and_touch_releases_on_the_repo_copy",
+        "tests/test_fixture_rereview_adapter.py::test_e08_p1_ctl_reserialized_report_releases",
+        "tests/test_fixture_rereview_adapter.py::test_fixture_cases_resolve_source_expected_after_and_pass_u13",
+        "tests/test_fixture_rereview_adapter.py::test_fixture_plan_refuses_incomplete_or_unreachable_operations_before_side_effects",
+        "tests/test_fixture_rereview_adapter.py::test_unapplied_operations_keep_their_symbols_missing",
+        "tests/test_fixture_rereview_adapter.py::test_repo_copy_is_refused_in_prestaged_mode_and_reverified_when_adopted",
+        "tests/test_fixture_rereview_adapter.py::test_unsigned_records_keep_the_cases_not_implemented"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-REREVIEW": {
+      "d4_gated": true,
+      "method": "record_material_changes",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/runner.py", "line": 1168, "symbol": "Controller.rereview_integrity (from integrity, line 1152)", "emits": "while an approval is active and nothing is produced: source / manifest / request / plan changes collected and raised as ReturnToReview; a goal change recorded and refused"},
+        {"file": "tools/workflow/runner.py", "line": 1258, "symbol": "Controller.record_material_change", "emits": "context.material_changes[i] {index, object, to_hash, state, sequence} + material-change-NNN.json + material_change dispatch event"},
+        {"file": "tools/workflow/runner.py", "line": 1268, "symbol": "Controller.return_to_review (via drive, line 1879)", "emits": "withdraws the approved transitions from the checkpoint, moves the active approval to superseded_approvals with invalidated_by, context.rereviews[i] {index, plan_hash, material_changes, withdrawn_states, binding_hash, returned_to, operator_decision} + return_to_review dispatch event; MAX_REREVIEWS_PER_PLAN (line 138) refuses a third re-review of one plan at review_binding"},
+        {"file": "tools/workflow/runner.py", "line": 1353, "symbol": "Controller.recheck_source", "emits": "context.source_rechecks[i] {index, source_hash, verdict PASS|FAIL, sequence} + source-recheck-NNN.json + source_recheck dispatch event"},
+        {"file": "tools/workflow/runner.py", "line": 659, "symbol": "Controller.issue_active_approval", "emits": "the re-reviewed approval replacing the withdrawn one: replaces = the last superseded approval_id, active-approval-NNN.json, active_approval dispatch event (event_seq['controller_trace.active_approval'] = issuance of the CURRENT approval)"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 463, "symbol": "transition_history (called from evidence_projection.Projection.states)", "emits": "the surviving transition history replayed from the dispatch clock with each return_to_review's withdrawn_states (checked against context.rereviews and the checkpoint history); notes.withdrawn_transitions"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 512, "symbol": "rereview_lists / superseded_chain (line 553)", "emits": "controller_trace.material_changes / source_rechecks verbatim after each record matches its file and dispatch event; event_seq['controller_trace.<list>[index=<i>]']; superseded approvals checked against their issued files and the replaces link; notes.rereview"},
+        {"file": "adapter_support/fixture_rereview_projection.py", "line": 590, "symbol": "rereview_report (WeatherAdapter.record_material_changes, weather_adapter.py:579)", "emits": "material_changes, source_rechecks, active_approval, their event keys, missing entries and the rereview notes of one projection"}
+      ],
+      "evidence_fields": [
+        "controller_trace.material_changes[*] {index, object (request|goal|plan|manifest|source), to_hash, state, sequence}",
+        "controller_trace.source_rechecks[*] {index, source_hash, verdict, sequence}",
+        "controller_trace.active_approval (the re-reviewed approval, replaces = the approval it supersedes) and event_seq['controller_trace.active_approval'] = its issuance",
+        "event_seq['controller_trace.material_changes[index=<i>]'], event_seq['controller_trace.source_rechecks[index=<i>]']",
+        "controller_trace.states: the surviving, duplicate-free history (withdrawn transitions in notes.withdrawn_transitions with their sequences)"
+      ],
+      "missing_fields": [
+        {"field": "controller_trace.material_changes / source_rechecks when the run did not finish", "owner": "CAP-REREVIEW (MISSING: later changes could still be recorded)"},
+        {"field": "controller_trace.authorizations for a withdrawn AUTHORIZED transition", "owner": "CAP-LEDGER-SEED (pre_review_projection.authorizations still counts every AUTHORIZED transition event, withdrawn ones included; not exercised by the frozen E15-P1 cases, whose changes precede AUTHORIZED)"}
+      ],
+      "mapping_choices_for_review": [
+        "no list in a finished run whose gap-free dispatch clock holds no material_change (source_recheck) event -> [] with a note (the controller emits one event per detection); unfinished -> MISSING",
+        "a change the controller refuses instead of recording (e.g. a definition edit that fails build_manifest's definition check at review_binding) is not a material change record; material_changes stays [] for that run",
+        "controller_trace.states is the surviving checkpoint history, not every entry: the frozen run_evidence validator requires a duplicate-free subsequence of the profile states, and a re-reviewed REVIEW_APPROVED is entered twice; the state clock is the surviving transition's sequence",
+        "X3 (defect, fixed in the projection): Projection.states required the transition dispatch events to equal the checkpoint history, so every material-change re-review run was refused ('transition events differ from the checkpoint history'); the history is now replayed from the controller's own return_to_review records"
+      ],
+      "tests": [
+        "tests/test_fixture_rereview_adapter.py::test_x3_rereview_run_projects_with_the_surviving_history",
+        "tests/test_fixture_rereview_adapter.py::test_e15_p1_ctl_two_rereviews_release_under_the_replacing_approval",
+        "tests/test_fixture_rereview_adapter.py::test_e15_p1_inj_third_change_stops_at_the_rereview_cap",
+        "tests/test_fixture_rereview_adapter.py::test_rereview_lists_are_empty_only_for_a_finished_run",
+        "tests/test_fixture_rereview_adapter.py::test_tampered_rereview_records_refuse_the_projection"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
     }
   }
 }

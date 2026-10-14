@@ -503,9 +503,12 @@ class Projection:
     # ---- controller trace (EC:controller_trace)
     def states(self):
         events = self.n.checkpoint["events"]
-        transitions = self.n.kinds("transition")
-        if [t["transition"] for t in transitions] != events:
-            raise EvidenceMappingError("transition events differ from the checkpoint history")
+        # CAP-REREVIEW (review finding X3): a return to review withdraws transitions from the
+        # checkpoint but not their dispatch events; the controller's own return_to_review
+        # record says which, so the surviving history is rebuilt from it (frx).
+        transitions, withdrawn = frx.transition_history(self.n)
+        if withdrawn:
+            self.notes.append({"withdrawn_transitions": withdrawn})
         states = [events[0]["from"]] if events else [self.n.checkpoint["state"]]
         for t in transitions:
             states.append(t["transition"]["to"])
@@ -628,6 +631,8 @@ class Projection:
 
     def pending_lists(self, trace):
         for name, (capability, ident) in PENDING_TRACE_LISTS.items():
+            if name in frx.REREVIEW_LISTS:
+                continue  # checked projection: frx.rereview_lists (CAP-REREVIEW)
             if name in RECOVERY_LEDGER_LISTS:
                 value, reason = self.recovery_list(name)
                 if value is None:
@@ -1173,6 +1178,7 @@ class Projection:
             # value is simply absent, a CAP-SYMBOLS gap.
             owner = "CAP-FIXTURE-OP" if "CAP-FIXTURE-OP" in reason else "CAP-SYMBOLS"
             self.gap("symbols.HARNESS_HASH:source_expected_after", owner, reason)
+        frx.project_fixture_symbols(self, out)  # CAP-FIXTURE-OP: onset_after_mutation
         try:
             out["HARNESS_HASH:source"] = catalog.tree_hash(cp["source"])
         except Exception as exc:  # declared, never swallowed
@@ -1237,6 +1243,7 @@ class Projection:
         if operator_actions is not None:
             trace["operator_actions"] = operator_actions
         self.pending_lists(trace)
+        frx.rereview_lists(self, trace)
         processes, transport = self.process_receipts(approval)
         launch_checks = self.launch_checks()
         harness = self.harness_observations()
@@ -1608,4 +1615,5 @@ def run_provenance(run_dir, harness_dir, markers, tags=None):
 
 
 # Imported last: pre_review_projection imports EvidenceMappingError from this module.
+from adapter_support import fixture_rereview_projection as frx  # noqa: E402
 from adapter_support import pre_review_projection as prp  # noqa: E402
