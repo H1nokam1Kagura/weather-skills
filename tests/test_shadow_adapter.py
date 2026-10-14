@@ -36,7 +36,11 @@ from tools.workflow.persistence import read_checkpoint
 from tools.workflow.profiles import stages
 
 PREFIX = "DEV-E2E-V2_7-"
-SIGN = {"reviewer": "test-local", "reviewed_at": "2026-10-14T00:00:00Z", "reviewed_commit": "0" * 40}
+SIGN = {
+    "reviewer": "test-local",
+    "reviewed_at": "2026-10-14T00:00:00Z",
+    "reviewed_commit": "0" * 40,
+}
 CASE_KEYS = (
     "id",
     "profile",
@@ -170,7 +174,8 @@ def test_e09_p1_ctl_four_current_decisions_are_accepted_and_the_run_releases(e09
     bundle = probe(frozen, "E09-P1-CTL", "clean release")
     assert ctl.evidence["role_output"]["shadow_policy"] == bundle["role_output"]["shadow_policy"]
     projected = [
-        {k: d[k] for k in ("state", "accepted", "action", "score")} for d in trace["shadow_decisions"]
+        {k: d[k] for k in ("state", "accepted", "action", "score")}
+        for d in trace["shadow_decisions"]
     ]
     assert projected == bundle["controller_trace"]["shadow_decisions"]
     symbols = ctl.evidence["symbols"]
@@ -178,9 +183,10 @@ def test_e09_p1_ctl_four_current_decisions_are_accepted_and_the_run_releases(e09
         assert symbols[f"HARNESS_CANDIDATE_LABEL:{state}.proceed"] == label
         assert symbols[f"HARNESS_CANDIDATE_LABEL:{state}.stop"] == "STOP"
     for decision in native:
-        assert symbols[f"HARNESS_DECISION_FINGERPRINT:{decision['state']}"] == decision[
-            "question_hash"
-        ]
+        assert (
+            symbols[f"HARNESS_DECISION_FINGERPRINT:{decision['state']}"]
+            == decision["question_hash"]
+        )
     assert not [m for m in ctl.report["missing"] if m["capability"] == sp.CAPABILITY]
     # Frozen scorer: U0 and every run_evidence validator (V25 record lists and the shadow
     # decision reconciliation included) find no FAIL.
@@ -189,9 +195,7 @@ def test_e09_p1_ctl_four_current_decisions_are_accepted_and_the_run_releases(e09
         assert fails(found) == [], name
 
 
-def test_e09_p1_inj_four_malformed_decisions_are_rejected_and_the_path_is_unchanged(
-    e09, frozen
-):
+def test_e09_p1_inj_four_malformed_decisions_are_rejected_and_the_path_is_unchanged(e09, frozen):
     ctl, inj = e09["CTL"], e09["INJ"]
     trace = inj.evidence["controller_trace"]
     assert trace["terminal"]["outcome"] == "RELEASED" and trace["states"] == stages("onset_map")
@@ -207,10 +211,14 @@ def test_e09_p1_inj_four_malformed_decisions_are_rejected_and_the_path_is_unchan
     assert native[1]["action"] == "RELEASE_NOW" and native[2]["score"] == "NaN"
     assert all(d["applied"] is False and d["authority_granted"] is False for d in native)
     # The deterministic path is the control's: same tools in the same order, same states.
-    assert tools(inj) == tools(ctl) and trace["states"] == ctl.evidence["controller_trace"]["states"]
+    assert (
+        tools(inj) == tools(ctl) and trace["states"] == ctl.evidence["controller_trace"]["states"]
+    )
     # Entry 0's stale fingerprint names SOURCE_CHECKED, where no shadow question exists: the
     # labelled harness stand-in, recorded on the receipt, never a controller value.
-    (stale,) = [r for r in receipts[0]["substitutions"][0]["resolutions"] if "FINGERPRINT" in r["symbol"]]
+    (stale,) = [
+        r for r in receipts[0]["substitutions"][0]["resolutions"] if "FINGERPRINT" in r["symbol"]
+    ]
     assert stale["symbol"] == "HARNESS_DECISION_FINGERPRINT:SOURCE_CHECKED"
     assert stale["source"] == "harness_authored_stale_fingerprint"
     assert stale["value"] == digest({"harness_stale_fingerprint": stale["symbol"]})
@@ -219,7 +227,8 @@ def test_e09_p1_inj_four_malformed_decisions_are_rejected_and_the_path_is_unchan
     bundle = probe(frozen, "E09-P1-INJ", "all rejected, release")
     assert inj.evidence["role_output"]["shadow_policy"] == bundle["role_output"]["shadow_policy"]
     projected = [
-        {k: d[k] for k in ("state", "accepted", "action", "score")} for d in trace["shadow_decisions"]
+        {k: d[k] for k in ("state", "accepted", "action", "score")}
+        for d in trace["shadow_decisions"]
     ]
     assert projected == bundle["controller_trace"]["shadow_decisions"]
     (note,) = [n["shadow_policy"] for n in inj.report["notes"] if "shadow_policy" in n]
@@ -244,6 +253,7 @@ def test_cap_shadow_is_declared_only_by_a_signed_record(frozen, lab, tmp_path):
     assert "CAP-SHADOW" in WeatherAdapter(producers=signed()).implemented_capabilities()
     adapter = WeatherAdapter(enable_run_case=True)  # the committed, unsigned record
     case = run_input(frozen, "E09-P1-CTL")
+    case["id"] += "-LOCAL-UNSIGNED"  # the e09 fixture staged the frozen id's source
     profile = lab.profile(MAP_GOAL, case, stub=None)
     profile["case_root"] = tmp_path / "never-E09-P1-CTL"
     with pytest.raises(AdapterRefusal, match="CAP-SHADOW"):
@@ -262,11 +272,14 @@ def test_drive_shadow_policy_declares_the_controllers_points_and_vocabulary(froz
     assert plan["configured"] and plan["policy_mode"] == runner.shadow.MODE
     assert plan["role_mode"] == "substituted"
     assert plan["invocation_points"] == list(policy.SHADOW_STATES)
-    assert plan["vocabulary"] == {s: {"proceed": p, "stop": "STOP"} for s, p in vocabulary().items()}
+    assert plan["vocabulary"] == {
+        s: {"proceed": p, "stop": "STOP"} for s, p in vocabulary().items()
+    }
     assert [e["index"] for e in plan["entries"]] == [0, 1, 2, 3]
-    assert sp.schedule_without_shadow(run_input(frozen, "E09-P1-INJ"), plan)[
-        "injection_schedule"
-    ] == []
+    assert (
+        sp.schedule_without_shadow(run_input(frozen, "E09-P1-INJ"), plan)["injection_schedule"]
+        == []
+    )
     # A case naming no shadow role runs the controller's rules mode: nothing is declared.
     plain = adapter.drive_shadow_policy(run_input(frozen, "E01-P1-CTL"))
     assert plain == {"capability": sp.CAPABILITY, "configured": False, "policy_mode": "rules"}
@@ -322,10 +335,12 @@ def test_unmappable_shadow_schedules_are_refused_never_skipped(frozen, change, m
         WeatherAdapter().drive_shadow_policy(case)
 
 
-def question(state="GOAL_CHECKED", **change):
+def question(state="GOAL_CHECKED", rehash=False, **change):
     sequence = stages("onset_map")
     q = policy.shadow_question(state, sequence[sequence.index(state) + 1], "b", {"x": 1})
     q.update(change)
+    if rehash:
+        q["question_hash"] = sp.question_body_hash(q)
     return q
 
 
@@ -349,7 +364,7 @@ def test_the_double_answers_only_an_armed_bound_controller_question(frozen):
     with pytest.raises(rs.SubstitutionUnavailable, match="does not bind its body"):
         driver.decide(question(binding_hash="changed after fingerprinting"))
     with pytest.raises(rs.SubstitutionUnavailable, match="declared vocabulary"):
-        driver.decide(question(candidates={"proceed": "X", "stop": "STOP"}))
+        driver.decide(question(rehash=True, candidates={"proceed": "X", "stop": "STOP"}))
     with pytest.raises(rs.SubstitutionUnavailable, match="PLAN_VALIDATED question"):
         driver.decide(question("PLAN_VALIDATED"))
     q = question()

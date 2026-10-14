@@ -97,7 +97,7 @@
         "symbols{HARNESS_RUN_DIR, HARNESS_SOURCE_CACHE, HARNESS_REQUEST_HASH(:current), HARNESS_MANIFEST_HASH:current, HARNESS_GOAL_HASH:current, HARNESS_GOAL_HASH:authorized (harness-supplied variant goal via the controller digest), HARNESS_PLAN_HASH:current/vN (plan-version hashes: contracts.plan_version_hash(plan, plan_claims), the same value as every plan_hash they are compared with, so a claims-only repair gets its own :vN), HARNESS_HASH:source/source_pre/source_expected_after, HARNESS_CONTROLLER_PID, HARNESS_PID:<tool> (single launch only), HARNESS_RESOLVED_ARTIFACT_PATH:onset/map, HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling}"
       ],
       "missing_fields": [
-        {"field": "HARNESS_CANDIDATE_LABEL:*, HARNESS_DECISION_FINGERPRINT:*", "owner": "CAP-SHADOW (read only through role_output.shadow_policy vocabularies / shadow cases)"},
+        {"field": "HARNESS_CANDIDATE_LABEL:*, HARNESS_DECISION_FINGERPRINT:* through resolve_symbol", "owner": "CAP-SHADOW (produced into evidence.symbols for shadow_policy-mode runs by adapter_support/shadow_projection.py project, from the controller's own shadow questions; resolve_symbol's closed table still excludes them, test_symbol_resolver_is_a_closed_native_table)"},
         {"field": "HARNESS_HASH:onset_after_mutation", "owner": "CAP-FIXTURE-OP (one case)"},
         {"field": "HARNESS_HASH:onset_partial_at_interrupt", "owner": "CAP-MIDPROCESS (one case)"},
         {"field": "HARNESS_HASH:source_expected_after for a case with a mutate_fixture entry", "owner": "CAP-FIXTURE-OP (records the expected hash when it applies the operation)"},
@@ -160,7 +160,7 @@
         {"file": "tools/workflow/runner.py", "line": 1448, "symbol": "Controller.accept_review_output", "emits": "frozen reviewer shape accepted (UC-03)"}
       ],
       "evidence_fields": ["role_output.<role>[k] for every contract role (empty list when never invoked)", "compiler_N[0].goal", "planner/repairer: plan (controller plan.steps), controller_plan (verbatim), claims (from claims or plan_claims), needs_info, rationale, response", "reviewer verbatim", "verifier {verdict (D8), sub_reason, returned_output}", "evidence_checker verbatim"],
-      "missing_fields": [{"field": "role_output.shadow_policy outputs", "owner": "CAP-SHADOW (role not produced at base; emitted as [] only because the role is never invoked)"}],
+      "missing_fields": [],
       "mapping_choices_for_review": ["plan.steps -> plan (full plan kept as controller_plan)", "plan_claims -> claims", "verifier verdict = controller-recorded D8 verdict, raw output kept as returned_output", "unknown output fields are passed through and listed in notes.unmapped_role_output_fields"],
       "tests": ["test_released_projection_maps_native_records_without_filling", "test_needs_info_stop_and_visible_synthetic_marker"],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
@@ -651,6 +651,111 @@
       "reviewed_commit": "8b7a8c40e4edaa8129ddeff9e635b8c07b85c3dd",
       "review_verdict": "APPROVE_WITH_NOTES",
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w4/D4-REREVIEW.md"
+    },
+    "CAP-SHADOW": {
+      "d4_gated": true,
+      "method": "drive_shadow_policy",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {
+          "file": "tools/workflow/shadow.py",
+          "line": 49,
+          "symbol": "after_transition",
+          "emits": "native producer: in policy mode shadow_policy, after GOAL_CHECKED, PLAN_VALIDATED, ONSET_CHECKED and DATA_VERIFIED asks role shadow_policy the fingerprinted question, validates the answer (policy.shadow_rejection) and records {index, state, accepted, action, score, question_hash, reason, authority_granted false, applied false, output_hash} in context.shadow_decisions (line 76), shadow-decision-NNN.json (line 90) and a shadow_decision dispatch event (line 91); never changes course"
+        },
+        {
+          "file": "tools/workflow/policy.py",
+          "line": 43,
+          "symbol": "SHADOW_STATES / shadow_candidates (50) / shadow_question (57) / shadow_rejection (75)",
+          "emits": "the invocation points, the per-state candidate vocabulary {proceed: PROCEED_TO_<next>, stop: STOP}, the question (question_hash over every key but context) and the rejection reasons"
+        },
+        {
+          "file": "tools/workflow/runner.py",
+          "line": 657,
+          "symbol": "Controller.advance",
+          "emits": "shadow.after_transition(self, target) right after the after_transition emit (line 652) of every committed transition"
+        },
+        {
+          "file": "adapter_support/shadow_projection.py",
+          "line": 129,
+          "symbol": "shadow_plan (WeatherAdapter.drive_shadow_policy)",
+          "emits": "declaration {configured, policy_mode, role_mode, invocation_points, vocabulary (policy.shadow_candidates over the profile states), entries}; every after_transition replace_role_output entry mapped or AdapterRefusal before any side effect"
+        },
+        {
+          "file": "adapter_support/shadow_projection.py",
+          "line": 239,
+          "symbol": "ShadowDriver.__call__ / decide (264) / bind_receipt (335)",
+          "emits": "arms the entry scheduled at after_transition <S> occurrence k; the substituted double answers the next shadow question (checked: role, schema, question_hash binds the body, candidates equal the declared vocabulary, state equals the armed stage) with the entry's payload, symbols resolved against that question; receipt baseline_output_hash null + substitutions[] {hook after_transition, schedule_indexes, delivered_output_hash, frozen_payload_hash, resolutions[{path, symbol, value, source}]}"
+        },
+        {
+          "file": "adapter_support/role_substitution.py",
+          "line": 593,
+          "symbol": "SubstitutedRoles.baseline (shadow branch; ask binds the receipt at 532; SHADOW_ROLE at 73)",
+          "emits": "shadow_policy accepted as a substituted role; answers only through the attached ShadowDriver, else SubstitutionUnavailable (no frozen baseline)"
+        },
+        {
+          "file": "adapter_support/weather_adapter.py",
+          "line": 390,
+          "symbol": "WeatherAdapter.run_case (driver attached at 427; Controller policy_mode at 446; drive_shadow_policy at 585)",
+          "emits": "policy_mode shadow_policy for a case naming a shadow_policy role, refused unless CAP-SHADOW is declared; shadow entries delivered by the driver (chained behind HarnessLaunchObserver), the rest of the schedule by InjectionHooks; evidence-projection.json harness.shadow_schedule {invocation_points, vocabulary, entries, coverage, stale_fingerprint_rule}"
+        },
+        {
+          "file": "adapter_support/shadow_projection.py",
+          "line": 432,
+          "symbol": "project (called from evidence_projection.project_run, line 1400)",
+          "emits": "controller_trace.shadow_decisions, role_output.shadow_policy in the contract vocabulary, symbols HARNESS_CANDIDATE_LABEL:<S>.<m> and HARNESS_DECISION_FINGERPRINT:<S>, notes.shadow_policy; refuses a decision that differs from its file or dispatch event, or that pairs with no shadow_policy invocation"
+        }
+      ],
+      "evidence_fields": [
+        "controller_trace.shadow_decisions[*] {state, accepted, action, score} plus the native index, question_hash, reason, authority_granted, applied, output_hash (EVIDENCE_CONTRACT.md controller_trace.shadow_decisions)",
+        "role_output.shadow_policy[k] {schema, state, question_fingerprint, action, score} (one per returned shadow_policy receipt, receipt order)",
+        "symbols HARNESS_CANDIDATE_LABEL:<S>.proceed / .stop = the controller's candidate label; HARNESS_DECISION_FINGERPRINT:<S> = the question_hash of the controller's question at S",
+        "invocation_receipts[role=shadow_policy] (CAP-RECEIPTS) with mode substituted",
+        "evidence-projection.json harness.shadow_schedule"
+      ],
+      "missing_fields": [
+        {
+          "field": "controller_trace.shadow_decisions when the checkpoint records no policy_mode, or in shadow_policy mode without a native list unless the run finished with no shadow decision event and no shadow_policy invocation",
+          "owner": "CAP-SHADOW (MISSING with the reason, never [])"
+        },
+        {
+          "field": "live shadow_policy decisions (E09-P2-CTL / -INJ)",
+          "owner": "CAP-LIVE-ROLE (not built); drive_shadow_policy declares the live case (role_mode live, no entries) but no live transport runs it"
+        },
+        {
+          "field": "harness_observations.free_ram_at_shadow_gib, harness_observations.budget_ok_at_shadow (E09-P2 J1)",
+          "owner": "not produced: no harness RAM/budget reading is taken at the shadow invocation"
+        },
+        {
+          "field": "a shadow invocation the schedule does not cover (re-entered shadow state, occurrence > 1)",
+          "owner": "CAP-SHADOW: no frozen shadow baseline; the substituted double fails closed (SubstitutionUnavailable, an observed dispatch failure) and the run stops"
+        }
+      ],
+      "mapping_choices_for_review": [
+        "Delivery channel: the frozen E09-P1 entries are replace_role_output at after_transition <S>. The controller emits after_transition, then asks shadow_policy for that same transition (runner.py 652 then 657), so the entry is the output of the shadow invocation that follows that emit. InjectionHooks keeps refusing replace_role_output at after_transition (unsupported_requirements and _apply unchanged); these entries are removed from its schedule and delivered by ShadowDriver. A schedule mixing them with other entries is refused (one index space; no frozen case mixes them).",
+        "No shadow baseline: the substituted double answers only with a scheduled decision; shadow_plan refuses a substituted shadow_policy without a decision for every invocation point at occurrence 1; receipts carry baseline_output_hash null.",
+        "Symbol resolution at delivery, from the question being answered (frozen spec assumption: HARNESS_CANDIDATE_LABEL:<state>.proceed is read from each decision object's own candidate list): a label must name the entry's own state and a meaning in its candidates (refused statically otherwise).",
+        "Stale fingerprint (stale-fingerprint/v1, verbatim in shadow_projection.STALE_FINGERPRINT_RULE): HARNESS_DECISION_FINGERPRINT:<S> = the question_hash of the controller's question at S (the current one, else the latest earlier one). E09-P1-INJ entry 0 names SOURCE_CHECKED, not an invocation point, so no controller fingerprint exists: the harness delivers digest({'harness_stale_fingerprint': symbol}), labelled harness_authored_stale_fingerprint on the receipt; the controller's own check rejects it (stale question fingerprint).",
+        "Contract vocabulary in the projection: native candidate labels (PROCEED_TO_<next>) and question hashes are projected as HARNESS_CANDIDATE_LABEL:<S>.<meaning> and HARNESS_DECISION_FINGERPRINT:<S> in role_output.shadow_policy and controller_trace.shadow_decisions. Reason: frozen V25-EVIDENCE record_lists make role_output.shadow_policy.action a closed vocabulary of exactly those symbols plus RELEASE_NOW/proceed, compared literally, and question_fingerprint must be hash-shaped, which the controller's bare-hex digest is not. evidence.symbols carries the native values; the harness stand-in maps back from the receipt resolution; anything else stays verbatim. Native values are listed in notes.shadow_policy.mapped.",
+        "shadow_decisions = [] when the checkpoint's policy_mode is not shadow_policy (shadow.enabled false: the controller asks nothing), and when a shadow_policy-mode run finished with no shadow_decision event and no shadow_policy invocation; otherwise MISSING. This also changes every non-E09 projection from MISSING to [].",
+        "policy_mode: run_case sets shadow_policy exactly when the case names shadow_policy under agent_roles live or substituted (only E09-*); every other frozen case lists it not_invoked and keeps rules mode.",
+        "Invocation points are the controller's four (policy.SHADOW_STATES). The frozen spec assumption gives E09-P2 one point (ONSET_CHECKED); the controller asks at four, so E09-P2's shadow_policy occurrence 1 would be GOAL_CHECKED, not ONSET_CHECKED. Not reached here (E09-P2 needs CAP-LIVE-ROLE); flagged for the controller owner."
+      ],
+      "tests": [
+        "tests/test_shadow_adapter.py::test_e09_p1_ctl_four_current_decisions_are_accepted_and_the_run_releases",
+        "tests/test_shadow_adapter.py::test_e09_p1_inj_four_malformed_decisions_are_rejected_and_the_path_is_unchanged",
+        "tests/test_shadow_adapter.py::test_cap_shadow_is_declared_only_by_a_signed_record",
+        "tests/test_shadow_adapter.py::test_drive_shadow_policy_declares_the_controllers_points_and_vocabulary",
+        "tests/test_shadow_adapter.py::test_unmappable_shadow_schedules_are_refused_never_skipped",
+        "tests/test_shadow_adapter.py::test_the_double_answers_only_an_armed_bound_controller_question",
+        "tests/test_shadow_adapter.py::test_shadow_decisions_are_empty_only_when_the_controller_proves_none_exist",
+        "tests/test_shadow_adapter.py::test_tampered_shadow_records_refuse_the_projection",
+        "tools/workflow/tests/test_rereview_shadow_v27.py (native controller shadow tests)"
+      ],
+      "notes": "Frozen cases needing only CAP-SHADOW beyond the signed records: DEV-E2E-V2_7-E09-P1-CTL and -INJ (both run in tests/test_shadow_adapter.py with this record signed in a test-local copy). CAP-SHADOW is in the frozen base method table (simkit.adapter.CAPABILITY_METHODS), so no extension_methods entry is needed. Declared only when an independent reviewer signs.",
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
     }
   }
 }

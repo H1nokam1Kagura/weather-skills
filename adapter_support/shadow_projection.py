@@ -83,7 +83,9 @@ def _mapping_error(message):
 
 
 def is_shadow_entry(spec):
-    return isinstance(spec, dict) and spec.get("hook") == HOOK and spec.get("operation") == OPERATION
+    return (
+        isinstance(spec, dict) and spec.get("hook") == HOOK and spec.get("operation") == OPERATION
+    )
 
 
 def _task_of(case):
@@ -376,7 +378,9 @@ class ShadowDriver:
             "coverage": {
                 "scheduled": len(self.plan["entries"]),
                 "applied": applied,
-                "unreached": [e["index"] for e in self.plan["entries"] if e["index"] not in applied],
+                "unreached": [
+                    e["index"] for e in self.plan["entries"] if e["index"] not in applied
+                ],
                 "records": copy.deepcopy(self.records),
             },
             "stale_fingerprint_rule": {
@@ -462,7 +466,9 @@ def project(projection, native):
         if native.finished() and not events and not shadow_records:
             trace["shadow_decisions"] = []
             projection["notes"].append(
-                {"shadow_policy": "shadow_policy mode; the finished run reached no invocation point"}
+                {
+                    "shadow_policy": "shadow_policy mode; the finished run reached no invocation point"
+                }
             )
         else:
             gap("shadow_policy mode but the controller recorded no shadow_decisions list")
@@ -531,7 +537,9 @@ def project(projection, native):
         if isinstance(output, dict):
             action = _contract_label(output.get("action"), question)
             if action != output.get("action"):
-                mapped.append({"output": len(outputs), "field": "action", "native": output["action"]})
+                mapped.append(
+                    {"output": len(outputs), "field": "action", "native": output["action"]}
+                )
                 output["action"] = action
             native_fp = output.get("question_fingerprint")
             if isinstance(native_fp, str) and native_fp in fingerprints:
