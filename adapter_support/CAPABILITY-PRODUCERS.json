@@ -304,6 +304,88 @@
       "tests": ["tests/test_weather_adapter.py::test_dependency_dispatch_methods_report_observed_dispositions_only"],
       "reviewer": null,
       "reviewed_at": null
+    },
+    "CAP-ROLE-SUBSTITUTE": {
+      "d4_gated": true,
+      "method": "substitute_role_output",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {
+          "file": "adapter_support/role_substitution.py",
+          "line": 384,
+          "symbol": "SubstitutedRoles.ask",
+          "emits": "the frozen baseline output of a substituted role plus a native agents.Roles-shape receipt (fresh invocation_id, distinct session_id, input_hash, output_hash, baseline_output_hash, mode substituted, cost_usd 0.0); reviewer receipts carry dispatch.stdin_hash of the exact payload"
+        },
+        {
+          "file": "tools/workflow/e2e_injections.py",
+          "line": 620,
+          "symbol": "InjectionHooks._apply (json_patch / replace_role_output at after_role)",
+          "emits": "the scheduled substitution applied in place to the answer at the controller's after_role emit; record {index, operation, before_hash, after_hash, status APPLIED}; unreached entries stay unreached"
+        },
+        {
+          "file": "adapter_support/role_substitution.py",
+          "line": 513,
+          "symbol": "CaseScheduleHooks.rebind",
+          "emits": "the substituted invocation's own receipt rebound to the delivered output: same receipt object, invocation_id and session_id; output_hash = digest(delivered); substitutions[] {schedule_indexes, operations, pre_substitution_output_hash, delivered_output_hash, adapter_mappings}; refuses any receipt that is not the double's own"
+        },
+        {
+          "file": "tools/workflow/runner.py",
+          "line": 807,
+          "symbol": "Controller.ask (after_role emit; dispatch receipt binding check at 816; role file at 847)",
+          "emits": "role-NNN-<role>.json {input, output, receipt} and dispatch_returned with the rebound receipt; the controller's own binding check still refuses an output that no receipt binds"
+        },
+        {
+          "file": "adapter_support/role_substitution.py",
+          "line": 282,
+          "symbol": "substitution_plan (WeatherAdapter.substitute_role_output)",
+          "emits": "static contract-to-native mapping of every after_role role-output entry, dry-run against the baseline; AdapterRefusal before any side effect for anything unmappable"
+        }
+      ],
+      "evidence_fields": [
+        "invocation_receipts[*].mode = substituted; session_id distinct and unchanged by substitution",
+        "role_output.<role>[k] = the delivered (substituted) output, bound by its receipt output_hash",
+        "checkpoint role_receipts[*].baseline_output_hash and substitutions[] (rebind provenance)",
+        "evidence-projection.json harness.case_schedule {entries, delegated, coverage (applied/unreached/records), rebinds}"
+      ],
+      "missing_fields": [
+        {
+          "field": "substituted output for a role that is also live in the same case (E06-P1, E07-P2, E10-P2 reviewer) and every live + substituted case (E01-P2, E04-P2, E05-P2, E06-P2, E09-P2, E13-P2, E15-P2)",
+          "owner": "CAP-LIVE-ROLE combining transport (not built): refused by substitute_role_output / substituted_roles_factory, never applied to a live role"
+        },
+        {
+          "field": "planner/repairer replacement carrying a bare plan step list (E07-P1 entry 2)",
+          "owner": "CAP-ROLE-SUBSTITUTE mapping decision pending review: refused (AdapterRefusal); see mapping_choices_for_review"
+        },
+        {
+          "field": "shadow_policy / router / verifier substitution at after_role",
+          "owner": "no frozen baseline (shadow_policy belongs to CAP-SHADOW); verifier: no frozen case substitutes it and the contract wraps it in returned_output; refused"
+        }
+      ],
+      "mapping_choices_for_review": [
+        "Delivery point: a substitution is applied at the controller's pre-commit after_role emit (InjectionHooks), and the substituted invocation's own receipt is rebound to the delivered output before the controller's dispatch receipt binding check. Reading of 'preserving receipts and session IDs': same receipt object, invocation_id and session_id; output_hash follows the delivered output; the pre-substitution hash is kept (baseline_output_hash, substitutions[].pre_substitution_output_hash).",
+        "Contract-to-native paths: compiler_N /goal/<f> -> native goal /<f>; compiler replacement {goal: G} -> G; planner/repairer /plan/<i>... -> /plan/steps/<i>..., /claims... -> /plan_claims..., /rationale identity; reviewer and evidence_checker identity (frozen shape is the native shape). Any other path is refused.",
+        "Baselines (CTL uses them; CTL and INJ both add their own schedule): compilers = the reference variant goal; planner = {schema workflow.review-envelope/1, plan expected_plan(goal), plan_claims C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE} taken from the frozen clean probe-bundle claims citing definition:agrhymet-sos-rolling sha256:3db5ec77...; repairer = the same envelope + a harness-authored response (the frozen text says only 'restates the claims verbatim and keeps the registered plan'); reviewer = APPROVE with approved_binding {plan_hash, source_hash} of the presented review_evidence and findings []; evidence_checker = SUPPORTED for every judged claim; verifier = PASS, binding_hash copied from the payload, scope data-replay.",
+        "The substituted planner/repairer fail closed (SubstitutionUnavailable: nothing returned, no receipt) unless the controller bound definition:agrhymet-sos-rolling with the frozen hash. The container case driver passes definition_source=None, so there the controller binds the TOML under the dot id and every planner-invoking substituted case stops at the planner dispatch until the D1 reference definition source is supplied.",
+        "Substituted reviewer receipts record dispatch.system_prompt as the literal marker 'SUBSTITUTED: no system prompt was sent; ...' (hash-consistent), not a prompt that was never sent.",
+        "Planner/repairer replacements carrying a bare step list (E07-P1, E07-P2) are refused instead of being wrapped into the native typed plan + envelope, because that would invent goal_hash, final, schema and plan_claims.",
+        "Live + substituted in one case is refused by the factory (case_driver keeps BLOCKED_LIVE for those); a role listed under agent_roles.not_invoked that the controller nevertheless invokes gets SubstitutionUnavailable (an observed dispatch failure), never a guessed output.",
+        "run_case now delivers the WHOLE case schedule through InjectionHooks chained behind HarnessLaunchObserver (before this change no schedule entry was applied at all). Non-role entries are listed as delegated and still need their own declared capabilities through admission; InjectionHooks' static unsupported_requirements findings refuse the case before any side effect."
+      ],
+      "notes": "Observed on E02-P1-INJ: the controller refuses at the first compiled goal that departs from the trusted goal, so compiler_2/3 are never invoked and their entries are reported unreached (never applied, never PASS). The method is in the frozen base table (simkit.adapter.CAPABILITY_METHODS), so no extension_methods entry is needed; this record is what keeps it undeclared until review.",
+      "tests": [
+        "tests/test_role_substitution_adapter.py::test_e02_p1_ctl_releases_with_three_empty_after_role_patches",
+        "tests/test_role_substitution_adapter.py::test_e02_p1_inj_patched_compilers_fail_the_goal_check_with_receipts_rebound",
+        "tests/test_role_substitution_adapter.py::test_e04_p1_ctl_releases_and_inj_output_path_fails_plan_validation",
+        "tests/test_role_substitution_adapter.py::test_e13_p1_ctl_baseline_claims_pass_both_gates_without_repair",
+        "tests/test_role_substitution_adapter.py::test_e13_p1_inj_non_verbatim_quote_routes_to_the_substituted_repairer",
+        "tests/test_role_substitution_adapter.py::test_e01_p1_ctl_all_substituted_roles_release_with_distinct_sessions",
+        "tests/test_role_substitution_adapter.py::test_unmappable_entries_are_refused_never_skipped",
+        "tests/test_role_substitution_adapter.py::test_run_case_refuses_unsupported_schedules_before_side_effects",
+        "tests/test_role_substitution_adapter.py::test_rebind_refuses_a_receipt_that_is_not_the_doubles_own",
+        "tests/test_role_substitution_adapter.py::test_substituted_double_fails_closed_without_the_frozen_bound_definition"
+      ],
+      "reviewer": null,
+      "reviewed_at": null
     }
   }
 }
