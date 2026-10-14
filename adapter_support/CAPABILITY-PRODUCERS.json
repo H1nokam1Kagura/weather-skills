@@ -756,6 +756,132 @@
       "reviewer": null,
       "reviewed_at": null,
       "reviewed_commit": null
+    },
+    "CAP-TRANSITION-REQUEST": {
+      "d4_gated": true,
+      "method": "submit_transition_request",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/operator_ledger.py", "line": 92, "symbol": "open_channel", "emits": "context.transition_requests = [] when the controller opens its channel (the transition interface exists from capture on: zero requests is observed, so [] is emitted, never an absent stream)"},
+        {"file": "tools/workflow/operator_ledger.py", "line": 348, "symbol": "submit_transition_request", "emits": "one record per request {request, from_state (controller state at submission), to_state, requested_by, result REJECTED, sequence, requested_via role_channel|transition_interface, reasons, claimed_from_state?, run_id?}: transition-request-NNN.json, transition_request dispatch event (event_seq), checkpoint; never calls advance(); a role-channel claim of resume/replan/repair_extension (repair_retry) also yields a rejected role_channel operator action (CAP-OPERATOR-ACTIONS)"},
+        {"file": "tools/workflow/runner.py", "line": 1048, "symbol": "Controller.request_transition", "emits": "the controller's transition interface (D20 CP-E15)"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 687, "symbol": "InjectionHooks._apply request_transition", "emits": "case-schedule delivery in run_case: forwards the resolved payload to controller.request_transition; schedule record delivered_to / controller_sequence; budget_override refused (unsupported_requirements, line 134, refuses such a case before any side effect); an operator resume without a role channel is left to CAP-RESUME"},
+        {"file": "adapter_support/operator_ledger_projection.py", "line": 66, "symbol": "submit_transition_request (WeatherAdapter.submit_transition_request)", "emits": "direct delivery to Controller.request_transition with the same refusals (budget_override, operator resume without a role channel, no interface); returns the controller's record"},
+        {"file": "adapter_support/operator_ledger_projection.py", "line": 155, "symbol": "transition_requests (via project, called from evidence_projection.Projection.run)", "emits": "controller_trace.transition_requests: each record checked against transition-request-NNN.json and its transition_request event; frozen fields plus requested_via / reasons / claimed_from_state; event_seq['controller_trace.transition_requests[<i>]']; MISSING with a reason when no channel was opened, never []"}
+      ],
+      "evidence_fields": [
+        "controller_trace.transition_requests[*] {request, from_state, to_state, requested_by, result ACCEPTED|REJECTED} (EC:controller_trace) plus the controller's requested_via, reasons, claimed_from_state",
+        "event_seq['controller_trace.transition_requests[<i>]'] = the transition_request dispatch event",
+        "controller_trace.operator_actions[source=role_channel] for a role-channel request claiming an operator action (projected by CAP-OPERATOR-ACTIONS)"
+      ],
+      "missing_fields": [
+        {"field": "controller_trace.transition_requests when no operator channel was opened", "owner": "harness configuration (run_case always opens it); MISSING, never []"},
+        {"field": "budget_override transition requests (resume overrides)", "owner": "CAP-RESUME (no budget-override request channel: refused before delivery; such a case is refused by unsupported_requirements before any side effect)"}
+      ],
+      "mapping_choices_for_review": [
+        "every request is REJECTED: no role channel holds transition authority and the controller decides transitions only through its own gates (operator_ledger.submit_transition_request); ACCEPTED is in the vocabulary but has no producer",
+        "request = payload.request, else payload.action, else the literal 'transition' (controller choice): E01-P1-INJ's payload names none, so its record reads request 'transition'",
+        "from_state is the controller state at submission; a payload from_state that differs is kept as claimed_from_state, never substituted",
+        "the frozen record carries no clock; the transition_request dispatch event is keyed controller_trace.transition_requests[<i>] (zero-based, like controller_trace.resume[<i>])",
+        "the controller's 1-based sequence, event_seq and run_id are not projected as contract fields"
+      ],
+      "tests": [
+        "tests/test_operator_ledger_capabilities.py::test_only_these_records_admit_the_four_frozen_cases",
+        "tests/test_operator_ledger_capabilities.py::test_unsigned_records_keep_the_frozen_cases_refused_before_side_effects",
+        "tests/test_operator_ledger_capabilities.py::test_no_channel_keeps_transition_requests_and_ledger_records_missing",
+        "tests/test_operator_ledger_capabilities.py::test_inconsistent_transition_or_ledger_records_refuse_the_projection",
+        "tests/test_operator_ledger_capabilities.py::test_e01_p1_inj_role_channel_release_request_is_rejected_and_the_run_releases",
+        "tests/test_operator_ledger_capabilities.py::test_e07_p1_inj_controller_stops_before_the_request_so_the_stream_is_observed_empty",
+        "tests/test_operator_ledger_capabilities.py::test_e07_p1_inj_local_variant_projects_the_rejected_repair_retry",
+        "tests/test_operator_ledger_capabilities.py::test_direct_transition_requests_go_to_the_controller_or_are_refused",
+        "tools/workflow/tests/test_operator_channel_v27.py"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-LEDGER-APPEND": {
+      "d4_gated": true,
+      "method": "append_ledger_record",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/operator_ledger.py", "line": 92, "symbol": "open_channel", "emits": "the run-scoped ledger created exclusively by the controller (run/operator-ledger.jsonl, inside HARNESS_RUN_DIR), bound to the operator run id"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 878, "symbol": "InjectionHooks._ledger_fixture FX-LEDGER-APPEND", "emits": "one literal line {record_id 'FX-LEDGER-APPEND:<entry id>', speaker assistant|user, text} appended at the live boundary (position after_authorization only); delivery record {target operator_ledger, record_id, record_hash, before_hash, after_hash, assigned_fields ['record_id']}; refuses a duplicate record_id, a ledger outside disposable_root, a missing channel, another position or speaker, empty text"},
+        {"file": "tools/workflow/operator_ledger.py", "line": 82, "symbol": "append_record", "emits": "append-only write of exactly one serialized record (fsync), never rewriting earlier bytes; returns the line hash"},
+        {"file": "tools/workflow/operator_ledger.py", "line": 286, "symbol": "consult / _decide (line 206)", "emits": "the controller's decision on each complete record at its wait boundary (operator_actions, CAP-OPERATOR-ACTIONS): an assistant record is rejected (speaker_not_user, run_id_missing)"},
+        {"file": "adapter_support/weather_adapter.py", "line": 488, "symbol": "WeatherAdapter.run_case (Controller operator_ledger_path=...)", "emits": "passes operator_ledger_path = run/operator-ledger.jsonl and delivers the case schedule's FX-LEDGER-APPEND entries through InjectionHooks (disposable_root = case root)"},
+        {"file": "adapter_support/operator_ledger_projection.py", "line": 87, "symbol": "append_literal_record (WeatherAdapter.append_ledger_record)", "emits": "direct delivery through the same native _ledger_fixture at a named live boundary (before_run refused: the pre-capture request-message path is CAP-LEDGER-SEED); returns the delivery record, never an acceptance"},
+        {"file": "adapter_support/operator_ledger_projection.py", "line": 202, "symbol": "ledger_records (via project)", "emits": "notes.operator_ledger_records: each consumed ledger line {line, record_hash, record_id, speaker, action, carries_run_id, controller_decision (the operator action or ledger rejection carrying that record_hash)}; refuses the projection if the consumed prefix no longer hashes to the controller's prefix_hash or a decision names a line the ledger lacks; MISSING without a channel or when the ledger file is unreadable"}
+      ],
+      "evidence_fields": [
+        "controller_trace.operator_actions[record_id=FX-LEDGER-APPEND:<id>] {source operator_ledger, speaker, action, accepted} (the controller's decision, projected by CAP-OPERATOR-ACTIONS)",
+        "notes.operator_ledger_records (harness note, not scored): consumed lines linked to the controller decision by line hash",
+        "evidence-projection.json harness.case_schedule.coverage.records[*] {operation mutate_fixture, target operator_ledger, record_id, record_hash, assigned_fields}"
+      ],
+      "missing_fields": [
+        {"field": "notes.operator_ledger_records when no operator channel was opened or the ledger file is unreadable at projection", "owner": "harness configuration (run_case always opens it); MISSING with the reason, never []"},
+        {"field": "FX-LEDGER-APPEND at before_run (request.messages insertion before capture)", "owner": "CAP-LEDGER-SEED (the request ledger, not the run-scoped operator ledger); not delivered by append_ledger_record"}
+      ],
+      "mapping_choices_for_review": [
+        "the frozen FX-LEDGER-APPEND args carry no record_id; the harness assigns 'FX-LEDGER-APPEND:<schedule entry id>' (listed in assigned_fields), the only non-literal field",
+        "no run_id is added to an FX-LEDGER-APPEND record (none is in the frozen args), so the controller also records run_id_missing for it",
+        "at a NEEDS-INFO wait a record without an action is read by the controller as the claimed answer (operator_ledger.IMPLIED_ACTIONS needs_info -> replan), so E03-P3-INJ's assistant record is recorded action replan, accepted false"
+      ],
+      "tests": [
+        "tests/test_operator_ledger_capabilities.py::test_only_these_records_admit_the_four_frozen_cases",
+        "tests/test_operator_ledger_capabilities.py::test_unsigned_records_keep_the_frozen_cases_refused_before_side_effects",
+        "tests/test_operator_ledger_capabilities.py::test_no_channel_keeps_transition_requests_and_ledger_records_missing",
+        "tests/test_operator_ledger_capabilities.py::test_inconsistent_transition_or_ledger_records_refuse_the_projection",
+        "tests/test_operator_ledger_capabilities.py::test_e03_p3_inj_assistant_record_is_appended_literally_and_rejected",
+        "tests/test_operator_ledger_capabilities.py::test_e03_p3_ctl_user_answer_with_the_harness_run_id_is_accepted_as_replan",
+        "tests/test_operator_ledger_capabilities.py::test_direct_ledger_appends_are_literal_and_only_the_controller_decides",
+        "tests/test_operator_ledger_capabilities.py::test_wrong_speaker_or_missing_channel_appends_are_refused",
+        "tests/test_evidence_projection_v27.py::test_operator_actions_from_a_real_ledger_answer"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-OPERATOR-RECORD-SETUP": {
+      "d4_gated": true,
+      "method": "append_attributed_operator_record",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/e2e_injections.py", "line": 878, "symbol": "InjectionHooks._ledger_fixture FX-OPERATOR-RECORD", "emits": "the five literal fields {record_id, speaker, action, run_id, text} appended verbatim (assigned_fields []); refuses any other field set, an empty field, a speaker other than user, an action outside answer|resume|replan, a duplicate record_id, a missing channel"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 304, "symbol": "InjectionHooks.resolve", "emits": "HARNESS_RUN_ID in the payload replaced from the schedule's symbol table; an unresolved HARNESS_* symbol refuses the entry"},
+        {"file": "adapter_support/operator_ledger_projection.py", "line": 130, "symbol": "operator_run_id_symbol (called from WeatherAdapter.run_case)", "emits": "HARNESS_RUN_ID = the harness-assigned operator run id that run_case also passes to the controller as operator_run_id (runner.py:281 open_channel binds it); set before any boundary is dispatched"},
+        {"file": "adapter_support/weather_adapter.py", "line": 489, "symbol": "WeatherAdapter.run_case Controller(operator_run_id=...)", "emits": "the controller's channel run_id; evidence-projection.json harness.operator_run_id"},
+        {"file": "tools/workflow/operator_ledger.py", "line": 206, "symbol": "_decide", "emits": "accepted only for speaker user + matching run_id + an action applicable at the boundary (answer -> replan, D30); an accepted replan records planner_occurrence before the planner dispatch"},
+        {"file": "tools/workflow/runner.py", "line": 1014, "symbol": "Controller.stop_needs_info", "emits": "the NEEDS-INFO wait boundary that consults the ledger; an accepted user answer re-invokes the planner within the original limits, else the NEEDS_INFO stop stands"},
+        {"file": "adapter_support/operator_ledger_projection.py", "line": 87, "symbol": "append_literal_record (WeatherAdapter.append_attributed_operator_record)", "emits": "direct delivery through the same native _ledger_fixture; returns the delivery record, never an acceptance"},
+        {"file": "adapter_support/operator_ledger_projection.py", "line": 202, "symbol": "ledger_records (via project)", "emits": "notes.operator_ledger_records linking the literal line to the controller's decision (as for CAP-LEDGER-APPEND)"}
+      ],
+      "evidence_fields": [
+        "controller_trace.operator_actions[record_id=<record_id>] {source operator_ledger, speaker user, action replan (answer, D30), accepted, planner_occurrence} (the controller's decision, projected by CAP-OPERATOR-ACTIONS)",
+        "notes.operator_ledger_records (harness note, not scored)",
+        "evidence-projection.json harness.operator_run_id and harness.case_schedule.coverage.records[*] (record_hash, assigned_fields [])"
+      ],
+      "missing_fields": [
+        {"field": "notes.operator_ledger_records when no operator channel was opened or the ledger file is unreadable at projection", "owner": "harness configuration; MISSING with the reason, never []"},
+        {"field": "symbols.HARNESS_RUN_ID in the projection", "owner": "CAP-SYMBOLS (closed symbol table; no frozen assertion of these cases reads it). The CAP-SYMBOLS record names CAP-RESUME / CAP-FIXTURE-OP as owners of the payload symbol, but E03-P3-CTL uses it and requires neither: run_case now supplies it to the schedule"}
+      ],
+      "mapping_choices_for_review": [
+        "HARNESS_RUN_ID (no frozen definition) = the harness-assigned operator run id ('harness-run-<uuid4>') that run_case hands the controller as operator_run_id; the controller checks every ledger record's run_id against it",
+        "acceptance is never read from the delivery: only controller_trace.operator_actions says accepted"
+      ],
+      "tests": [
+        "tests/test_operator_ledger_capabilities.py::test_only_these_records_admit_the_four_frozen_cases",
+        "tests/test_operator_ledger_capabilities.py::test_unsigned_records_keep_the_frozen_cases_refused_before_side_effects",
+        "tests/test_operator_ledger_capabilities.py::test_no_channel_keeps_transition_requests_and_ledger_records_missing",
+        "tests/test_operator_ledger_capabilities.py::test_inconsistent_transition_or_ledger_records_refuse_the_projection",
+        "tests/test_operator_ledger_capabilities.py::test_e03_p3_ctl_user_answer_with_the_harness_run_id_is_accepted_as_replan",
+        "tests/test_operator_ledger_capabilities.py::test_direct_ledger_appends_are_literal_and_only_the_controller_decides",
+        "tests/test_operator_ledger_capabilities.py::test_wrong_speaker_or_missing_channel_appends_are_refused",
+        "tools/workflow/tests/test_operator_channel_v27.py::test_fx_operator_record_appends_literal_without_claiming_acceptance"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
     }
   }
 }

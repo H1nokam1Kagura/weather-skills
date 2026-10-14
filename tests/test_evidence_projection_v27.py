@@ -1489,6 +1489,10 @@ SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E13-P3-CTL",
     "DEV-E2E-V2_7-E13-P3-INJ",
 }
+# D4-gated records committed UNSIGNED, awaiting their independent review (wave 5 operator
+# ledger). Each must stay fully unsigned and undeclared until signed; signing one moves it out
+# of this set deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned.
+AWAITING_REVIEW = {"CAP-TRANSITION-REQUEST", "CAP-LEDGER-APPEND", "CAP-OPERATOR-RECORD-SETUP"}
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
@@ -1498,7 +1502,7 @@ def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
     admitted = set()
     for case in frozen["cases"]:
         missing = set(case["adapter_requirements"]) - implemented
-        assert not (missing & gated), (case["id"], sorted(missing & gated))
+        assert not (missing & gated - AWAITING_REVIEW), (case["id"], sorted(missing & gated))
         if not missing:
             admitted.add(case["id"])
     assert admitted == SIGNED_ADMITTED
@@ -1571,10 +1575,16 @@ def test_committed_d4_signatures_are_complete_and_pinned():
     """Every d4_gated record in the committed file carries a full signature (reviewer, time,
     reviewed commit, an APPROVE verdict and its report) and is therefore declared."""
     adapter = WeatherAdapter()
-    for capability, record in adapter.producers["capabilities"].items():
+    records = adapter.producers["capabilities"]
+    assert all(records[c].get("d4_gated") is True for c in AWAITING_REVIEW)
+    for capability, record in records.items():
         if record.get("d4_gated") is not True:
             continue
         assert record["status"] == "PRODUCER_MAPPED", capability
+        if capability in AWAITING_REVIEW:
+            assert all(record[k] is None for k in ("reviewer", "reviewed_at", "reviewed_commit"))
+            assert capability not in adapter.implemented_capabilities(), capability
+            continue
         assert re.fullmatch(r"[0-9a-f]{40}", record["reviewed_commit"]), capability
         assert record["reviewed_at"].endswith("Z") and record["reviewer"].strip(), capability
         assert record["review_verdict"].startswith("APPROVE"), capability

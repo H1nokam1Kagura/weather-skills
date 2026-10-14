@@ -8,6 +8,7 @@ D4). run_case is opt-in and refuses any case needing an undeclared capability.
 import copy
 import json
 import re
+import uuid
 from pathlib import Path
 
 from simkit.adapter import Adapter
@@ -18,6 +19,7 @@ from adapter_support import (
     role_substitution,
     shadow_projection,
 )
+from adapter_support import operator_ledger_projection as olp
 from adapter_support.fixture_staging import stage_fixture
 from tools.check_capability_signatures import rereview_flagged
 from tools.workflow import review_evidence
@@ -88,6 +90,8 @@ class WeatherAdapter(Adapter):
         "CAP-EVIDENCE-CHECKER": "invoke_evidence_checker",
         "CAP-PRE-REVIEW-GATES": "record_claim_checks",
         "CAP-OPERATOR-ACTIONS": "record_operator_actions",
+        "CAP-LEDGER-APPEND": "append_ledger_record",
+        "CAP-OPERATOR-RECORD-SETUP": "append_attributed_operator_record",
     }
 
     def __init__(self, enable_run_case=False, producers=None):
@@ -214,6 +218,40 @@ class WeatherAdapter(Adapter):
             },
             "missing": [m for m in projection["missing"] if m["path"].startswith(prefix)],
         }
+
+    def submit_transition_request(self, controller, payload):
+        """CAP-TRANSITION-REQUEST: deliver one request to the controller's own transition
+        interface (Controller.request_transition) on behalf of a role channel or operator and
+        return the controller's ACCEPTED/REJECTED record. budget_override payloads and
+        operator resume requests are refused before delivery (no channel for them here)."""
+        try:
+            return olp.submit_transition_request(controller, payload)
+        except olp.DeliveryRefused as exc:
+            raise AdapterRefusal(str(exc)) from exc
+
+    def append_ledger_record(self, controller, args, *, disposable_root, boundary, entry_id):
+        """CAP-LEDGER-APPEND (FX-LEDGER-APPEND): append one literal attributed record to the
+        controller's run-scoped operator ledger at a named live boundary. Returns the delivery
+        record; acceptance is only the controller's operator_actions decision."""
+        try:
+            return olp.append_literal_record(
+                controller, "FX-LEDGER-APPEND", args, disposable_root, boundary, entry_id
+            )
+        except olp.DeliveryRefused as exc:
+            raise AdapterRefusal(str(exc)) from exc
+
+    def append_attributed_operator_record(
+        self, controller, args, *, disposable_root, boundary, entry_id
+    ):
+        """CAP-OPERATOR-RECORD-SETUP (FX-OPERATOR-RECORD): append the literal harness-supplied
+        attributed user record (record_id, speaker, action, run_id, text) at the selected
+        boundary. Never infers or fabricates controller acceptance."""
+        try:
+            return olp.append_literal_record(
+                controller, "FX-OPERATOR-RECORD", args, disposable_root, boundary, entry_id
+            )
+        except olp.DeliveryRefused as exc:
+            raise AdapterRefusal(str(exc)) from exc
 
     @staticmethod
     def _reason(projection, name):
@@ -424,6 +462,11 @@ class WeatherAdapter(Adapter):
         roles = profile["roles_factory"](run_dir)
         # The case schedule runs chained behind the launch observer, whose records stay intact.
         schedule_hooks = role_substitution.case_hooks(schedule_plan, roles, prepared["case_root"])
+        # HARNESS_RUN_ID (FX-OPERATOR-RECORD payloads): the harness-assigned operator run id,
+        # handed to the controller as operator_run_id; the controller checks each record's.
+        operator_run_id = f"harness-run-{uuid.uuid4()}"
+        if schedule_hooks is not None:
+            olp.operator_run_id_symbol(schedule_hooks, operator_run_id)
         shadow_driver = shadow_projection.attach(shadow_plan, roles)
         observer = evidence_projection.HarnessLaunchObserver(
             chained=shadow_projection.chain(schedule_hooks, shadow_driver)
@@ -443,6 +486,7 @@ class WeatherAdapter(Adapter):
             dispatch_evidence_mode=True,
             definition_source=profile["definition_source"],
             operator_ledger_path=operator_ledger,
+            operator_run_id=operator_run_id,
             policy_mode=shadow_projection.policy_mode(shadow_plan),
         )
         try:
@@ -473,6 +517,7 @@ class WeatherAdapter(Adapter):
             "source_pre": prepared["source_pre"],
             "seeded_ledger": seeded["derivation"],
             "operator_ledger": str(operator_ledger),
+            "operator_run_id": operator_run_id,
             "source_expected_after": {"value": expected_after, "reason": expected_reason},
             "fixture_staged": "pre-staged" if profile.get("prepared_fixture") else "run_case",
         }
