@@ -1109,15 +1109,19 @@ class Projection:
             if isinstance(self.h.get(key), str):
                 out[f"HARNESS_HASH:{key}"] = self.h[key]
         if "source_expected_after" not in self.h:
-            self.gap(
-                "symbols.HARNESS_HASH:source_expected_after",
-                "CAP-FIXTURE-OP",
-                self.h.get("source_expected_after_reason", "not supplied by the harness"),
+            reason = self.h.get(
+                "source_expected_after_reason",
+                "not supplied by the harness (no run_case projection inputs)",
             )
+            # Owned by CAP-FIXTURE-OP only when the case applies fixture operations (the reason
+            # from pre_review_projection.expected_source_after names it); otherwise the harness
+            # value is simply absent, a CAP-SYMBOLS gap.
+            owner = "CAP-FIXTURE-OP" if "CAP-FIXTURE-OP" in reason else "CAP-SYMBOLS"
+            self.gap("symbols.HARNESS_HASH:source_expected_after", owner, reason)
         try:
             out["HARNESS_HASH:source"] = catalog.tree_hash(cp["source"])
-        except Exception:
-            pass
+        except Exception as exc:  # declared, never swallowed
+            self.gap("symbols.HARNESS_HASH:source", "CAP-SYMBOLS", f"source unreadable: {exc!r}")
         if controller_pid is not None:
             out["HARNESS_CONTROLLER_PID"] = controller_pid
         else:
@@ -1336,7 +1340,20 @@ def project_run(run_dir, harness=None):
     path = harness.get("observations_path")
     observations = load_harness_observations(path) if path is not None else None
     projection = Projection(native, harness, observations).run()
-    projection["notes"].append({"write_capture": write_capture_status(projection)})
+    verdict = write_capture_status(projection)
+    projection["notes"].append({"write_capture": verdict})
+    filesystem = projection["evidence"]["filesystem_snapshot"]
+    if verdict["status"] != "EXHAUSTIVE" and "created_paths" in filesystem:
+        # The scorer reads any created_paths list as exhaustive (frozen score.py all_under,
+        # empty_is_exhaustive): a list the adapter cannot vouch for is withheld, never scored.
+        del filesystem["created_paths"]
+        projection["missing"].append(
+            {
+                "path": "filesystem_snapshot.created_paths",
+                "capability": "CAP-EXHAUSTIVE-WRITES",
+                "reason": "withheld, write capture not exhaustive: " + verdict["reason"],
+            }
+        )
     return projection
 
 

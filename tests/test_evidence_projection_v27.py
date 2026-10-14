@@ -1005,6 +1005,14 @@ def test_exhaustive_write_capture_only_from_a_complete_trace(released, tmp_path)
         result = adapter.assert_exhaustive_write_capture(released.run, {"observations_path": path})
         assert result["status"] == "MISSING" and result["reason"].startswith(reason), result
         assert "created_paths" not in result
+        # D-EW-1: the scored evidence never carries a list the verdict does not vouch for
+        # (frozen all_under reads any created_paths as exhaustive via empty_is_exhaustive).
+        projection = adapter.capture_evidence(released.run, {"observations_path": path})
+        assert "created_paths" not in projection["evidence"]["filesystem_snapshot"]
+        (gap,) = [
+            m for m in projection["missing"] if m["path"] == "filesystem_snapshot.created_paths"
+        ]
+        assert gap["capability"] == "CAP-EXHAUSTIVE-WRITES" and reason in gap["reason"]
 
 
 def test_observe_harness_carries_whole_tree_fields_or_reports_them_missing(released, tmp_path):
@@ -1083,6 +1091,58 @@ def test_run_case_persists_projection_inputs_for_the_post_trace_projection(relea
     foreign.write_text(json.dumps({**inputs, "run_dir": str(tmp_path)}), encoding="utf-8")
     refused = project("refused.json", "--inputs", str(foreign))
     assert refused["status"] == "ERROR" and "ForeignInputs" in refused["error"]
+
+
+def test_container_projection_resolves_source_expected_after(released, tmp_path):
+    """D-SY-1: the scored in-container projection merges source_expected_after (and its
+    reason) from run_case's inputs record, like the in-process projection."""
+    from adapter_support.pre_review_projection import expected_source_after
+    from container_harness import project_in_container
+
+    inputs_path = released.harness / "evidence-projection-inputs.json"
+    inputs = json.loads(inputs_path.read_text(encoding="utf-8"))
+    assert {"source_expected_after", "source_expected_after_reason"} <= set(inputs)
+    observations = write_observations(
+        tmp_path, harness_observations(WeatherAdapter().capture_evidence(released.run))
+    )
+
+    def project(name, inputs_file):
+        out = tmp_path / name
+        argv = ["p", str(released.run), str(observations), str(out), "--inputs", str(inputs_file)]
+        assert project_in_container.main(argv) == 0
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    merged = project("merged.json", inputs_path)
+    assert merged["status"] == "OK" and merged["inputs_status"]["not_carried"] == []
+    symbols = merged["projection"]["evidence"]["symbols"]
+    assert symbols["HARNESS_HASH:source_expected_after"] == symbols["HARNESS_HASH:source_pre"]
+    assert not [
+        m
+        for m in merged["projection"]["missing"]
+        if m["path"] == "symbols.HARNESS_HASH:source_expected_after"
+    ]
+    # A mutate_fixture case: run_case writes only the reason; the gap is CAP-FIXTURE-OP's.
+    value, reason = expected_source_after(
+        {"injection_schedule": [{"operation": "mutate_fixture"}]}, "h"
+    )
+    assert value is None
+    mutated = {k: v for k, v in inputs.items() if k != "source_expected_after"}
+    mutated["source_expected_after_reason"] = reason
+    mutated_path = tmp_path / "mutated-inputs.json"
+    mutated_path.write_text(json.dumps(mutated), encoding="utf-8")
+    result = project("mutated.json", mutated_path)
+    assert result["inputs_status"]["not_carried"] == []
+    assert "HARNESS_HASH:source_expected_after" not in result["projection"]["evidence"]["symbols"]
+    (gap,) = [
+        m
+        for m in result["projection"]["missing"]
+        if m["path"] == "symbols.HARNESS_HASH:source_expected_after"
+    ]
+    assert gap == {
+        "path": "symbols.HARNESS_HASH:source_expected_after",
+        "capability": "CAP-FIXTURE-OP",
+        "reason": reason,
+    }
 
 
 def frozen_all_under(frozen):
@@ -1708,4 +1768,6 @@ def test_symbols_resolve_expected_source_and_definition_from_the_capture(release
     projection = WeatherAdapter().capture_evidence(released.run)
     assert "HARNESS_HASH:source_expected_after" not in projection["evidence"]["symbols"]
     owners = {m["path"]: m["capability"] for m in projection["missing"]}
-    assert owners["symbols.HARNESS_HASH:source_expected_after"] == "CAP-FIXTURE-OP"
+    # No harness value at all is a CAP-SYMBOLS gap; CAP-FIXTURE-OP owns it only for a case
+    # with fixture operations (test_container_projection_resolves_source_expected_after).
+    assert owners["symbols.HARNESS_HASH:source_expected_after"] == "CAP-SYMBOLS"

@@ -32,7 +32,13 @@ INPUT_KEYS = (
     "source_pre",
     "authorized_goal",
     "run_provenance",
+    # CAP-SYMBOLS HARNESS_HASH:source_expected_after and, when absent, its owner/reason.
+    "source_expected_after",
+    "source_expected_after_reason",
 )
+# Always written by run_case; source_expected_after is written only when it is known (a case
+# with fixture operations leaves it to CAP-FIXTURE-OP), so it is never "not carried".
+OPTIONAL_INPUT_KEYS = ("source_expected_after",)
 
 
 class ForeignInputs(ValueError):
@@ -64,7 +70,7 @@ def load_inputs(path, run_dir):
         "status": "MERGED",
         "case_id": record.get("case_id"),
         "merged": sorted(merged),
-        "not_carried": sorted(set(INPUT_KEYS) - set(merged)),
+        "not_carried": sorted(set(INPUT_KEYS) - set(merged) - set(OPTIONAL_INPUT_KEYS)),
     }
 
 
