@@ -1,7 +1,8 @@
 """CAP-ROLE-SUBSTITUTE: substituted role doubles + after_role substitution on the real controller.
 
 Frozen pairs run through WeatherAdapter.run_case with the substituted_roles_factory the
-container case driver calls: E01-P1-CTL, E02-P1 (CTL/INJ), E04-P1 (CTL/INJ), E13-P1 (CTL/INJ).
+container case driver calls: E01-P1-CTL, E02-P1 (CTL/INJ), E04-P1 (CTL/INJ), E07-P1 (CTL/INJ,
+bare-plan wrapping), E13-P1 (CTL/INJ).
 The local case keeps the frozen case's id, profile, budget, agent_roles and injection_schedule;
 only adapter_requirements is local (CAP-ROLE-SUBSTITUTE stays D4-gated: reviewer null), so the
 frozen cases themselves remain NOT_IMPLEMENTED. Tools are the module's stand-in scripts.
@@ -356,13 +357,166 @@ def test_e01_p1_ctl_all_substituted_roles_release_with_distinct_sessions(lab, fr
     assert launch_hashes_present(result)
 
 
+# --------------------------------------------------------------- E07 bare-plan wrapping
+# Owner ruling e07_bare_plan_wrapping_2026-10-14: E07-P1 entry 2 replaces the repairer output
+# with a bare step list; it is wrapped by rs.WRAP_RULE (before this change run_case refused
+# E07-P1-CTL and -INJ at substitution_plan, before any side effect).
+
+
+def frozen_bare_plan(case):
+    (entry,) = [
+        s
+        for s in case["injection_schedule"]
+        if s["selector"]["role_or_tool_or_stage"] in {"planner", "repairer"}
+        and s["operation"] == "replace_role_output"
+        and isinstance(s["payload"].get("plan"), list)
+    ]
+    return entry
+
+
+def assert_wrapping(wrapping, frozen_entry):
+    """Steps are the frozen list verbatim; every derived field equals its recorded source,
+    the stand-in repairer baseline the wrapped output replaces."""
+    source = rs.static_baseline("repairer", MAP_GOAL, "E07-P1")
+    payload = frozen_entry["payload"]
+    assert wrapping["rule_id"] == rs.WRAP_RULE_ID and wrapping["rule"] == rs.WRAP_RULE
+    assert wrapping["source_output_hash"] == digest(source)
+    assert wrapping["frozen_payload_hash"] == digest(payload)
+    derived = {d["field"]: d for d in wrapping["derived_fields"]}
+    assert set(derived) == {"/plan/goal_hash", "/plan/final", "/schema", "/plan_claims"}
+    for field, record in derived.items():
+        value = source
+        for key in field.strip("/").split("/"):
+            value = value[key]
+        assert record["value"] == value and record["source"] == "replaced output " + field
+    assert derived["/plan/goal_hash"]["value"] == digest(MAP_GOAL)
+    assert derived["/plan_claims"]["value"] == rs.frozen_claims()
+    assert [d["field"] for d in wrapping["delivered_verbatim"]] == ["/plan/steps", "/response"]
+    wrapped = copy.deepcopy(source)
+    wrapped["plan"]["steps"] = payload["plan"]
+    wrapped["response"] = payload["response"]
+    assert wrapping["wrapped_output_hash"] == digest(wrapped)
+    return wrapped
+
+
+@pytest.fixture(scope="module")
+def e07(lab, frozen):
+    return {k: execute(lab, local_case(frozen, f"E07-P1-{k}")) for k in ("CTL", "INJ")}
+
+
+def test_e07_p1_frozen_pair_runs_and_the_controller_blocks_the_title_patch(e07, frozen):
+    """Both frozen cases now run. The controller's own plan validation refuses the planner's
+    patched title (it departs from the goal-bound typed plan) before any review, so the review
+    and the wrapped repairer are never reached: reported unreached, never applied."""
+    for kind, result in e07.items():
+        entry = frozen_bare_plan(frozen[f"{PREFIX}E07-P1-{kind}"])
+        schedule = result.report["harness"]["case_schedule"]
+        (planned,) = [e for e in schedule["entries"] if e.get("wrapping")]
+        assert planned["index"] == 2 and planned["native_role"] == "repairer"
+        assert_wrapping(planned["wrapping"], entry)
+        trace = result.evidence["controller_trace"]
+        assert trace["terminal"] == {
+            "outcome": "BLOCKED",
+            "reason": "plan_validation_failed",
+            "failed_gate": "plan_validation",
+        }
+        assert trace["final_state"] == "GOAL_CHECKED"
+        assert schedule["coverage"]["applied"] == [0] and 2 in schedule["coverage"]["unreached"]
+        assert not any(r["role"] == "repairer" for r in result.checkpoint["role_receipts"])
+        assert_receipts_preserved(result)
+        assert no_producing_process(result)
+
+
+@pytest.fixture(scope="module")
+def e07_unpatched(lab, frozen):
+    """LOCAL variant (not a frozen case): E07-P1 without entry 0, the planner title patch the
+    controller blocks, so the reviewer REJECT reaches the wrapped repairer."""
+    out = {}
+    for kind in ("CTL", "INJ"):
+        case = local_case(frozen, f"E07-P1-{kind}")
+        case["id"] += "-LOCAL-NO-TITLE-PATCH"
+        assert case["injection_schedule"][0]["operation"] == "json_patch"
+        del case["injection_schedule"][0]
+        out[kind] = execute(lab, case)
+    return out
+
+
+def test_e07_p1_wrapped_repairer_output_is_delivered_with_its_rule_recorded(e07_unpatched, frozen):
+    for kind, result in e07_unpatched.items():
+        entry = frozen_bare_plan(frozen[f"{PREFIX}E07-P1-{kind}"])
+        assert_receipts_preserved(result)
+        (repairer,) = substituted(result.checkpoint["role_receipts"], "repairer")
+        (sub,) = repairer["substitutions"]
+        (wrapping,) = sub["wrappings"]
+        wrapped = assert_wrapping(wrapping, entry)
+        assert sub["pre_substitution_output_hash"] == wrapping["source_output_hash"]
+        assert sub["delivered_output_hash"] == wrapping["wrapped_output_hash"] == digest(wrapped)
+        assert sub["adapter_mappings"] == [
+            f"bare plan step list -> envelope of the replaced output ({rs.WRAP_RULE_ID})"
+        ]
+        outputs = [
+            f["output"] for f in role_files(result.run) if f["receipt"]["role"] == "repairer"
+        ]
+        (output,) = outputs
+        assert output == wrapped and output["plan"]["steps"] == entry["payload"]["plan"]
+        assert output["response"] == entry["payload"]["response"]
+        attempts = result.checkpoint["context"]["repair_attempts"]
+        assert [a["status"] for a in attempts] == ["returned"]
+    ctl, inj = e07_unpatched["CTL"], e07_unpatched["INJ"]
+    # CTL: the second (replaced) review approves the wrapped plan; the run releases.
+    assert ctl.evidence["controller_trace"]["terminal"]["outcome"] == "RELEASED"
+    # INJ: the second review rejects again and the repairer-channel retry request is refused
+    # by the controller; the single repair allowance is spent.
+    assert inj.evidence["controller_trace"]["terminal"] == {
+        "outcome": "BLOCKED",
+        "reason": "repair_exhausted",
+        "failed_gate": "repair_exhausted",
+    }
+    (request,) = inj.checkpoint["context"]["transition_requests"]
+    assert request["request"] == "repair_retry" and request["result"] == "REJECTED"
+    assert no_producing_process(inj)
+
+
+def test_e07_p2_has_no_bare_plan_and_stays_refused_as_live_plus_substituted(lab, frozen, tmp_path):
+    """E07-P2 schedules no bare step list (its repairer is live); it stays refused before any
+    side effect because its replaced reviewer is also a live role (CAP-LIVE-ROLE)."""
+    adapter = WeatherAdapter(enable_run_case=True)
+    for kind in ("CTL", "INJ"):
+        case = local_case(frozen, f"E07-P2-{kind}")
+        assert not any(
+            isinstance(s.get("payload"), dict) and isinstance(s["payload"].get("plan"), list)
+            for s in case["injection_schedule"]
+        )
+        profile = lab.profile(MAP_GOAL, case, stub=None)
+        profile["case_root"] = tmp_path / f"never-E07-P2-{kind}"
+        with pytest.raises(AdapterRefusal, match="live role's output is never replaced"):
+            adapter.run_case(case, profile)
+        assert not profile["case_root"].exists()
+
+
 # --------------------------------------------------------------------------- refusals
+
+
+def bad_repairer_replacement(frozen, payload):
+    """E07-P1-CTL with its repairer replacement (entry 2) swapped for another shape."""
+    case = local_case(frozen, "E07-P1-CTL")
+    assert case["injection_schedule"][2]["selector"]["role_or_tool_or_stage"] == "repairer"
+    case["injection_schedule"][2]["payload"] = payload
+    return case
 
 
 def test_unmappable_entries_are_refused_never_skipped(frozen):
     adapter = WeatherAdapter()
-    with pytest.raises(AdapterRefusal, match="repairer replacement with a plan"):
-        adapter.substitute_role_output(local_case(frozen, "E07-P1-CTL"), MAP_GOAL)
+    bare = local_case(frozen, "E07-P1-CTL")["injection_schedule"][2]["payload"]
+    for payload, message in (
+        ({"plan": "not a step list", "response": "x"}, "replacement of this shape"),
+        ({**bare, "plan_claims": []}, "may carry only \\['response'\\] besides plan"),
+    ):
+        with pytest.raises(AdapterRefusal, match=message):
+            adapter.substitute_role_output(bad_repairer_replacement(frozen, payload), MAP_GOAL)
+    # The wrapping rule derives the envelope from the goal-bound stand-in baseline.
+    with pytest.raises(AdapterRefusal, match="needs the case goal"):
+        adapter.substitute_role_output(local_case(frozen, "E07-P1-CTL"))
     with pytest.raises(AdapterRefusal, match="live role's output is never replaced"):
         adapter.substitute_role_output(local_case(frozen, "E06-P1-INJ"), MAP_GOAL)
     base = local_case(frozen, "E02-P1-INJ")
@@ -390,11 +544,13 @@ def test_unmappable_entries_are_refused_never_skipped(frozen):
 
 def test_run_case_refuses_unsupported_schedules_before_side_effects(lab, frozen, tmp_path):
     adapter = WeatherAdapter(enable_run_case=True)
+    shaped = bad_repairer_replacement(frozen, {"plan": "not a step list"})
+    shaped["id"] += "-LOCAL-BAD-SHAPE"  # a local variant; the e07 fixture ran E07-P1-CTL
     for short, message in (
-        ("E07-P1-CTL", "repairer replacement with a plan"),
+        ("E07-P1-CTL", "replacement of this shape"),
         ("E11-P1-INJ", "injection channels that are unavailable"),
     ):
-        case = local_case(frozen, short)
+        case = shaped if short == "E07-P1-CTL" else local_case(frozen, short)
         profile = lab.profile(MAP_GOAL, case, stub=None)
         profile["case_root"] = tmp_path / f"never-{short}"
         with pytest.raises(AdapterRefusal, match=message):

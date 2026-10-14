@@ -24,7 +24,7 @@
         {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "HarnessLaunchObserver", "emits": "harness-computed *_hash_at_launch (before_tool) and gate artifact_content_hash (after_tool)"},
         {"file": "tools/workflow/trace_records.py", "line": 21, "symbol": "record_initial_state (called from Controller.run, runner.py:1683)", "emits": "initial_state dispatch event {state, controller_pid} as the first event of a fresh run: event_seq['controller_trace.states[CAPTURED]']"},
         {"file": "tools/workflow/trace_records.py", "line": 64, "symbol": "retain_compiled_goal (called from runner.py:1847)", "emits": "failed goal check {verdict FAIL, failed_fields, compiler_occurrence, gate, reason} in context.goal_check + goal-check.json + goal_check dispatch event"},
-        {"file": "tools/workflow/recovery.py", "line": 97, "symbol": "new_ledger / ledger (bound by Controller.bind_recovery for every run)", "emits": "counters.automatic_resumes_used, limits.max_automatic_resumes, interruptions"},
+        {"file": "tools/workflow/recovery.py", "line": 97, "symbol": "new_ledger / ledger (bound by Controller.bind_recovery for every run)", "emits": "counters.automatic_resumes_used, limits.max_automatic_resumes, and the recovery lists resume, interruptions, diagnoses, mechanical_repairs, operator_notifications, transport_retries (context.recovery, schema workflow.recovery/1), read by evidence_projection.Projection.recovery_list / pending_lists"},
         {"file": "adapter_support/pre_review_projection.py", "line": null, "symbol": "argv_flags", "emits": "process_receipts[*].flags from the parser-accepted controller argv"},
         {"file": "tools/workflow/runner.py", "line": 642, "symbol": "Controller.issue_active_approval", "emits": "native active approval (approval_id, reviewer_occurrence, reviewer_session_id, hashes, binding_hash, replaces) + active-approval-NNN.json + active_approval dispatch event"}
       ],
@@ -35,7 +35,8 @@
         "process_receipts[*] {tool, artifact, argv (controller command minus interpreter and catalogued script), flags, command, start, end, exit_code, pid, parent_pid, phase, producing, wall_seconds, output_bytes, approval_*, *_hash_at_launch}",
         "event_seq (states incl. the initial CAPTURED state, receipts, process start/end, gate_reports, active_approval (native issuance event), terminal, plan_validations, claim_checks, operator_actions) + _absent for keys a finished gap-free sequence rules out",
         "budget_ledger.final {consumed_model_usd, elapsed_seconds, repair_attempts_used, resume_attempts_used, automatic_resumes_used, combined_process_output_bytes, limits {max_model_usd, max_total_seconds, max_repair_attempts, max_resume_attempts}}; launch_checks; at_checkpoint absent when the run recorded no interruption",
-        "controller_trace.states, final_state, plan_validations (+ plan as contract step list), goal_check (PASS from GOAL_CHECKED, FAIL with failed_fields from the native record)"
+        "controller_trace.states, final_state, plan_validations (+ plan as contract step list), goal_check (PASS from GOAL_CHECKED, FAIL with failed_fields from the native record)",
+        "controller_trace.resume / interruptions / diagnoses / mechanical_repairs / operator_notifications / transport_retries projected verbatim from the recovery ledger context.recovery.<list> after its schema (workflow.recovery/1) is checked: [] when the ledger holds none; MISSING with the reason (ledger absent, wrong schema, list not a list) otherwise, never [] (E02-P1 diagnosis ADAPTER_PROJECTION_DEFECT: before this change they were read from the context top level, where the controller never writes them, and reported MISSING on every run)"
       ],
       "missing_fields": [
         {"field": "budget_ledger.at_checkpoint (only when the run recorded an interruption)", "owner": "CAP-RESUME (no counter snapshot at the interruption checkpoint; only interrupt/resume cases have one)"}
@@ -57,8 +58,12 @@
         "test_run_without_dispatch_evidence_is_refused",
         "test_receipts_carry_flags_resume_counters_and_the_initial_clock",
         "test_failed_goal_check_records_its_fields_natively",
-        "test_argv_flags_never_guess_an_irregular_argv"
+        "test_argv_flags_never_guess_an_irregular_argv",
+        "test_pending_records_light_up_from_their_frozen_native_shape",
+        "test_recovery_lists_stay_missing_without_a_valid_recovery_ledger",
+        "test_recovery_list_of_the_wrong_type_stays_missing"
       ],
+      "rereview_required": "recovery lists read from context.recovery (E02-P1 ADAPTER_PROJECTION_DEFECT); Processes.run RAM/time guard raises carry resource_guard and Controller.ask keeps it (owner ruling role_cli_resource_gate_2026-10-14)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
       "reviewed_at": "2026-10-14T15:12:50Z",
       "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
@@ -120,8 +125,12 @@
       ],
       "evidence_fields": ["controller_trace.terminal {outcome, reason, failed_gate}", "event_seq['controller_trace.terminal']"],
       "missing_fields": [],
-      "mapping_choices_for_review": ["identity mapping; a gate code outside FAILED_GATES is omitted (scores NOT_OBSERVED) and reported, never replaced by a nearby gate"],
-      "tests": ["test_terminal_mapping_never_guesses_an_unmapped_gate", "test_claim_gate_block_projects_a_routed_record_and_no_review", "test_needs_info_stop_and_visible_synthetic_marker"],
+      "mapping_choices_for_review": [
+        "identity mapping; a gate code outside FAILED_GATES is omitted (scores NOT_OBSERVED) and reported, never replaced by a nearby gate",
+        "owner ruling role_cli_resource_gate_2026-10-14: a role CLI the process manager refuses (launch-check RAM floor / aggregate time budget, unmeasurable RAM) or stops (RAM guard, wall-time guard) ends on failed_gate resource_guard, outcome INCOMPLETE (contracts.INCOMPLETE_GATES), reason resource_guard_failed, terminal_mapping.source raise_site: processes.py raises Refused(gate='resource_guard') and Controller.ask's tag() keeps a set gate (KongRoles re-raises it instead of an UNKNOWN outcome). Output-budget stops, role-output, parse, transport and receipt failures keep the role's ROLE_GATES gate. terminal_for / finish / evidence_projection.map_terminal are unchanged: resource_guard is in FAILED_GATES and projects by identity"
+      ],
+      "tests": ["test_terminal_mapping_never_guesses_an_unmapped_gate", "test_claim_gate_block_projects_a_routed_record_and_no_review", "test_needs_info_stop_and_visible_synthetic_marker", "tools/workflow/tests/test_runner_lifecycle_v27.py::test_role_cli_resource_guard_ends_the_run_on_resource_guard", "tools/workflow/tests/test_runner_lifecycle_v27.py::test_malformed_role_cli_output_keeps_the_role_gate"],
+      "rereview_required": "role CLI RAM/time guard -> resource_guard (owner ruling role_cli_resource_gate_2026-10-14): processes.py raise sites, kong_roles.KongRoles._resource_guard, runner.CALL_SITE_GATES / Controller.ask comment",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
       "reviewed_at": "2026-10-14T15:12:50Z",
       "reviewed_commit": "42ff3e99608ab308d8b5d9f26f43107b159da7e7",
@@ -533,7 +542,7 @@
       "producers": [
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 413,
+          "line": 490,
           "symbol": "SubstitutedRoles.ask",
           "emits": "the frozen baseline output of a substituted role plus a native agents.Roles-shape receipt (fresh invocation_id, distinct session_id, input_hash, output_hash, baseline_output_hash, mode substituted, cost_usd 0.0); reviewer receipts carry dispatch.stdin_hash of the exact payload"
         },
@@ -545,9 +554,15 @@
         },
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 542,
+          "line": 619,
           "symbol": "CaseScheduleHooks.rebind",
-          "emits": "the substituted invocation's own receipt rebound to the delivered output: same receipt object, invocation_id and session_id; output_hash = digest(delivered); substitutions[] {schedule_indexes, operations, pre_substitution_output_hash, delivered_output_hash, adapter_mappings}; refuses any receipt that is not the double's own"
+          "emits": "the substituted invocation's own receipt rebound to the delivered output: same receipt object, invocation_id and session_id; output_hash = digest(delivered); substitutions[] {schedule_indexes, operations, pre_substitution_output_hash, delivered_output_hash, adapter_mappings, wrappings (bare-plan wrap only)}; refuses any receipt that is not the double's own, and a bare-plan wrap whose replaced output hash is not the recorded source_output_hash or whose delivered hash is not the recorded wrapped_output_hash"
+        },
+        {
+          "file": "adapter_support/role_substitution.py",
+          "line": 267,
+          "symbol": "wrap_bare_plan (WRAP_RULE / WRAP_RULE_ID bare-plan-wrap/v1 at line 143)",
+          "emits": "owner ruling e07_bare_plan_wrapping_2026-10-14: the native envelope for a planner/repairer bare step list (steps verbatim, every other field copied from the replaced output) plus the wrapping record {rule_id, rule, owner_ruling, source, source_output_hash, frozen_payload_hash, wrapped_output_hash, delivered_verbatim[{field, source}], derived_fields[{field, source, value}]} on the schedule entry and on each delivery (substitutions[].wrappings)"
         },
         {
           "file": "tools/workflow/runner.py",
@@ -557,31 +572,27 @@
         },
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 310,
+          "line": 386,
           "symbol": "substitution_plan (WeatherAdapter.substitute_role_output)",
           "emits": "static contract-to-native mapping of every after_role role-output entry, dry-run against the baseline; AdapterRefusal before any side effect for anything unmappable"
         },
         {
           "file": "adapter_support/role_substitution.py",
-          "line": 104,
-          "symbol": "FROZEN_REPAIRER_RESPONSES / repairer_response (line 119)",
+          "line": 109,
+          "symbol": "FROZEN_REPAIRER_RESPONSES / repairer_response (line 124)",
           "emits": "the substituted repairer's response: the frozen probe-bundle text verbatim for the pair (E13-P1, E13-P3, E15-P1), else a labelled harness-authored fallback"
         }
       ],
       "evidence_fields": [
         "invocation_receipts[*].mode = substituted; session_id distinct and unchanged by substitution",
         "role_output.<role>[k] = the delivered (substituted) output, bound by its receipt output_hash",
-        "checkpoint role_receipts[*].baseline_output_hash and substitutions[] (rebind provenance)",
-        "evidence-projection.json harness.case_schedule {entries, delegated, coverage (applied/unreached/records), rebinds}"
+        "checkpoint role_receipts[*].baseline_output_hash and substitutions[] (rebind provenance; substitutions[].wrappings for a bare-plan wrap)",
+        "evidence-projection.json harness.case_schedule {entries (entries[*].wrapping for a bare-plan wrap), delegated, coverage (applied/unreached/records), rebinds}"
       ],
       "missing_fields": [
         {
           "field": "substituted output for a role that is also live in the same case (E06-P1, E07-P2, E10-P2 reviewer) and every live + substituted case (E01-P2, E04-P2, E05-P2, E06-P2, E09-P2, E13-P2, E15-P2)",
           "owner": "CAP-LIVE-ROLE combining transport (not built): refused by substitute_role_output / substituted_roles_factory, never applied to a live role"
-        },
-        {
-          "field": "planner/repairer replacement carrying a bare plan step list (E07-P1 entry 2)",
-          "owner": "CAP-ROLE-SUBSTITUTE mapping decision pending review: refused (AdapterRefusal); see mapping_choices_for_review"
         },
         {
           "field": "shadow_policy / router / verifier substitution at after_role",
@@ -594,7 +605,7 @@
         "Baselines (CTL uses them; CTL and INJ both add their own schedule): compilers = the reference variant goal; planner = {schema workflow.review-envelope/1, plan expected_plan(goal), plan_claims C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE} taken from the frozen clean probe-bundle claims citing definition:agrhymet-sos-rolling sha256:3db5ec77...; repairer = the same envelope + the pair's frozen response text verbatim (DEV-ONLY <pair>-INJ probe_bundles[0].evidence.role_output.repairer[0].response); reviewer = APPROVE with approved_binding {plan_hash, source_hash} of the presented review_evidence and findings []; evidence_checker = SUPPORTED for every judged claim; verifier = PASS, binding_hash copied from the payload, scope data-replay.",
         "D1 reference definition: the container case driver passes the pinned file container_harness/pinned/definitions/agrhymet-sos-rolling.txt (LF-only by .gitattributes) as definition_source; case_driver.reference_definition hash-checks its bytes against FROZEN_DEFINITION_SOURCE_HASH (sha256:3db5ec77...) and refuses the run on a mismatch, so the controller binds it under definition:agrhymet-sos-rolling. The substituted planner/repairer cite only that bound source: if the controller bound no definition:agrhymet-sos-rolling with the frozen hash (or the text lacks a frozen quote), they fail closed with SubstitutionUnavailable -- nothing returned, no receipt, an observed dispatch failure -- never a citation of an unbound source.",
         "Substituted reviewer receipts record dispatch.system_prompt as the literal marker 'SUBSTITUTED: no system prompt was sent; ...' (hash-consistent), not a prompt that was never sent.",
-        "Planner/repairer replacements carrying a bare step list (E07-P1, E07-P2) are refused instead of being wrapped into the native typed plan + envelope, because that would invent goal_hash, final, schema and plan_claims.",
+        "Bare-plan wrapping (owner ruling e07_bare_plan_wrapping_2026-10-14; replaces the earlier refusal of these replacements). Rule bare-plan-wrap/v1, verbatim: 'A planner/repairer replace_role_output whose frozen payload carries plan as a JSON array is wrapped into the native envelope of the output it replaces at the controller's after_role point. For a substituted role that output is the stand-in's baseline for this invocation (static_baseline(role, goal, pair)); at delivery its hash must equal the recorded source_output_hash, and the delivered hash the recorded wrapped_output_hash, else the substitution is refused. The array is delivered verbatim as plan.steps. Every other key of the typed plan (goal_hash, final) and every other envelope key the replaced output carries (schema, plan_claims; response or rationale only when the payload does not supply it) is copied unchanged from the replaced output. Payload keys other than plan are delivered verbatim and must be native envelope keys of the role (repairer: response; planner: rationale). No value is invented: a key the replaced output does not carry is never added, and any other payload shape is refused.' Derived fields and sources for the only frozen instance (E07-P1-CTL and E07-P1-INJ entry 2, repairer occurrence 1): /plan/goal_hash <- replaced output /plan/goal_hash (= digest(goal)); /plan/final <- replaced output /plan/final (['onset', 'map']); /schema <- replaced output /schema (workflow.review-envelope/1); /plan_claims <- replaced output /plan_claims (the frozen C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE baseline claims); delivered verbatim: /plan/steps <- frozen payload /plan, /response <- frozen payload /response. E07-P2 schedules no bare step list (its repairer is live); it stays refused as live + substituted. Observed on the frozen E07-P1 cases: the controller's own plan validation blocks the planner's patched title (entry 0) at GOAL_CHECKED (plan_validation), so the wrapped repairer entry is reported unreached; delivery of the wrap is exercised on a local variant without entry 0 (CTL releases; INJ ends repair_exhausted after the controller rejects the repairer-channel retry request).",
         "Live + substituted in one case is refused by the factory (case_driver keeps BLOCKED_LIVE for those); a role listed under agent_roles.not_invoked that the controller nevertheless invokes gets SubstitutionUnavailable (an observed dispatch failure), never a guessed output.",
         "run_case now delivers the WHOLE case schedule through InjectionHooks chained behind HarnessLaunchObserver (before this change no schedule entry was applied at all). Non-role entries are listed as delegated and still need their own declared capabilities through admission; InjectionHooks' static unsupported_requirements findings refuse the case before any side effect.",
         "Repairer response: the frozen texts are per pair (E13-P1 'Citation for C-WINDOW restated verbatim ...', E13-P3 'C-LAST-ELIGIBLE corrected ...', E15-P1 'Child plan of h-plan-1 ...', the last kept verbatim including the probe placeholder label h-plan-1) and are used for both the CTL and INJ case of that pair. These three are exactly the frozen pairs whose substituted repairer runs unpatched (E03-P3 and E07-P1 replace it by schedule; the rest are live). Any other pair gets a harness-authored fallback, because no frozen text exists for it; the source is reported by repairer_response() as harness_authored_fallback."
@@ -611,8 +622,12 @@
         "tests/test_role_substitution_adapter.py::test_run_case_refuses_unsupported_schedules_before_side_effects",
         "tests/test_role_substitution_adapter.py::test_rebind_refuses_a_receipt_that_is_not_the_doubles_own",
         "tests/test_role_substitution_adapter.py::test_substituted_double_fails_closed_without_the_frozen_bound_definition",
-        "tests/test_role_substitution_adapter.py::test_repairer_baseline_response_is_the_frozen_probe_text"
+        "tests/test_role_substitution_adapter.py::test_repairer_baseline_response_is_the_frozen_probe_text",
+        "tests/test_role_substitution_adapter.py::test_e07_p1_frozen_pair_runs_and_the_controller_blocks_the_title_patch",
+        "tests/test_role_substitution_adapter.py::test_e07_p1_wrapped_repairer_output_is_delivered_with_its_rule_recorded",
+        "tests/test_role_substitution_adapter.py::test_e07_p2_has_no_bare_plan_and_stays_refused_as_live_plus_substituted"
       ],
+      "rereview_required": "e07 bare-plan wrapping (owner ruling e07_bare_plan_wrapping_2026-10-14)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
       "reviewed_at": "2026-10-14T15:58:22Z",
       "reviewed_commit": "8b7a8c40e4edaa8129ddeff9e635b8c07b85c3dd",

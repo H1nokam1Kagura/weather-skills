@@ -325,6 +325,7 @@ class KongRoles:
         if dispatch_context is not None:
             self.dispatch_observer(dict(self.dispatch_observation))
             self.dispatch_observation["process_boundary"] = "ENTERED"
+        serial_before = getattr(self.processes, "serial", None)
         try:
             # CAP-TRANSPORT-RETRY: a classified pre-write fault (nothing launched, so nothing
             # sent) is retried once inside this attempt; anything else stays UNKNOWN.
@@ -337,6 +338,8 @@ class KongRoles:
                 invocation,
             )
         except Exception as exc:
+            if isinstance(exc, Refused) and exc.gate == "resource_guard":
+                self._resource_guard(role, invocation, exc, serial_before, spent_before)
             self._unknown(role, invocation, f"worker process failed: {type(exc).__name__}", {})
         if dispatch_context is not None:
             self.dispatch_observation.update(
@@ -427,6 +430,31 @@ class KongRoles:
                 "system_prompt_hash": text_hash(prompt),
             }
         return value
+
+    def _resource_guard(self, role, invocation, exc, serial_before, spent_before):
+        """The process manager refused or stopped the worker for its RAM floor or wall-time
+        guard (owner ruling role_cli_resource_gate_2026-10-14): the run stops on
+        resource_guard, never on this role's gate. A refusal before launch (the launch serial
+        did not move) provably sent nothing and releases the reservation; a worker stopped
+        after launch may have sent the request, so the reservation is kept and the outcome is
+        recorded as UNKNOWN, while the Refused (gate resource_guard) is what is raised."""
+        launched = type(serial_before) is not int or (
+            getattr(self.processes, "serial", None) != serial_before
+        )
+        if not launched:
+            self.spent = spent_before
+            raise exc
+        self.unknown_outcomes.append(
+            {
+                "role": role,
+                "invocation_id": invocation,
+                "outcome": "UNKNOWN",
+                "reason": f"worker stopped by the process manager: {exc}",
+                "budget_guard": self.budget_guard,
+                "failed_gate": "resource_guard",
+            }
+        )
+        raise exc
 
     def _unknown(self, role, invocation, reason, evidence):
         # Guard on: keep the reservation, the request may have been billed.

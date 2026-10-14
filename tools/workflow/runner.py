@@ -52,6 +52,9 @@ from .profiles import PROFILES, stages
 # CAP-REASON-MAP, call-site half. A refusal raised inside a role transport (agents.py,
 # kong_roles.py, or a custom Roles) without its own gate is tagged with the gate the role serves:
 # the role's output could not be obtained or was not acceptable, so that gate failed.
+# Exception (owner ruling role_cli_resource_gate_2026-10-14): a role CLI process the process
+# manager refused or stopped for its RAM floor or wall-time guard arrives already tagged
+# resource_guard at the raise site (processes.py) and keeps it; tag() never replaces a set gate.
 ROLE_GATES = {
     "compiler": "goal_check",
     "planner": "plan_validation",
@@ -82,7 +85,11 @@ STATE_GATES = {
 CALL_SITE_GATES = {
     "agents": "ROLE_GATES by role (Controller.ask)",
     "kong_roles": "ROLE_GATES by role (Controller.ask)",
-    "processes": "resource_guard (Controller.tool); role CLIs via ROLE_GATES",
+    "processes": (
+        "resource_guard (Controller.tool); RAM/time guard refusals and stops carry "
+        "resource_guard from the raise site for role CLIs too; the output-budget stop of a "
+        "role CLI via ROLE_GATES"
+    ),
     "catalog": "plan_validation for preflight, gate_evidence for artifact hashes",
     "admission": "source_check (inspect_source, integrity)",
     "review_evidence": "review_binding (capture), claim_evidence (plan envelope), else state",
@@ -775,6 +782,8 @@ class Controller:
         try:
             answer = self.roles.ask(role, payload)
         except BaseException as exc:
+            # Untagged role failures take the role's gate; a raise-site gate (resource_guard
+            # from the process manager's RAM/time guard) is kept as raised.
             tag(exc, ROLE_GATES.get(role, "transition"))
             if attempt is None and not isinstance(exc, Exception):
                 raise  # Preserve legacy interruption/checkpoint behavior.

@@ -16,7 +16,7 @@ import pytest
 from frozen_v27 import frozen_root
 
 from tools.workflow import __main__ as cli
-from tools.workflow import contracts, runner
+from tools.workflow import agents, contracts, runner
 from tools.workflow.contracts import (
     FAILED_GATES,
     Refused,
@@ -26,6 +26,7 @@ from tools.workflow.contracts import (
     validate_goal,
 )
 from tools.workflow.persistence import read_checkpoint, run_lock, write_checkpoint
+from tools.workflow.processes import Processes
 from tools.workflow.tests.test_workflow import GOAL, FakeProcesses, FakeRoles, controller, request
 
 WORKFLOW = Path(runner.__file__).resolve().parent
@@ -97,9 +98,8 @@ OUTSIDE_INVENTORY = Counter(
         ("policy", "invalid action mask"),
         ("policy", "invalid bounded decision scores"),
         ("policy", "stale or masked policy action"),
-        ("processes", "aggregate time budget exhausted"),
-        ("processes", "available RAM cannot be measured"),
-        ("processes", "insufficient free RAM to start a child"),
+        # The RAM/time guard raises carry resource_guard since owner ruling
+        # role_cli_resource_gate_2026-10-14; only the output-budget stop stays untagged.
         ("processes", "reason"),
         ("review_evidence", "invalid review claim fields"),
         ("review_evidence", "invalid review claim identity/text/declaration"),
@@ -434,6 +434,95 @@ def test_resume_refusals_carry_gates(tmp_path, monkeypatch):
     with pytest.raises(Refused) as caught:
         runner.Controller.resume(c.root, FakeProcesses(), FakeRoles())
     assert caught.value.gate == "pending_operation"
+
+
+# ------------------------------------------------- role CLI resource guard (owner ruling)
+# role_cli_resource_gate_2026-10-14: a role CLI the process manager refuses or stops for its
+# RAM floor or wall-time guard ends the run on resource_guard (INCOMPLETE), not on the role's
+# ROLE_GATES gate. agents.Roles launches the role command through a real Processes; only the
+# Claude executable is replaced by a synthetic python child (the guard loop is the real one).
+
+
+class ScriptedCli(Processes):
+    """Real Processes; the role command's argv is replaced by a synthetic python child."""
+
+    def __init__(self, root, script, **kwargs):
+        super().__init__(root, **kwargs)
+        self.script = script
+
+    def run(self, argv, cwd, env, stdin="", tool=None):
+        return super().run([sys.executable, "-c", self.script], cwd, env, stdin, tool)
+
+
+def cli_roles(tmp_path, monkeypatch, script, **kwargs):
+    monkeypatch.setattr("tools.workflow.agents.shutil.which", lambda _: "claude")
+    workspace = tmp_path / "roles" / "workspace"
+    workspace.mkdir(parents=True)
+    (tmp_path / "role-processes").mkdir()
+    return agents.Roles(ScriptedCli(tmp_path / "role-processes", script, **kwargs), workspace)
+
+
+def memory(*values, then):
+    it = iter(values)
+    return lambda: next(it, then)
+
+
+SLEEP_60 = "import time; time.sleep(60)"
+RESOURCE_TERMINAL = {
+    "outcome": "INCOMPLETE",
+    "reason": "resource_guard_failed",
+    "failed_gate": "resource_guard",
+}
+
+
+@pytest.mark.parametrize(
+    ("script", "kwargs", "message"),
+    [
+        # Wall-time guard: the per-process timeout stops the running role CLI.
+        (SLEEP_60, {"timeout": 1, "memory_reader": lambda: 64.0}, "time budget exhausted"),
+        # RAM floor: in-run sample under the floor stops the running role CLI.
+        (
+            SLEEP_60,
+            {"ram_floor": 2, "memory_reader": memory(64.0, then=1.8)},
+            "RAM guard",
+        ),
+        # RAM floor at the launch check: the role CLI is refused before it starts.
+        (SLEEP_60, {"ram_floor": 2, "memory_reader": lambda: 2.5}, "insufficient free RAM"),
+    ],
+    ids=["wall_time_guard", "ram_floor_stop", "ram_floor_launch_refusal"],
+)
+def test_role_cli_resource_guard_ends_the_run_on_resource_guard(
+    tmp_path, monkeypatch, script, kwargs, message
+):
+    roles = cli_roles(tmp_path, monkeypatch, script, **kwargs)
+    c = controller(tmp_path, monkeypatch, roles=roles)
+    with pytest.raises(Refused, match=message) as caught:
+        c.run()
+    # The first role asked is the compiler (ROLE_GATES goal_check): its gate is not applied.
+    assert caught.value.gate == "resource_guard" and caught.value.gate_source == "raise_site"
+    assert runner.ROLE_GATES["compiler"] != "resource_guard"
+    stored = result_json(c)
+    assert stored["terminal"] == RESOURCE_TERMINAL
+    assert stored["terminal_mapping"] == {"source": "raise_site"}
+    assert read_checkpoint(c.root)["context"]["terminal"]["failed_gate"] == "resource_guard"
+    assert "resource_guard" in contracts.INCOMPLETE_GATES
+    assert roles.receipts == [] and c.state == "SOURCE_CHECKED"
+
+
+def test_malformed_role_cli_output_keeps_the_role_gate(tmp_path, monkeypatch):
+    """Regression: a role CLI that ran to completion and printed a malformed envelope is a
+    role-output failure, tagged with the role's gate (compiler -> goal_check)."""
+    roles = cli_roles(
+        tmp_path, monkeypatch, "print('not a json envelope')", memory_reader=lambda: 64.0
+    )
+    c = controller(tmp_path, monkeypatch, roles=roles)
+    with pytest.raises(Refused, match="invalid compiler envelope") as caught:
+        c.run()
+    assert caught.value.gate == runner.ROLE_GATES["compiler"] == "goal_check"
+    stored = result_json(c)
+    assert stored["terminal"]["failed_gate"] == "goal_check"
+    assert stored["terminal"]["outcome"] == "BLOCKED"
+    assert stored["terminal_mapping"] == {"source": "call_site"}
 
 
 # ------------------------------------------------------------------ item 2: needs_info

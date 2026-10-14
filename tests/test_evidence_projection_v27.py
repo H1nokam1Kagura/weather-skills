@@ -443,15 +443,15 @@ def failed_review(lab):
 
 
 # Known MISSING findings of the frozen V24 validator on a released run, each with its owner:
-# whole-tree harness observation (CAP-HARNESS-OBS, container harness input), the resume list
-# (CAP-RESUME) and exhaustive writes (not declared). The resume counter/limit now come from the
-# controller's recovery ledger, operator_actions from its operator channel and the CAPTURED clock
-# from its initial_state event (wave 4).
+# whole-tree harness observation (CAP-HARNESS-OBS, container harness input) and exhaustive
+# writes (not declared). The resume counter/limit and the resume list (with the other recovery
+# lists, E02-P1 diagnosis ADAPTER_PROJECTION_DEFECT) now come from the controller's recovery
+# ledger, operator_actions from its operator channel and the CAPTURED clock from its
+# initial_state event (wave 4).
 V24_RELEASED_MISSING = {
     "count field harness_observations.max_concurrent_children missing",
     "count field harness_observations.shell_launches missing",
     "count field harness_observations.data_fetch_attempts missing",
-    "list stream controller_trace.resume missing",
     "list stream filesystem_snapshot.created_paths missing",
 }
 
@@ -543,8 +543,10 @@ def test_released_projection_maps_native_records_without_filling(released):
     assert symbols["HARNESS_RESOLVED_ARTIFACT_PATH:onset"] == onset["path"]
     # Absent producers stay absent (never []), and every gap names its owner.
     trace = ev["controller_trace"]
-    for name in ("resume", "transition_requests", "interruptions"):
-        assert name not in trace
+    assert "transition_requests" not in trace
+    # The recovery ledger exists in every run: nothing interrupted or resumed is an observed [].
+    for name in sorted(ep.RECOVERY_LEDGER_LISTS):
+        assert trace[name] == [], name
     # The controller opened its operator channel and decided nothing: an observed [].
     assert trace["operator_actions"] == []
     assert "signalled_pids" not in trace
@@ -720,12 +722,61 @@ def test_pending_records_light_up_from_their_frozen_native_shape(released):
     # test_operator_actions_from_a_real_ledger_answer).
     with Tamper(run / "checkpoint.json"):
         payload = read_checkpoint(run)
-        payload["context"]["resume"] = [{"result": "ACCEPTED", "sequence": 3}]
+        # The controller keeps resume in its recovery ledger (recovery.new_ledger).
+        payload["context"]["recovery"]["resume"] = [{"result": "ACCEPTED", "sequence": 3}]
         write_checkpoint(run, payload)
         ev = WeatherAdapter().capture_evidence(run)["evidence"]
         assert ev["controller_trace"]["resume"] == [{"result": "ACCEPTED", "sequence": 3}]
         assert ev["event_seq"]["controller_trace.resume[0]"] == 3
-        assert "interruptions" not in ev["controller_trace"]
+        assert ev["controller_trace"]["interruptions"] == []
+
+
+@pytest.mark.parametrize(
+    ("ledger_value", "reason"),
+    [
+        (None, "no native recovery ledger in this run"),
+        ({"schema": "workflow.recovery/0"}, "recovery ledger is malformed (schema"),
+        ("not-a-ledger", "recovery ledger is malformed (schema"),
+    ],
+    ids=["absent", "wrong_schema", "not_an_object"],
+)
+def test_recovery_lists_stay_missing_without_a_valid_recovery_ledger(
+    released, ledger_value, reason
+):
+    from tools.workflow.persistence import read_checkpoint, write_checkpoint
+
+    run = released.run
+    with Tamper(run / "checkpoint.json"):
+        payload = read_checkpoint(run)
+        if ledger_value is None:
+            del payload["context"]["recovery"]
+        else:
+            payload["context"]["recovery"] = ledger_value
+        # A top-level list is not the controller's record and is never read for these.
+        payload["context"]["resume"] = []
+        write_checkpoint(run, payload)
+        projection = WeatherAdapter().capture_evidence(run)
+        trace = projection["evidence"]["controller_trace"]
+        gaps = {m["path"]: m for m in projection["missing"]}
+        for name in ep.RECOVERY_LEDGER_LISTS:
+            assert name not in trace, name  # MISSING, never []
+            assert gaps[f"controller_trace.{name}"]["reason"].startswith(reason)
+        assert gaps["controller_trace.resume"]["capability"] == "CAP-RESUME"
+
+
+def test_recovery_list_of_the_wrong_type_stays_missing(released):
+    from tools.workflow.persistence import read_checkpoint, write_checkpoint
+
+    run = released.run
+    with Tamper(run / "checkpoint.json"):
+        payload = read_checkpoint(run)
+        payload["context"]["recovery"]["diagnoses"] = {"index": 0}
+        write_checkpoint(run, payload)
+        projection = WeatherAdapter().capture_evidence(run)
+        trace = projection["evidence"]["controller_trace"]
+        assert "diagnoses" not in trace and trace["resume"] == []
+        (gap,) = [m for m in projection["missing"] if m["path"] == "controller_trace.diagnoses"]
+        assert gap["reason"] == "recovery ledger is malformed (diagnoses is not a list)"
 
 
 def test_run_without_dispatch_evidence_is_refused(tmp_path):
@@ -1429,6 +1480,13 @@ def test_terminal_mapping_never_guesses_an_unmapped_gate():
         {"outcome": "RELEASED", "reason": "released", "failed_gate": None}
     )
     assert released["terminal"]["failed_gate"] is None
+    # Owner ruling role_cli_resource_gate_2026-10-14: a role CLI RAM/time guard stop.
+    guard = {
+        "outcome": "INCOMPLETE",
+        "reason": "resource_guard_failed",
+        "failed_gate": "resource_guard",
+    }
+    assert adapter.map_terminal_reason(guard)["terminal"] == guard
     with pytest.raises(ep.EvidenceMappingError):
         adapter.map_terminal_reason({"outcome": "DONE", "reason": "x", "failed_gate": None})
 
