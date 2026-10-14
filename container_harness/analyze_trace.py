@@ -225,6 +225,30 @@ def braced_after(text, marker):
     return out
 
 
+def marker_values(text, marker):
+    """Every value that follows ``marker`` outside quoted strings: a balanced ``{...}``, or the
+    bare token up to the next ',' / '}' (``NULL``, ``0x7ffd...``)."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] == '"':
+            i = _skip_quoted(text, i)
+            continue
+        if text.startswith(marker, i):
+            j = i + len(marker)
+            if text.startswith("{", j):
+                (value,) = braced_after(text[i:], marker)[:1] or [text[j:]]
+            else:
+                k = j
+                while k < n and text[k] not in ",}":
+                    k += 1
+                value = text[j:k].strip()
+            out.append(value)
+            i = j + max(len(value), 1)
+            continue
+        i += 1
+    return out
+
+
 def sockaddr(token):
     """strace sockaddr text -> (family, destination). (None, None) for NULL; ("UNREADABLE",
     raw) when the argument is not a decoded sockaddr (e.g. a bare pointer)."""
@@ -668,6 +692,7 @@ def analyze(outdir, run_dir=None):
     io_uring_ok = False
     unresolved_targets = []
     fetch_attempts, unreadable_destinations = [], []
+    unresolved_creations = []
     relay_endpoint = status.get("relay_endpoint") or None
 
     def canon(path):
@@ -713,6 +738,9 @@ def analyze(outdir, run_dir=None):
 
     def add(path, how, ev, pkey, kind="file"):
         if path is None:
+            # A creating call whose path cannot be resolved (relative path, unknown base):
+            # the created set would silently lose an entry, so created_paths becomes MISSING.
+            unresolved_creations.append({"pid": ev.tid, "call": how, "line": ev.line})
             return
         if path.startswith(PSEUDO_FS):
             notes["excluded_pseudo_fs"].append({"path": path, "call": how})
@@ -742,6 +770,10 @@ def analyze(outdir, run_dir=None):
         links.pop(path, None)
 
     def move(src, dst, how, ev, pkey):
+        if src is None:  # entries moved with an unknown source cannot be named
+            unresolved_creations.append({"pid": ev.tid, "call": how + "(source)", "line": ev.line})
+            add(dst, how, ev, pkey)
+            return
         moved = sorted(p for p in exists if p == src or p.startswith(src + "/"))
         was = dst in exists
         for p in moved:
@@ -769,8 +801,19 @@ def analyze(outdir, run_dir=None):
             addrs = [a[1] if len(a) > 1 else "<absent>"]
         elif name == "sendto":
             addrs = [a[4] if len(a) > 4 else None]
-        else:  # sendmsg / sendmmsg: every msg_name={...}; none means a connected socket
-            addrs = braced_after(ev.raw_args, "msg_name=")
+        else:  # sendmsg / sendmmsg: every msg_name; NULL means a connected socket
+            message = a[1].strip() if len(a) > 1 else ""
+            addrs = marker_values(message, "msg_name=")
+            undecoded = not message.startswith("[" if name == "sendmmsg" else "{")
+            if name == "sendmmsg" and not undecoded:
+                # every message's header must be decoded (an abbreviated array hides some)
+                vlen = parse_int(a[2]) if len(a) > 2 else None
+                headers = len(marker_values(message, "msg_hdr="))
+                undecoded = vlen is None or headers < vlen or "...]" in message
+            if not undecoded and not addrs:
+                undecoded = True  # a decoded msghdr always prints msg_name
+            if undecoded:
+                addrs = ["<undecoded msghdr>"]
         sender = procs[pkey].pid
         for token in addrs:
             family, dest = sockaddr(token)
@@ -1135,6 +1178,10 @@ def analyze(outdir, run_dir=None):
             missing["filesystem_snapshot.created_paths"] = (
                 "io_uring_setup succeeded: writes may bypass the trace"
             )
+        elif unresolved_creations:
+            missing["filesystem_snapshot.created_paths"] = (
+                f"{len(unresolved_creations)} creating call(s) with an unresolvable path"
+            )
         else:
             evidence["filesystem_snapshot"]["created_paths"] = sorted({r["path"] for r in created})
         signalled = sorted({t for at in attempts for t in at["target_pids"]})
@@ -1179,6 +1226,7 @@ def analyze(outdir, run_dir=None):
         else:
             evidence["harness_observations"]["data_fetch_attempts"] = len(fetch_attempts)
     notes["network_attempts"] = fetch_attempts[:50]
+    notes["unresolved_creations"] = unresolved_creations[:20]
     notes["unreadable_network_destinations"] = unreadable_destinations[:20]
     ram, ram_reason, notes["ram_sampling"] = min_free_ram(outdir, status)
     if ram is None:

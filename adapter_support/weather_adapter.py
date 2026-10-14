@@ -124,8 +124,10 @@ class WeatherAdapter(Adapter):
         An unknown token is refused; a known token the run did not observe is unresolved
         (refused), never defaulted, and never read from role output.
         """
-        known = symbol in SYMBOL_TABLE or any(p.fullmatch(symbol) for p in SYMBOL_PATTERNS)
-        if not isinstance(symbol, str) or not known:
+        known = isinstance(symbol, str) and (
+            symbol in SYMBOL_TABLE or any(p.fullmatch(symbol) for p in SYMBOL_PATTERNS)
+        )
+        if not known:
             raise EvidenceMappingError(f"symbol outside the closed table: {symbol!r}")
         symbols = projection["evidence"]["symbols"]
         if symbol not in symbols:

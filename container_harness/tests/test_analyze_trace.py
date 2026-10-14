@@ -454,6 +454,61 @@ def test_confined_case_run_creates_nothing_outside_the_run_dir(tmp_path):
     ]
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        'openat(5, "x.txt", O_WRONLY|O_CREAT, 0666) = 3',  # undecorated dirfd, no -y result
+        'mkdirat(7, "d", 0777) = 0',
+        'renameat(7, "a", AT_FDCWD</work/run>, "b") = 0',  # unknown source directory
+    ],
+)
+def test_unresolvable_creating_call_makes_created_paths_missing(tmp_path, line):
+    cap = start(Capture(tmp_path))
+    cap(ROOT, 'openat(AT_FDCWD</work/run>, "ok.txt", O_WRONLY|O_CREAT, 0666) = 3</work/run/ok.txt>')
+    cap(ROOT, line)
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_observations"]["tracer_status"]["status"] == "OK"
+    assert "created_paths" not in ev["filesystem_snapshot"]  # absent, never a short list
+    assert ev["missing"]["filesystem_snapshot.created_paths"] == (
+        "1 creating call(s) with an unresolvable path"
+    )
+    assert ev["harness_notes"]["unresolved_creations"]
+    assert ev["controller_trace"]["signalled_pids"] == []  # other fields unaffected
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "sendmsg(3<socket:[1]>, 0x7ffd1234, 0) = 5",  # whole msghdr undecoded
+        'sendmsg(3<socket:[1]>, {msg_name=0x7ffd5678, msg_namelen=16, msg_iov=[{iov_base="a", '
+        "iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 1",
+        "sendmmsg(3<socket:[1]>, 0x7ffd9abc, 2, 0) = 2",
+        'sendmmsg(3<socket:[1]>, [{msg_hdr={msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="a", '
+        "iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=1}], 2, 0) = 2",
+    ],
+)
+def test_undecoded_sendmsg_destination_makes_fetch_attempts_missing(tmp_path, line):
+    cap = start(Capture(tmp_path))
+    cap(ROOT, line)
+    ev = cap.exit(ROOT).write()
+    assert "data_fetch_attempts" not in ev["harness_observations"]  # never a quiet 0
+    assert ev["missing"]["harness_observations.data_fetch_attempts"] == (
+        "network destination address unreadable in the trace"
+    )
+
+
+def test_connected_sendmsg_with_null_destination_is_not_an_attempt(tmp_path):
+    cap = start(Capture(tmp_path))
+    cap(
+        ROOT,
+        'sendmsg(3<socket:[1]>, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="a", '
+        "iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 1",
+    )
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_observations"]["data_fetch_attempts"] == 0
+    assert ev["missing"] == {}
+
+
 RELAY = "172.30.0.1:18080"
 NET_LINES = [
     (101, "socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_TCP) = 3<socket:[4242]>"),
