@@ -18,6 +18,7 @@ from adapter_support import (
     role_substitution,
     shadow_projection,
 )
+from adapter_support import fixture_rereview_projection as fixture_ops
 from adapter_support.fixture_staging import stage_fixture
 from tools.check_capability_signatures import rereview_flagged
 from tools.workflow import review_evidence
@@ -88,6 +89,7 @@ class WeatherAdapter(Adapter):
         "CAP-EVIDENCE-CHECKER": "invoke_evidence_checker",
         "CAP-PRE-REVIEW-GATES": "record_claim_checks",
         "CAP-OPERATOR-ACTIONS": "record_operator_actions",
+        "CAP-REREVIEW": "record_material_changes",
     }
 
     def __init__(self, enable_run_case=False, producers=None):
@@ -393,6 +395,7 @@ class WeatherAdapter(Adapter):
         scheduled = shadow_projection.schedule_without_shadow(case, shadow_plan)
         # The schedule is mapped or refused here, before any side effect (CAP-ROLE-SUBSTITUTE).
         role_substitution.refuse_unsupported_schedule(scheduled)
+        fixture_plan = self.apply_fixture_operation(scheduled, profile["repo"])
         schedule_plan = self.substitute_role_output(scheduled, variant["goal"])
         max_repairs = self.configure_repair(case)
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
@@ -410,7 +413,9 @@ class WeatherAdapter(Adapter):
                 presented_fetch_version=profile["presented_fetch_version"],
             )
         run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
-        harness_files = {"seeded-ledger.json": seeded}
+        # A copy: a before_run FX-LEDGER-APPEND edits seeded["request"] in place (prepare).
+        harness_files = {"seeded-ledger.json": copy.deepcopy(seeded)}
+        repo, repo_copy = fixture_ops.controller_repo(fixture_plan, profile, prepared)
         if channel is None:
             atomic_json(harness_dir / "seeded-ledger.json", seeded)
         # The controller creates and owns this run-scoped operator ledger (D14/D28); the
@@ -431,7 +436,7 @@ class WeatherAdapter(Adapter):
         if schedule_hooks is not None:
             schedule_hooks.prepare(seeded["request"], prepared["source"])
         controller = Controller(
-            profile["repo"],
+            repo,
             seeded["request"],
             prepared["source"],
             run_dir,
@@ -467,6 +472,14 @@ class WeatherAdapter(Adapter):
         }
         if expected_after is not None:
             harness_inputs["source_expected_after"] = expected_after
+        fixture_record = None
+        if fixture_plan["entries"]:
+            fixture_record = fixture_ops.fixture_report(
+                fixture_plan, schedule_hooks, prepared["source_pre"]["value"]
+            )
+            fixture_ops.harness_inputs_from(fixture_record, harness_inputs)
+            expected_after = harness_inputs.get("source_expected_after")
+            expected_reason = harness_inputs["source_expected_after_reason"]
         summary = {
             "case_id": case["id"],
             "input_supplement": profile.get("input_supplement"),
@@ -476,6 +489,9 @@ class WeatherAdapter(Adapter):
             "source_expected_after": {"value": expected_after, "reason": expected_reason},
             "fixture_staged": "pre-staged" if profile.get("prepared_fixture") else "run_case",
         }
+        if fixture_record is not None:
+            summary["fixture_operations"] = fixture_record
+            summary["repo_copy"] = repo_copy
         if schedule_hooks is not None:
             summary["case_schedule"] = schedule_hooks.report()
         if shadow_driver is not None:
@@ -574,6 +590,19 @@ class WeatherAdapter(Adapter):
             return "channel"
         atomic_json(Path(harness_dir) / PROJECTION_INPUTS_FILE, record)
         return str(Path(harness_dir) / PROJECTION_INPUTS_FILE)
+
+    def apply_fixture_operation(self, case, repo=None):
+        """CAP-FIXTURE-OP: every scheduled fixture operation checked (known operation, complete
+        frozen arguments, a target the delivery path reaches), or AdapterRefusal before any side
+        effect. Delivery is InjectionHooks at the controller's own hook points (run_case);
+        definition/runtime-manifest edits run on a disposable repository copy."""
+        return fixture_ops.fixture_plan(case, repo)
+
+    def record_material_changes(self, run_dir, harness=None):
+        """CAP-REREVIEW: controller_trace.material_changes / source_rechecks and the replacing
+        active approval with their event keys, each checked against the controller's files and
+        dispatch events; MISSING (listed in ``missing``) for an unfinished run."""
+        return fixture_ops.rereview_report(self.capture_evidence(run_dir, harness))
 
     def substitute_role_output(self, case, goal=None):
         """CAP-ROLE-SUBSTITUTE: the case's after_role role-output entries mapped onto the
