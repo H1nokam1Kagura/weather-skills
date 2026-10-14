@@ -24,6 +24,25 @@ Frozen v2.7 shapes produced (EVIDENCE_CONTRACT.json ``structures``):
     direct child processes of the controller alive at once), ``harness_observations.shell_launches``
     (successful execve of a shell binary by any tree process), ``signal_capture_exhaustive``,
     ``tracer_status``.
+  * ``harness_observations.data_fetch_attempts``: network attempts of the tree. Every connect()
+    and every destination-addressed sendto/sendmsg/sendmmsg message whose address family is not
+    local (AF_UNIX/AF_LOCAL and AF_NETLINK, plus the AF_UNSPEC disconnect, are excluded),
+    whether or not it succeeded (containers run with ``--network none``, so attempts fail).
+    DECISION: the host relay endpoint (``relay_endpoint`` in harness_status, live-role
+    containers only) is the role transport, not a data fetch, when the CONTROLLER process
+    itself connects to it; those calls are listed in ``harness_notes.role_transport_connects``.
+    A relay connect by any other tree process counts as a fetch attempt. Missing when network
+    syscalls were not in the traced set (``trace_network`` absent from harness_status), when
+    io_uring was set up (IORING_OP_CONNECT bypasses syscall tracing) or when a destination
+    address could not be read.
+  * ``harness_observations.min_free_ram_while_running_gib``: NOT trace-derived. The minimum
+    MemAvailable (GiB, /proc/meminfo: the container VM figure, owner reading UC-07_memory) over
+    the harness RAM sampler's readings taken while the traced tree was running (strictly
+    between ``run_start`` and ``run_end``). The sampler (``ram_sampler.py``) is a root process
+    the entry shell starts outside the traced tree. Missing when the sampler did not finish
+    cleanly, no reading falls inside the run window, or the readings leave a gap longer than
+    ``RAM_MAX_GAP_S`` (at either end or between readings): a sampled minimum is claimed only
+    when the whole run is covered. A post-exit reading is never used.
 
 Missing stays missing: if the tracer died, a trace file is truncated, the harness did not
 finish, or the trace is structurally inconsistent, every trace-derived field is ABSENT (listed
@@ -60,7 +79,13 @@ TRACE_FIELDS = (
     "controller_trace.signalled_pids",
     "harness_observations.max_concurrent_children",
     "harness_observations.shell_launches",
+    "harness_observations.data_fetch_attempts",
 )
+RAM_FIELD = "harness_observations.min_free_ram_while_running_gib"
+RAM_MAX_GAP_S = 2.0
+NETWORK_SYSCALLS = {"connect", "sendto", "sendmsg", "sendmmsg"}
+# Address families that never leave the container: not a data fetch.
+LOCAL_FAMILIES = {"AF_UNIX", "AF_LOCAL", "AF_NETLINK"}
 
 LINE = re.compile(r"^(\d+)\.(\d{1,9}) (.*)$")
 SYSCALL = re.compile(
@@ -158,6 +183,69 @@ def parse_int(token):
         return int(token, 0)
     except (TypeError, ValueError):
         return None
+
+
+def _skip_quoted(text, i):
+    """Index just past the C string literal starting at text[i] == '"'."""
+    i += 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == '"':
+            return i + 1
+        i += 1
+    return i
+
+
+def braced_after(text, marker):
+    """Every balanced ``{...}`` directly following ``marker`` outside quoted strings."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] == '"':
+            i = _skip_quoted(text, i)
+            continue
+        if text.startswith(marker + "{", i):
+            j, depth = i + len(marker), 0
+            while j < n:
+                if text[j] == '"':
+                    j = _skip_quoted(text, j)
+                    continue
+                if text[j] == "{":
+                    depth += 1
+                elif text[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            out.append(text[i + len(marker) : j + 1])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def sockaddr(token):
+    """strace sockaddr text -> (family, destination). (None, None) for NULL; ("UNREADABLE",
+    raw) when the argument is not a decoded sockaddr (e.g. a bare pointer)."""
+    if token is None or token.strip() in ("NULL", ""):
+        return None, None
+    token = token.strip()
+    m = re.match(r"\{sa_family=(AF_\w+)", token)
+    if not m:
+        return "UNREADABLE", token[:120]
+    family = m.group(1)
+    port = re.search(r"sin6?_port=htons\((\d+)\)", token)
+    dest = token[:120]
+    if family == "AF_INET":
+        addr = re.search(r'inet_addr\("([^"]*)"\)', token)
+        if addr and port:
+            dest = f"{addr.group(1)}:{port.group(1)}"
+    elif family == "AF_INET6":
+        addr = re.search(r'inet_pton\(AF_INET6, "([^"]*)"', token)
+        if addr and port:
+            dest = f"[{addr.group(1)}]:{port.group(1)}"
+    return family, dest
 
 
 class Event:
@@ -334,6 +422,9 @@ def analyze(outdir, run_dir=None):
         "pid_reuse": [],
         "clone_flags_of_note": [],
         "exec_failures": [],
+        "role_transport_connects": [],
+        "local_socket_calls": 0,
+        "sockets_created": {},
         "semantics": {
             "signal_zero": "excluded from signalled_pids (no signal is sent); listed here",
             "failed_signal_attempts": "included in signalled_pids (the controller issued them)",
@@ -343,6 +434,12 @@ def analyze(outdir, run_dir=None):
             "(clone/vfork/fork return or first event, to exit)",
             "shell_launches": "successful execve of a shell binary by any tree process",
             "process_tree": "creating parent from clone events, never the reassigned parent",
+            "data_fetch_attempts": "connect() and destination-addressed send calls of any "
+            "tree process to a non-local address family, successful or not; the controller's "
+            "own connects to the declared relay endpoint are role transport (listed in "
+            "role_transport_connects), not data fetches",
+            "min_free_ram_while_running_gib": "minimum MemAvailable over harness RAM sampler "
+            "readings strictly inside the traced run window; whole-run coverage required",
         },
     }
     missing = {}
@@ -504,6 +601,8 @@ def analyze(outdir, run_dir=None):
     add_harness(tracer_pid, entry_pid, parse_int(status.get("tracer_pgid")), "strace")
     decoy = parse_int(status.get("decoy_pid"))
     add_harness(decoy, entry_pid, parse_int(status.get("decoy_pgid")), "decoy")
+    sampler = parse_int(status.get("ram_sampler_pid"))
+    add_harness(sampler, entry_pid, parse_int(status.get("ram_sampler_pgid")), "ram-sampler")
 
     # ---- global replay in time order
     all_events = []
@@ -568,6 +667,8 @@ def analyze(outdir, run_dir=None):
     shell_launches = 0
     io_uring_ok = False
     unresolved_targets = []
+    fetch_attempts, unreadable_destinations = [], []
+    relay_endpoint = status.get("relay_endpoint") or None
 
     def canon(path):
         """Resolve symlinked DIRECTORY components (not the final one) via the link table."""
@@ -660,6 +761,40 @@ def analyze(outdir, run_dir=None):
             links[dst] = links.pop(src)
 
     deliveries, kills, analyzer_errors = [], [], []
+
+    def record_network(ev, pkey):
+        """data_fetch_attempts: one entry per non-local destination a call addresses."""
+        a, name = ev.args, ev.name
+        if name == "connect":
+            addrs = [a[1] if len(a) > 1 else "<absent>"]
+        elif name == "sendto":
+            addrs = [a[4] if len(a) > 4 else None]
+        else:  # sendmsg / sendmmsg: every msg_name={...}; none means a connected socket
+            addrs = braced_after(ev.raw_args, "msg_name=")
+        sender = procs[pkey].pid
+        for token in addrs:
+            family, dest = sockaddr(token)
+            if family is None:
+                continue  # NULL destination: a connected socket (its connect is counted)
+            if family == "AF_UNSPEC" and name == "connect":
+                continue  # dissolves a datagram association; addresses nothing
+            entry = {
+                "pid": sender,
+                "tid": ev.tid,
+                "call": name,
+                "family": family,
+                "destination": dest,
+                "result": "ok" if ev.ok else f"{ev.ret} {ev.tail}".strip()[:80],
+                "ts_ns": ev.ts,
+            }
+            if family == "UNREADABLE":
+                unreadable_destinations.append(entry)
+            elif family in LOCAL_FAMILIES:
+                notes["local_socket_calls"] += 1
+            elif relay_endpoint and dest == relay_endpoint and sender == root_tid:
+                notes["role_transport_connects"].append(entry)
+            else:
+                fetch_attempts.append(entry)
 
     def replay_one(ev, pkey):
         nonlocal shell_launches, io_uring_ok
@@ -763,6 +898,13 @@ def analyze(outdir, run_dir=None):
                 for other in procs[pkey].threads:  # threads share the fs struct
                     if other in procs:
                         cwd[other] = newcwd
+            return
+        if name in NETWORK_SYSCALLS:
+            record_network(ev, pkey)
+            return
+        if name == "socket" and a:
+            family = a[0].split("|")[0]
+            notes["sockets_created"][family] = notes["sockets_created"].get(family, 0) + 1
             return
         if name in SIGNAL_SYSCALLS:
             record_signal(
@@ -1025,6 +1167,24 @@ def analyze(outdir, run_dir=None):
             procs, root_key
         )
         evidence["harness_observations"]["shell_launches"] = shell_launches
+        fetch_gap = None
+        if status.get("trace_network") != "1":
+            fetch_gap = "network syscalls were not in the traced set"
+        elif io_uring_ok:
+            fetch_gap = "io_uring_setup succeeded: connects may bypass the trace"
+        elif unreadable_destinations:
+            fetch_gap = "network destination address unreadable in the trace"
+        if fetch_gap:
+            missing["harness_observations.data_fetch_attempts"] = fetch_gap
+        else:
+            evidence["harness_observations"]["data_fetch_attempts"] = len(fetch_attempts)
+    notes["network_attempts"] = fetch_attempts[:50]
+    notes["unreadable_network_destinations"] = unreadable_destinations[:20]
+    ram, ram_reason, notes["ram_sampling"] = min_free_ram(outdir, status)
+    if ram is None:
+        missing[RAM_FIELD] = ram_reason
+    else:
+        evidence["harness_observations"]["min_free_ram_while_running_gib"] = ram
     evidence["harness_observations"]["signal_capture_exhaustive"] = bool(
         complete and not unresolved_targets
     )
@@ -1067,6 +1227,51 @@ def analyze(outdir, run_dir=None):
 
 def roots_has(roots, tid):
     return tid in roots
+
+
+def min_free_ram(outdir, status):
+    """-> (GiB or None, missing reason, note). Only readings strictly inside (run_start,
+    run_end) count: a reading before the tree started or after it exited is never the
+    running minimum."""
+    path = Path(outdir) / "ram_samples.txt"
+    note = {
+        "source": "harness ram_sampler.py: /proc/meminfo MemAvailable (container VM figure)",
+        "file": path.name,
+        "max_gap_s": RAM_MAX_GAP_S,
+    }
+    try:
+        start, end = float(status["run_start"]), float(status["run_end"])
+    except (KeyError, ValueError):
+        return None, "run window not recorded (run_start/run_end)", note
+    if not path.exists():
+        return None, "no harness RAM sampler readings", note
+    readings, header, footer, errors = [], None, False, []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("#start"):
+            header = line
+        elif line.startswith("#end"):
+            footer = True
+        elif line.startswith("#"):
+            errors.append(line[:200])
+        elif line.strip():
+            parts = line.split()
+            try:
+                readings.append((float(parts[0]), int(parts[1])))
+            except (IndexError, ValueError):
+                errors.append(line[:200])
+    note.update(header=header, readings=len(readings), errors=errors[:10])
+    if header is None or not footer or errors:
+        return None, "harness RAM sampler did not finish cleanly", note
+    inside = sorted(r for r in readings if start < r[0] < end)
+    note["readings_in_run_window"] = len(inside)
+    if not inside:
+        return None, "no RAM reading while the tree was running", note
+    gaps = [inside[0][0] - start, end - inside[-1][0]]
+    gaps += [b[0] - a[0] for a, b in zip(inside, inside[1:], strict=False)]
+    note["largest_gap_s"] = round(max(gaps), 3)
+    if max(gaps) > RAM_MAX_GAP_S:
+        return None, f"RAM readings leave a {max(gaps):.3f}s gap in the run window", note
+    return min(kib for _, kib in inside) / 1024**2, None, note
 
 
 def record_signal(
@@ -1201,6 +1406,12 @@ def main(argv):
             "max_concurrent_children", "MISSING"
         ),
         "shell_launches": evidence["harness_observations"].get("shell_launches", "MISSING"),
+        "data_fetch_attempts": evidence["harness_observations"].get(
+            "data_fetch_attempts", "MISSING"
+        ),
+        "min_free_ram_while_running_gib": evidence["harness_observations"].get(
+            "min_free_ram_while_running_gib", "MISSING"
+        ),
         "missing": evidence["missing"],
         "created_outside_run_dir": evidence["harness_notes"]["created_outside_run_dir"],
     }

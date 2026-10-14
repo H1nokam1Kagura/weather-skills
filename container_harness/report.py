@@ -420,6 +420,11 @@ def canary(root, rows):
         "process_tree_size": len(get(ev, "process_tree") or {}),
         "max_concurrent_children": get(ev, "harness_observations.max_concurrent_children"),
         "shell_launches": get(ev, "harness_observations.shell_launches"),
+        "data_fetch_attempts": get(ev, "harness_observations.data_fetch_attempts"),
+        "min_free_ram_while_running_gib": get(
+            ev, "harness_observations.min_free_ram_while_running_gib"
+        ),
+        "role_transport_connects": len(notes.get("role_transport_connects", [])),
         "signal_capture_exhaustive": get(ev, "harness_observations.signal_capture_exhaustive"),
         "missing": ev.get("missing"),
         "kernel_signal_setups": len(notes.get("kernel_signal_setups", [])),

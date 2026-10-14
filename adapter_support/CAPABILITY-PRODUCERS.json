@@ -1,7 +1,7 @@
 {
   "schema": "weather-adapter.capability-producers/1",
   "authority": "Owner ruling D4 (CR-09): every declared capability requires a reviewed capability-to-producer record; an empty signal list is never emitted as exhaustive evidence. Source: simkit/handoffs/completion-20261012/decisions/OWNER-RULINGS.json.",
-  "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids and symbols.HARNESS_CONTROLLER_PID as a harness-observations input file. The projection accepts and merges it; CAP-EXHAUSTIVE-WRITES and CAP-SIGNAL-CAPTURE are NOT declared by carrying those values (statuses unchanged until the traced harness is reviewed).",
+  "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer (container_harness/analyze_trace.py, run by entry.sh after the traced tree exits) supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids, symbols.HARNESS_CONTROLLER_PID, harness_observations.{max_concurrent_children, shell_launches, data_fetch_attempts, signal_capture_exhaustive, tracer_status} and the harness RAM sampler's min_free_ram_while_running_gib as a harness-observations input file (observations_path). The projection merges it, checked against the controller's own records. CAP-EXHAUSTIVE-WRITES, CAP-SIGNAL-CAPTURE and CAP-HARNESS-OBS are PRODUCER_MAPPED on that route but declared only when a reviewer signs the record; carrying values declares nothing.",
   "base": "controller 0e862c8 (feat/simkit-completion-snowyowl); line numbers refer to that base",
   "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED and reviewer is a non-empty string. reviewer/reviewed_at are left null for the coordinator. PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
   "frozen_shapes": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json structures (frozen v2.7, read-only)",
@@ -174,49 +174,80 @@
     "CAP-HARNESS-OBS": {
       "d4_gated": true,
       "method": "observe_harness",
-      "status": "PARTIAL",
+      "status": "PRODUCER_MAPPED",
       "producers": [
         {"file": "tools/workflow/processes.py", "line": 285, "symbol": "Processes.run launch_check", "emits": "free_ram_gib, budget_ok, launched, reading_source per launch decision"},
-        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
+        {"file": "container_harness/analyze_trace.py", "line": null, "symbol": "analyze / max_concurrent", "emits": "harness_observations.max_concurrent_children: direct child processes of the controller alive at once (clone return to exit, from the trace)"},
+        {"file": "container_harness/analyze_trace.py", "line": null, "symbol": "analyze replay_one execve", "emits": "harness_observations.shell_launches: successful execve of a shell binary by any tree process"},
+        {"file": "container_harness/analyze_trace.py", "line": null, "symbol": "analyze record_network", "emits": "harness_observations.data_fetch_attempts: connect() and destination-addressed sendto/sendmsg/sendmmsg calls of any tree process to a non-local address family (AF_UNIX/AF_LOCAL, AF_NETLINK and the AF_UNSPEC disconnect excluded), successful or not; detail in harness_notes.network_attempts"},
+        {"file": "container_harness/entry.sh", "line": null, "symbol": "strace -e trace=...socket,connect,sendto,sendmsg,sendmmsg; status trace_network=1; status relay_endpoint", "emits": "network syscalls in the traced set (containers run with --network none, live-role containers on the --internal relay network only)"},
+        {"file": "container_harness/ram_sampler.py", "line": null, "symbol": "main", "emits": "root sampler outside the traced tree, started before run_start and stopped after run_end: /proc/meminfo MemAvailable every 0.2 s (container VM figure, owner reading UC-07_memory)"},
+        {"file": "container_harness/analyze_trace.py", "line": null, "symbol": "min_free_ram", "emits": "harness_observations.min_free_ram_while_running_gib: minimum over sampler readings strictly inside the run window; MISSING unless the sampler finished cleanly and no gap exceeds 2.0 s (ends included)"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.harness_observations", "emits": "merges the four fields from observations_path (shape-checked: counts non-negative integers, RAM a finite non-negative GiB reading); harness-reported missing stays MISSING with its reason"}
       ],
-      "evidence_fields": ["budget_ledger.launch_checks", "harness_observations.max_concurrent_children, harness_observations.shell_launches (container harness input only)"],
+      "evidence_fields": ["budget_ledger.launch_checks", "harness_observations.max_concurrent_children", "harness_observations.shell_launches", "harness_observations.data_fetch_attempts", "harness_observations.min_free_ram_while_running_gib (container harness input only)"],
       "missing_fields": [
-        {"field": "harness_observations.max_concurrent_children", "owner": "container harness (MISSING without the observations input)"},
-        {"field": "harness_observations.shell_launches", "owner": "container harness (MISSING without the observations input)"},
-        {"field": "harness_observations.data_fetch_attempts", "owner": "no design (network observation)"},
-        {"field": "harness_observations.min_free_ram_while_running_gib", "owner": "processes.py (min_free_gib falls back to a post-exit read when no sample was taken; not distinguishable)"}
+        {"field": "all four harness_observations fields on the in-process route", "owner": "container harness (no whole-tree observer without the trace; MISSING, never 0)"},
+        {"field": "max_concurrent_children, shell_launches, data_fetch_attempts when the trace is incomplete", "owner": "container harness (tracer death/truncation: reason carried verbatim)"},
+        {"field": "data_fetch_attempts when network syscalls were not traced, io_uring was set up, or a destination was unreadable", "owner": "container harness"},
+        {"field": "min_free_ram_while_running_gib when the sampler did not cover the whole run", "owner": "container harness RAM sampler"}
       ],
-      "tests": ["test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
+      "mapping_choices_for_review": [
+        "data_fetch_attempts counts calls (each connect, each addressed message), not distinct destinations; failed attempts count",
+        "the controller process's own connects to the declared relay endpoint (live roles) are role transport, listed in harness_notes.role_transport_connects, not data fetches; the same connect from any other tree process counts",
+        "min_free_ram_while_running_gib is a harness-sampled minimum (0.2 s period, 2.0 s max gap), whole run window, not the controller's own per-tool guard readings (process_exit min_free_gib is the system under test's guard and covers only tool runtime)",
+        "the RAM figure is the container VM's MemAvailable (owner reading UC-07_memory); it is independent of tracer status"
+      ],
+      "notes": "Upgraded from PARTIAL: each whole-tree field now has a harness producer. The network-syscall trace set and the RAM sampler are unit-tested on synthetic captures (container_harness/tests/test_analyze_trace.py) but have not yet run in a container; the first container run is the reviewer's evidence for them. max_concurrent_children and shell_launches already came out of the container canary.",
+      "tests": ["test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_observe_harness_carries_whole_tree_fields_or_reports_them_missing", "container_harness/tests/test_analyze_trace.py::test_data_fetch_attempts_count_non_local_destinations", "container_harness/tests/test_analyze_trace.py::test_quiet_run_reports_zero_fetch_attempts_only_when_network_was_traced", "container_harness/tests/test_analyze_trace.py::test_relay_connect_is_role_transport_only_from_the_controller", "container_harness/tests/test_analyze_trace.py::test_unobservable_network_makes_fetch_attempts_missing", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_is_the_running_minimum_of_harness_readings", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_missing_unless_the_whole_run_is_covered", "container_harness/tests/test_analyze_trace.py::test_threads_are_not_children_and_concurrency_counts_overlap", "container_harness/tests/test_analyze_trace.py::test_shell_launches_and_relative_paths_after_chdir"],
       "reviewer": null,
       "reviewed_at": null
     },
     "CAP-SIGNAL-CAPTURE": {
       "d4_gated": true,
       "method": "capture_signal_targets",
-      "status": "PARTIAL",
+      "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "tools/workflow/signal_stop.py", "line": 645, "symbol": "stop_tree", "emits": "signal-stop/1 {signalled_pids, process_tree, exhaustive, exhaustive_reasons}"},
+        {"file": "container_harness/entry.sh", "line": null, "symbol": "root strace -ff -A -y -u runner -e trace=%process,%signal,setsid,setpgid,pidfd_open,pidfd_send_signal,...", "emits": "every kill-family syscall, clone and pgid change of the uid-1000 tree; the tree cannot signal or read the tracer"},
+        {"file": "container_harness/analyze_trace.py", "line": null, "symbol": "record_signal / analyze", "emits": "controller_trace.signalled_pids (every pid a kill/tkill/tgkill/rt_*sigqueueinfo/pidfd_send_signal targeted, group and -1 targets resolved at call time, failed calls included, signal 0 excluded), process_tree (creating parent), signal_capture_exhaustive (trace complete and every target resolved; receiver-side SI_USER/SI_TKILL/SI_QUEUE deliveries cross-checked)"},
+        {"file": "tools/workflow/signal_stop.py", "line": 645, "symbol": "stop_tree", "emits": "signal-stop/1 {signalled_pids, process_tree, exhaustive, exhaustive_reasons} (Windows; checked against the trace, kept in notes)"},
         {"file": "tools/workflow/processes.py", "line": 423, "symbol": "Processes.run signal_stop event", "emits": "signal_stop dispatch event on the controller clock"},
-        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed_signal_capture", "emits": "merges the trace fields when harness[\"observations_path\"] is supplied; every native launch must appear with the same parent and every native signal_stop pid must be observed, else the projection is refused; harness-reported missing stays MISSING with its reason"}
       ],
       "evidence_fields": ["controller_trace.signalled_pids", "harness_observations.signal_capture_exhaustive (true only when every record is exhaustive)", "process_tree (launch pid->parent plus signal_stop trees)", "container route: signalled_pids, signal_capture_exhaustive and process_tree (creating parent) from the harness trace; every native launch must appear with the same parent and every native signal_stop pid must be observed, else the projection is refused; the native signal_stop projection and any differing parent-at-signal are kept in notes"],
       "missing_fields": [{"field": "all fields when no signal_stop record exists and no harness observations input is supplied", "owner": "D4: absence of a stop record is never an empty exhaustive list"}, {"field": "fields the container harness reports missing (tracer death, truncation, unresolved targets)", "owner": "container harness (reason carried verbatim)"}],
-      "notes": "Not declared: status stays PARTIAL until the traced container harness is reviewed (container_route_ruling_2026-10-13).",
-      "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
+      "mapping_choices_for_review": [
+        "signal 0 (existence probe) is excluded from signalled_pids and listed in harness_notes.signal_zero_probes",
+        "failed kill-family calls (ESRCH, EPERM) are included: the contract says terminated or not",
+        "kill(-1) and group targets resolve to every member alive at call time, harness processes included (the entry shell, strace and the RAM sampler are root: an EPERM target is still a target)",
+        "process_tree uses the creating parent; the kernel-reassigned parent of an orphan is in harness_notes.reparented (owner reading parent_at_signal)",
+        "kernel-generated deliveries (SIGCHLD, SIGPIPE, timers, parent-death, SIGIO) are not the controller signalling; setups flagged in harness_notes.kernel_signal_setups"
+      ],
+      "notes": "Upgraded from PARTIAL on the container route (container_route_ruling_2026-10-13): the harness trace is the producer, already exercised by the container canary/tree/tracer-death scenarios. Results certify Linux only; Windows signal_stop code is not exercised on this route. Declared only when a reviewer signs.",
+      "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "container_harness/tests/test_analyze_trace.py::test_signal_forms_group_pidfd_tgkill_zero_and_failed", "container_harness/tests/test_analyze_trace.py::test_user_delivery_without_attempt_makes_signals_missing", "container_harness/tests/test_analyze_trace.py::test_process_tree_uses_creating_parent_and_notes_reassignment", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty"],
       "reviewer": null,
       "reviewed_at": null
     },
     "CAP-EXHAUSTIVE-WRITES": {
       "d4_gated": true,
       "method": "assert_exhaustive_write_capture",
-      "status": "NOT_DECLARED",
+      "status": "PRODUCER_MAPPED",
       "producers": [
-        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
+        {"file": "container_harness/entry.sh", "line": null, "symbol": "pre-run find baseline + root strace -ff -A -y -e trace=%file,...,bind,memfd_create,io_uring_*", "emits": "baseline.txt/baseline_links.tsv taken just before the tracer starts; every path syscall of the uid-1000 tree"},
+        {"file": "container_harness/analyze_trace.py", "line": null, "symbol": "analyze replay_one add/move/remove", "emits": "filesystem_snapshot.created_paths: every new directory entry the tree made (files, dirs, fifos, sockets, links, rename targets, create-then-delete), symlinked directory components resolved; tracer_status; MISSING on tracer death, truncation, inconsistency, analyzer error or a successful io_uring_setup"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges created_paths from observations_path (unique absolute paths, never both present and missing)"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "write_capture_status", "emits": "notes.write_capture {status EXHAUSTIVE|MISSING, reason}: EXHAUSTIVE only with tracer_status OK, no trace-derived field in the harness's missing, created_paths carried and every present artifact path among them"},
+        {"file": "adapter_support/weather_adapter.py", "line": null, "symbol": "WeatherAdapter.assert_exhaustive_write_capture", "emits": "the write_capture verdict plus created_paths when EXHAUSTIVE (licenses empty_is_exhaustive); otherwise MISSING with the harness's reason"}
       ],
-      "evidence_fields": ["filesystem_snapshot.created_paths (container harness input only; compared by exact string with artifacts.<id>.path, so the projection must run in the trace's path namespace)"],
+      "evidence_fields": ["filesystem_snapshot.created_paths (container harness input only; compared by exact string with artifacts.<id>.path, so the projection must run in the trace's path namespace: container_harness/project_in_container.py)"],
       "missing_fields": [{"field": "filesystem_snapshot.created_paths", "owner": "container harness (MISSING without the observations input, or when the harness reports it missing, e.g. tracer death or io_uring)"}],
-      "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). The value is carried when supplied, but the capability is not declared: no method is implemented and status stays NOT_DECLARED until the traced harness is reviewed.",
-      "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
+      "mapping_choices_for_review": [
+        "'nothing missing' is read as no trace-derived field missing: a gap in the untraced RAM sampler does not make write capture non-exhaustive; any other trace-derived gap (process_tree, signalled_pids, counts, data_fetch_attempts) does",
+        "an artifact the controller reports present whose path is not among created_paths makes the verdict MISSING (projection outside the trace's path namespace, or a capture gap), never EXHAUSTIVE",
+        "unnamed O_TMPFILE/memfd inodes are not created paths (owner reading unnamed_temp_files); O_CREAT on an existing path is a write, listed in harness_notes.o_creat_on_existing, not a created path"
+      ],
+      "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). Upgraded from NOT_DECLARED: the method exists and the producer (trace analyzer) already ran in the container canary/tree scenarios. Exhaustive capture is attribution-blind inside one process: run_case's harness staging (case root, source/, harness/) runs in the traced controller process and is therefore in created_paths, outside the frozen allow-list HARNESS_RUN_DIR (all_under, every v2.7 case), as are tool caches under $HOME seen in the canary. That is a scoring outcome the capture correctly exposes, not a capture defect; see the write-allow-list finding in the handoff. Declared only when a reviewer signs.",
+      "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_exhaustive_write_capture_only_from_a_complete_trace", "container_harness/tests/test_analyze_trace.py::test_created_paths_semantics", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty", "container_harness/tests/test_analyze_trace.py::test_io_uring_success_makes_created_paths_missing_only"],
       "reviewer": null,
       "reviewed_at": null
     },
