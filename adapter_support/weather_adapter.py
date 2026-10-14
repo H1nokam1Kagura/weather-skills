@@ -12,7 +12,7 @@ from pathlib import Path
 
 from simkit.adapter import Adapter
 
-from adapter_support import evidence_projection, role_substitution
+from adapter_support import evidence_projection, pre_review_projection, role_substitution
 from adapter_support.fixture_staging import stage_fixture
 from tools.workflow import review_evidence
 from tools.workflow.catalog import safe_path, tree_hash
@@ -36,6 +36,7 @@ PROHIBITION_FIELDS = ("baseline",)
 # CAP-SYMBOLS closed table: exact tokens, or a prefix whose suffix is resolved natively.
 SYMBOL_TABLE = (
     "HARNESS_RUN_DIR",
+    "HARNESS_SOURCE_CACHE",
     "HARNESS_REQUEST_HASH",
     "HARNESS_REQUEST_HASH:current",
     "HARNESS_MANIFEST_HASH:current",
@@ -77,6 +78,9 @@ class WeatherAdapter(Adapter):
         "CAP-RUN-PROVENANCE": "tag_run_provenance",
         "CAP-SCHEDULE-DEPENDENCIES": "dispatch_dependent_schedule",
         "CAP-REVIEW-APPROVAL-HOOK": "dispatch_after_accepted_review",
+        "CAP-EVIDENCE-CHECKER": "invoke_evidence_checker",
+        "CAP-PRE-REVIEW-GATES": "record_claim_checks",
+        "CAP-OPERATOR-ACTIONS": "record_operator_actions",
     }
 
     def __init__(self, enable_run_case=False, producers=None):
@@ -149,6 +153,55 @@ class WeatherAdapter(Adapter):
             "review_snapshots": observations["review_snapshots"],
             "review_dispatch_failures": observations["review_dispatch_failures"],
         }
+
+    def invoke_evidence_checker(self, run_dir, harness=None):
+        """CAP-EVIDENCE-CHECKER: the controller invokes the separate evidence_checker role
+        itself (Controller.claim_check -> ask, after gate 1, before the reviewer). This
+        returns its receipts, structured per-claim outputs and observed placement, or MISSING
+        when claim gates were not enabled. Live or substituted output arrives through the
+        role transport / after_role hooks, never through this method."""
+        projection = self.capture_evidence(run_dir, harness)
+        return pre_review_projection.evidence_checker_report(
+            projection["evidence"], projection["missing"]
+        )
+
+    def record_claim_checks(self, run_dir, harness=None):
+        """CAP-PRE-REVIEW-GATES: controller_trace.claim_checks (reviewer_occurrence as the
+        receipt ordinal) and their event keys, or MISSING. citation_gate/citation_verdict are
+        controller labels, never evidence (v2.5 UC-14-resolution)."""
+        projection = self.capture_evidence(run_dir, harness)
+        trace = projection["evidence"]["controller_trace"]
+        if "claim_checks" not in trace:
+            return {"status": "MISSING", "reason": self._reason(projection, "claim_checks")}
+        prefix = "controller_trace.claim_checks["
+        return {
+            "claim_checks": trace["claim_checks"],
+            "event_seq": {
+                k: v for k, v in projection["evidence"]["event_seq"].items() if k.startswith(prefix)
+            },
+            "missing": [m for m in projection["missing"] if m["path"].startswith(prefix)],
+        }
+
+    def record_operator_actions(self, run_dir, harness=None):
+        """CAP-OPERATOR-ACTIONS: every operator action the controller accepted or rejected,
+        with source and speaker, and their event keys; MISSING when no channel was opened."""
+        projection = self.capture_evidence(run_dir, harness)
+        trace = projection["evidence"]["controller_trace"]
+        if "operator_actions" not in trace:
+            return {"status": "MISSING", "reason": self._reason(projection, "operator_actions")}
+        prefix = "controller_trace.operator_actions["
+        return {
+            "operator_actions": trace["operator_actions"],
+            "event_seq": {
+                k: v for k, v in projection["evidence"]["event_seq"].items() if k.startswith(prefix)
+            },
+            "missing": [m for m in projection["missing"] if m["path"].startswith(prefix)],
+        }
+
+    @staticmethod
+    def _reason(projection, name):
+        path = f"controller_trace.{name}"
+        return "; ".join(m["reason"] for m in projection["missing"] if m["path"] == path)
 
     def observe_harness(self, run_dir, harness=None):
         """CAP-HARNESS-OBS: the controller's launch checks plus the whole-tree fields the
@@ -318,6 +371,12 @@ class WeatherAdapter(Adapter):
         )
         run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
         atomic_json(harness_dir / "seeded-ledger.json", seeded)
+        # The controller creates and owns this run-scoped operator ledger (D14/D28); the
+        # harness only appends literal records to it (FX-LEDGER-APPEND). Harness-side path.
+        operator_ledger = harness_dir / "operator-ledger.jsonl"
+        expected_after, expected_reason = pre_review_projection.expected_source_after(
+            case, prepared["source_pre"]["value"]
+        )
         processes = profile["processes_factory"](run_dir)
         roles = profile["roles_factory"](run_dir)
         # The case schedule runs chained behind the launch observer, whose records stay intact.
@@ -337,6 +396,7 @@ class WeatherAdapter(Adapter):
             review_evidence_mode=True,
             dispatch_evidence_mode=True,
             definition_source=profile["definition_source"],
+            operator_ledger_path=operator_ledger,
         )
         try:
             controller.run()
@@ -353,7 +413,10 @@ class WeatherAdapter(Adapter):
             "source_pre": prepared["source_pre"]["value"],
             "authorized_goal": variant["goal"],
             "run_provenance": self.tag_run_provenance(run_dir, harness_dir, markers),
+            "source_expected_after_reason": expected_reason,
         }
+        if expected_after is not None:
+            harness_inputs["source_expected_after"] = expected_after
         # Persisted before projecting, so a post-trace re-projection has them even when the
         # in-process projection refuses.
         self.persist_projection_inputs(
@@ -365,6 +428,8 @@ class WeatherAdapter(Adapter):
             "input_supplement": profile.get("input_supplement"),
             "source_pre": prepared["source_pre"],
             "seeded_ledger": seeded["derivation"],
+            "operator_ledger": str(operator_ledger),
+            "source_expected_after": {"value": expected_after, "reason": expected_reason},
         }
         if schedule_hooks is not None:
             projection["harness"]["case_schedule"] = schedule_hooks.report()
@@ -411,22 +476,28 @@ class WeatherAdapter(Adapter):
         return role_substitution.SubstitutedRoles(case, goal)
 
     def diagnostic_capability_status(self):
-        return {
-            "CAP-BOUND-SOURCES": {
+        """Status of the DIRECT diagnostic path (capture_review_diagnostics) only.
+
+        That path reads a live Controller and projects review snapshots without the dispatch
+        clock, so it never supplies the full capabilities. Their status as capabilities is the
+        CAPABILITY-PRODUCERS.json record, reported beside it (never overridden here).
+        """
+        records = self.producers["capabilities"]
+        out = {}
+        for capability, reason in (
+            ("CAP-BOUND-SOURCES", "diagnostic path: snapshots only; no approval or claim checks"),
+            ("CAP-RECEIPTS", "diagnostic path: no controller-global dispatch clock is read"),
+            ("CAP-HARNESS-OBS", "diagnostic path: review projection is not harness observation"),
+        ):
+            record = records.get(capability, {})
+            out[capability] = {
                 "status": "NOT_IMPLEMENTED",
-                "reasons": [
-                    "failed dispatch lacks complete invocation/receipt correlation",
-                ],
-            },
-            "CAP-RECEIPTS": {
-                "status": "NOT_IMPLEMENTED",
-                "reasons": ["native receipts lack controller-global seq and resume phase"],
-            },
-            "CAP-HARNESS-OBS": {
-                "status": "NOT_IMPLEMENTED",
-                "reasons": ["review projection is not exhaustive harness observation"],
-            },
-        }
+                "scope": "capture_review_diagnostics",
+                "reasons": [reason],
+                "capability_record_status": record.get("status"),
+                "capability_record_method": record.get("method"),
+            }
+        return out
 
     def controller_goal_hash(self, goal):
         """CAP-CONTROLLER-HASH: the controller's own authorization goal digest.
