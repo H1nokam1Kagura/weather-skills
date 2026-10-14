@@ -1,0 +1,25 @@
+{
+  "reviewer": "/root/implementation_review",
+  "scope": [
+    "tools/workflow/runner.py",
+    "tools/workflow/agents.py",
+    "tools/workflow/tests/test_dispatch_evidence.py",
+    "completion-evidence/prepare_baseline.py",
+    "completion-evidence/check_case_admission.py"
+  ],
+  "method": "Independent read-only source review against original WIP; no reviewer test execution",
+  "findings": [
+    {
+      "id": "R1",
+      "status": "RESOLVED_INDEPENDENT_REREVIEW",
+      "description": "Both evidence modes serialize different copies of the receipt because controller_dispatch is added after review snapshot. Populate correlation before serialization and test combined mode."
+    }
+  ],
+  "verified_properties": [
+    "Unknown dispatch outcomes retain pending state and refuse resume",
+    "Baseline preservation verifies frozen bytes",
+    "Admission report does not count unsupported cases as executions or passes"
+  ],
+  "limits": "No exhaustive process capture, authenticated receipt, science or GS1 validation",
+  "final_review": "No remaining findings in narrow source rereview: receipt ordering, primary exception preservation, real callback failure cleanup; runtime checks separate."
+}

@@ -1,0 +1,9 @@
+{
+  "reporter": "/root/process_audit",
+  "command": "python -B -m pytest -q -p no:cacheprovider tools/workflow/tests/test_dispatch_evidence.py tools/workflow/tests/test_review_evidence.py",
+  "summary": "25 passed in 59.97s",
+  "exit_code": 0,
+  "evidence_type": "Executing subagent tool-result report; no separate stdout or XML artifact was produced",
+  "regressions": ["Combined-mode correlated receipt equality across all four durable representations", "Failure evidence save/checkpoint errors retain original exception and pending resume refusal"],
+  "limit": "Local component tests, not registered SIMKIT case results"
+}

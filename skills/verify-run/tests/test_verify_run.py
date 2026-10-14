@@ -222,6 +222,36 @@ def test_replay_rtol(tmp_path, clip_region, aggregate, verify_run, capsys):
     assert "equal within tolerance" in out
 
 
+def test_replay_runner_that_cannot_start_is_unverifiable_not_a_crash(
+    tmp_path, clip_region, aggregate, vr_module, monkeypatch, capsys
+):
+    # e.g. `uv` absent in an offline container: a gate verdict, never a traceback.
+    monkeypatch.setattr(vr_module, "_runner", lambda script: ["no-such-runner-xyz", str(script)])
+    _src, _clipped, weekly = _chain(tmp_path, clip_region, aggregate)
+
+    code = _gate(vr_module.verify_run, "-i", str(weekly), "--require-replay")
+
+    out = capsys.readouterr().out
+    assert code == 2, out
+    assert "replay runner 'no-such-runner-xyz' could not be started" in out
+
+
+def test_python_replay_runner_reruns_with_this_interpreter(
+    tmp_path, clip_region, aggregate, vr_module, monkeypatch, capsys
+):
+    monkeypatch.setattr(vr_module, "_runner", lambda script: pytest.fail("uv runner used"))
+    _src, _clipped, weekly = _chain(tmp_path, clip_region, aggregate)
+
+    code = _gate(
+        vr_module.verify_run, "-i", str(weekly), "--require-replay", "--replay-runner", "python"
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert _has_check(out, "PASS", "replay: replay of weekly.zarr")
+    assert "re-run with this interpreter (python)" in out
+
+
 def test_required_replay_runs_without_optional_flag(
     tmp_path, clip_region, aggregate, verify_run, capsys
 ):

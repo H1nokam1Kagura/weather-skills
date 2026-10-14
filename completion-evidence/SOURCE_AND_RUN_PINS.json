@@ -1,0 +1,585 @@
+{
+  "stage": "LOCAL_IMPLEMENTATION_AND_ADMISSION_REPORT",
+  "source_head": "6f062c13682b75a5e0aea91f335c83a938c7199a",
+  "files": [
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/__init__.py",
+      "sha256": "7d7e374a177320d9333516298b5ae1cc79c7bcfa119217c2c373fc652c5a80eb",
+      "bytes": 73,
+      "relative_path": "tools/workflow/__init__.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/__main__.py",
+      "sha256": "777bc40681267256f1bed5ee808aaf82bff8ae61767aa2b52cfcc40b4e4b5125",
+      "bytes": 5854,
+      "relative_path": "tools/workflow/__main__.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/admission.py",
+      "sha256": "2df04fbbd8c55734f90e870f72d77170ec6d82d558aa7c049e6564678cfe19f4",
+      "bytes": 4664,
+      "relative_path": "tools/workflow/admission.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/agents.py",
+      "sha256": "28d34d3e7fb9c67f2197d4a67e79fd1f9a4987fe5f67358c8e1be4127345ed93",
+      "bytes": 6597,
+      "relative_path": "tools/workflow/agents.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/catalog.py",
+      "sha256": "4a7fa56e169f80faffb158987328e9bb85873cc9d09e8d130fae4710a079822c",
+      "bytes": 6408,
+      "relative_path": "tools/workflow/catalog.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/contracts.py",
+      "sha256": "83baf8a3f2daddceaafde924f8507eff986f54ff1c27471288c59efb2a199fd4",
+      "bytes": 5589,
+      "relative_path": "tools/workflow/contracts.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/e2e_admission.py",
+      "sha256": "0d105fcaa8ae9e23bf6bef1a9094a08fbd668d8f7f51f9b844dd4887ab8b0cf1",
+      "bytes": 7138,
+      "relative_path": "tools/workflow/e2e_admission.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/e2e_contracts.py",
+      "sha256": "ed029215cb3d647c086c8d6da3f648b2ad513f0f41da78261ad163fc7a879a3e",
+      "bytes": 11764,
+      "relative_path": "tools/workflow/e2e_contracts.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/e2e_injections.py",
+      "sha256": "80461aed92724a556623e2ca8be01e383f19b0e7833b193f8801627e54050c8a",
+      "bytes": 18329,
+      "relative_path": "tools/workflow/e2e_injections.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/evaluation.py",
+      "sha256": "e2ae807fc17a3157a67c26595dc5e074b058ddd56386776b95528babfeb74ea3",
+      "bytes": 18451,
+      "relative_path": "tools/workflow/evaluation.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/persistence.py",
+      "sha256": "1ba020eb748bdf6ec4b951e9d5b7fad509ed247d15c287938bf456cfc4ec690f",
+      "bytes": 2542,
+      "relative_path": "tools/workflow/persistence.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/policy.py",
+      "sha256": "1438f63fb65a35f12fcb03ad71dd49af738248eb9fd62753648a086c21ed6154",
+      "bytes": 1215,
+      "relative_path": "tools/workflow/policy.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/processes.py",
+      "sha256": "ee7d521648f4bddbf8d609de8740ad88f7c2645b129a8a4d0722bbcc158ec3ff",
+      "bytes": 8417,
+      "relative_path": "tools/workflow/processes.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/profiles.py",
+      "sha256": "fee354430fee0a382dd8b7f9956fb5278415f9bd7e642c2685f618f28112d423",
+      "bytes": 689,
+      "relative_path": "tools/workflow/profiles.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/reporting.py",
+      "sha256": "e97b5100436a48bc756dd4a87c8af2db7d711b268a72cad449f2902419b7430e",
+      "bytes": 2963,
+      "relative_path": "tools/workflow/reporting.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/review_evidence.py",
+      "sha256": "050bde6bc8fae731d36d15dc8afac1237dc9c04cdf12b2f6cdf3ccd4f241be59",
+      "bytes": 5805,
+      "relative_path": "tools/workflow/review_evidence.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/runner.py",
+      "sha256": "64695346e1b0f9e0214bd9e19a41aa617a2240f8a5e03d0ebfab732be97c58ac",
+      "bytes": 38522,
+      "relative_path": "tools/workflow/runner.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/simulation.py",
+      "sha256": "e5871365750acb40e7597547de7c1864b3aba7f9c7e4d0795ac4b2c1a046025f",
+      "bytes": 9443,
+      "relative_path": "tools/workflow/simulation.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/synthetic_eval.py",
+      "sha256": "6bcbaffd439c1d97b02ac1546650d9cf677ac2c318353bdce352f2ad6c531d76",
+      "bytes": 2679,
+      "relative_path": "tools/workflow/synthetic_eval.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_admission.py",
+      "sha256": "2e78ae2c52053b6ac7c6e7f83f078d0ffe4449ea87e28614a442a0963e838744",
+      "bytes": 8076,
+      "relative_path": "tools/workflow/tests/test_admission.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_agents.py",
+      "sha256": "4a3e46c1177e1356e42d1a8ae89ff9dd1cfb12746e48e35e9fd9911edc2f4381",
+      "bytes": 1765,
+      "relative_path": "tools/workflow/tests/test_agents.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_e2e_contracts.py",
+      "sha256": "45214d028ba0aceae341965bae69cc6f919575900d81f49fb8214b133156757e",
+      "bytes": 5737,
+      "relative_path": "tools/workflow/tests/test_e2e_contracts.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_e2e_injections.py",
+      "sha256": "671257151dee80fa6794e767e1b2d41fc340b116845793c7acc4966d71e2532b",
+      "bytes": 5978,
+      "relative_path": "tools/workflow/tests/test_e2e_injections.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_evaluation.py",
+      "sha256": "f5f99526809aed5941df667f4f40b1e77e9456bd05ba6c11e77a040df285f9f4",
+      "bytes": 2559,
+      "relative_path": "tools/workflow/tests/test_evaluation.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_recovery.py",
+      "sha256": "d04caff9f5ee910cc3163eacf26be1866ecfd266360ae1c9a9e3fdcacf3795ca",
+      "bytes": 6461,
+      "relative_path": "tools/workflow/tests/test_recovery.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_review_evidence.py",
+      "sha256": "7ded82a79f565b986941b32ee785e733ec33e423ede709f0b597375d8ac73dd5",
+      "bytes": 13836,
+      "relative_path": "tools/workflow/tests/test_review_evidence.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_simulation_outcomes.py",
+      "sha256": "5a9a0a39f088ee57522ff84f974b20b08bdca9c3ad49d0d2acc9d268c4876232",
+      "bytes": 881,
+      "relative_path": "tools/workflow/tests/test_simulation_outcomes.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tools/workflow/tests/test_workflow.py",
+      "sha256": "1b0e7988da92cd616510850bb0d519b644f3e16018e642be75664eb6b7588775",
+      "bytes": 10023,
+      "relative_path": "tools/workflow/tests/test_workflow.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/adapter_support/fixture_staging.py",
+      "sha256": "c44beccf067a6ec73e0cc10c413f2a1b578910ec7cb6291797d765ba335cfe02",
+      "bytes": 7319,
+      "relative_path": "adapter_support/fixture_staging.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/adapter_support/process_observation.py",
+      "sha256": "400e55ac14aa4006e22bdc3038f431d50032472441a22c5cf9616aed946db6b1",
+      "bytes": 2215,
+      "relative_path": "adapter_support/process_observation.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/adapter_support/signal_capture.py",
+      "sha256": "0ed25f4086d00c86df6df807c6dbc66ff2e8b1c5557a1d901bc915721da9025e",
+      "bytes": 6505,
+      "relative_path": "adapter_support/signal_capture.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/adapter_support/weather_adapter.py",
+      "sha256": "a9530422fca013ea45405cbd30cdc6a1dbeee16b93004bfe706d4fe9045f56a0",
+      "bytes": 10427,
+      "relative_path": "adapter_support/weather_adapter.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tests/conftest.py",
+      "sha256": "d9344a30eb2296cb6ce28e0f9c1937c64c17b33cb75e87c403c61a1a024c50ef",
+      "bytes": 4864,
+      "relative_path": "tests/conftest.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tests/test_adapter_fixture_staging.py",
+      "sha256": "b6bf4088948132b179f2e4a8611e9776b6950ce7fbc7c0d5ebac81904a9ce069",
+      "bytes": 7631,
+      "relative_path": "tests/test_adapter_fixture_staging.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tests/test_adapter_signal_capture.py",
+      "sha256": "065d44c8c44ca5083d2bdaef27f553af06259f770fcc4eab93dd731b922e010a",
+      "bytes": 3519,
+      "relative_path": "tests/test_adapter_signal_capture.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tests/test_controller_process_observation.py",
+      "sha256": "f73769e7e00d1c1c8fc19cdc9eb8883ba54a74abc4b298177a456489f30bac22",
+      "bytes": 7657,
+      "relative_path": "tests/test_controller_process_observation.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tests/test_one_script_per_skill.py",
+      "sha256": "300e914c4d2ffa4440146b813d3d6aee2b1b569f77df868f3e0583fb662497b7",
+      "bytes": 1210,
+      "relative_path": "tests/test_one_script_per_skill.py"
+    },
+    {
+      "path": "C:/Users/neilha/.agentbus/weather-adapter-v27-20261011/tests/test_weather_adapter.py",
+      "sha256": "0b5c0474b04ab2ab1c776c2116d5cfdb47fd5cf15877b831944d0a2f5d60a079",
+      "bytes": 6953,
+      "relative_path": "tests/test_weather_adapter.py"
+    }
+  ],
+  "baseline_selection": {
+    "selection": "EXACT_FROZEN_V2_7_FINAL_PINS",
+    "status": "SOURCE_PACKAGE_ONLY_NOT_EXECUTED",
+    "pins_manifest_sha256": "153f207e89c6ac7786d8203413eeef1e1fce219aef7252d63aced1b5b33d0402",
+    "cli_provenance": "Recovered uncommitted file bytes; identified by frozen hash, not its source HEAD.",
+    "policy_successor": "Separate oracle-policy-1-r2 package remains unadopted and unratified.",
+    "files": [
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/frozen/agentic-e2e-injections.DEV-ONLY.json",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\frozen\\agentic-e2e-injections.DEV-ONLY.json",
+        "sha256": "9c3ea347454c76410e2e73adfb24aabca70018f1e7c3fd6bf4a4f11bfac241b0",
+        "bytes": 50776970
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/frozen/agentic-e2e-injections.ADAPTER-REQUIREMENTS.json",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\frozen\\agentic-e2e-injections.ADAPTER-REQUIREMENTS.json",
+        "sha256": "3b183eb41d73caa25318fe89a669efeec38f8945b7c3f8a353475583058972c2",
+        "bytes": 62200
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/requirements.json",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\requirements.json",
+        "sha256": "7e06a75fefcd86da12ea4b708d994abc0185c72315cc63053906ad66c93fabab",
+        "bytes": 122418
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/OPEN-QUESTIONS.json",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\OPEN-QUESTIONS.json",
+        "sha256": "2b4b11bd954a4d432a61edeeb909b0e2650c6a6a47603010688254887b60dd53",
+        "bytes": 15045
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/spec-rulings.json",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\spec-rulings.json",
+        "sha256": "f3478cf6283719b10c59ee39651f88618a1e70611d91e3c68e5e40561e90f40e",
+        "bytes": 13625
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\EVIDENCE_CONTRACT.json",
+        "sha256": "2478c5085f1a1a79828978972e3d86b12cb3966ed0323e5db11d7b28478b2548",
+        "bytes": 2933792
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.md",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\EVIDENCE_CONTRACT.md",
+        "sha256": "fb22a4c7b729cefb6f6965af4f8cb2a99ebe06168e4b1b44812702dfaab6dfd1",
+        "bytes": 90376
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/amendments.json",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\amendments.json",
+        "sha256": "0af3c5554aa52e93bb18bdf29a64ae72f55aceb07f7e1fdcad86fddc4b502154",
+        "bytes": 22
+      },
+      {
+        "relative_path": "simkit/adapter.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\adapter.py",
+        "sha256": "0566e56e575f24d0949c394826e0a5973d8fcc74895af24bde3623634c00e335",
+        "bytes": 5862
+      },
+      {
+        "relative_path": "simkit/cli.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\simkit-v2_7-closure-20261011\\simkit\\cli.py",
+        "sha256": "1be700205bbd63526cfcdfc803b5954341973c9ce84414b44f9891536df0e33d",
+        "bytes": 7030
+      },
+      {
+        "relative_path": "simkit/contract.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\contract.py",
+        "sha256": "d2e171aa5215469241ba9f6db1af0fc90685ea4e33e161227838b68ce3bdc70c",
+        "bytes": 18683
+      },
+      {
+        "relative_path": "simkit/core.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\core.py",
+        "sha256": "57576ef36dd98755d7f30296e2cce7e09e9de1b54d4431ad705d3f75e9e9067d",
+        "bytes": 5519
+      },
+      {
+        "relative_path": "simkit/guarded.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\guarded.py",
+        "sha256": "8261820629d76529bd8e0815a27d7051f59474542646027d12ede0771efe92c1",
+        "bytes": 5329
+      },
+      {
+        "relative_path": "simkit/profile.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\profile.py",
+        "sha256": "43513e74589e998cea332cbc321acef28fe876ee064c0c8d50c4a20201a099d9",
+        "bytes": 4608
+      },
+      {
+        "relative_path": "simkit/ratify.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\ratify.py",
+        "sha256": "6d62612dfb658fff3b60272c2d3df483e95566b75132ddb6abcec07a0a895534",
+        "bytes": 9022
+      },
+      {
+        "relative_path": "simkit/runner.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\runner.py",
+        "sha256": "43329bed8f5f3cb2d8e560cb2919f8dc9fb48ffb7a1ea2b9911c014f2de23297",
+        "bytes": 1432
+      },
+      {
+        "relative_path": "simkit/score.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\score.py",
+        "sha256": "aabe153188db1e28d0e541628d26b89097d834dd08efa2cb932af93a730aec86",
+        "bytes": 168605
+      },
+      {
+        "relative_path": "simkit/v27_validation.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\v27_validation.py",
+        "sha256": "a2b87a7983217760580485bcf5e0e78d6d2c57c7dff4d15bac8bf37c1bbdbf33",
+        "bytes": 2608
+      },
+      {
+        "relative_path": "simkit/validate.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\validate.py",
+        "sha256": "84fcb37fa1cc9a8b0361c29870016203424a170eddc7ae33920a019f2608aa59",
+        "bytes": 56219
+      },
+      {
+        "relative_path": "simkit/__init__.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\simkit\\__init__.py",
+        "sha256": "c5c5dc42982a5e12979b9dc071221ade680d43db2729fd9ecb482dcea1c6cdd1",
+        "bytes": 551
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/capability_fixes.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\capability_fixes.py",
+        "sha256": "d684d51ed614fdad2e44a1a41bf9c1ca54a0ee1e82305531f60f9a32e8d4817b",
+        "bytes": 2766
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/cases_v2_7.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\cases_v2_7.py",
+        "sha256": "c3d8309fa045e7880ea8acbd4a0ac7598158a38f692ca3087aa1bacfc58770fa",
+        "bytes": 4410
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/rubric_fixes.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\rubric_fixes.py",
+        "sha256": "bc68c9aca3404e2303220cac672593e536a4080a2a3e230783da0220bc41169e",
+        "bytes": 1012
+      },
+      {
+        "relative_path": "casesets/cached-onset-e2e-v2_7/schedule_fixes.py",
+        "source": "C:\\Users\\neilha\\.agentbus\\aws-harness-plan\\simkit\\casesets\\cached-onset-e2e-v2_7\\schedule_fixes.py",
+        "sha256": "473582ff43c84c964fd7db58512af2b9365c5f937bd3befeb8a38bbb5fb7974a",
+        "bytes": 23998
+      }
+    ]
+  },
+  "current_controller_files": [
+    {
+      "relative_path": "tools/workflow/__init__.py",
+      "sha256": "7d7e374a177320d9333516298b5ae1cc79c7bcfa119217c2c373fc652c5a80eb",
+      "bytes": 73
+    },
+    {
+      "relative_path": "tools/workflow/__main__.py",
+      "sha256": "777bc40681267256f1bed5ee808aaf82bff8ae61767aa2b52cfcc40b4e4b5125",
+      "bytes": 5854
+    },
+    {
+      "relative_path": "tools/workflow/admission.py",
+      "sha256": "2df04fbbd8c55734f90e870f72d77170ec6d82d558aa7c049e6564678cfe19f4",
+      "bytes": 4664
+    },
+    {
+      "relative_path": "tools/workflow/agents.py",
+      "sha256": "28b3a6f479dedb66b083f01599b8589b9604ac15d557338d5b89a172ceb2f8d7",
+      "bytes": 7285
+    },
+    {
+      "relative_path": "tools/workflow/catalog.py",
+      "sha256": "4a7fa56e169f80faffb158987328e9bb85873cc9d09e8d130fae4710a079822c",
+      "bytes": 6408
+    },
+    {
+      "relative_path": "tools/workflow/contracts.py",
+      "sha256": "83baf8a3f2daddceaafde924f8507eff986f54ff1c27471288c59efb2a199fd4",
+      "bytes": 5589
+    },
+    {
+      "relative_path": "tools/workflow/e2e_admission.py",
+      "sha256": "0d105fcaa8ae9e23bf6bef1a9094a08fbd668d8f7f51f9b844dd4887ab8b0cf1",
+      "bytes": 7138
+    },
+    {
+      "relative_path": "tools/workflow/e2e_contracts.py",
+      "sha256": "ed029215cb3d647c086c8d6da3f648b2ad513f0f41da78261ad163fc7a879a3e",
+      "bytes": 11764
+    },
+    {
+      "relative_path": "tools/workflow/e2e_injections.py",
+      "sha256": "80461aed92724a556623e2ca8be01e383f19b0e7833b193f8801627e54050c8a",
+      "bytes": 18329
+    },
+    {
+      "relative_path": "tools/workflow/evaluation.py",
+      "sha256": "e2ae807fc17a3157a67c26595dc5e074b058ddd56386776b95528babfeb74ea3",
+      "bytes": 18451
+    },
+    {
+      "relative_path": "tools/workflow/persistence.py",
+      "sha256": "1ba020eb748bdf6ec4b951e9d5b7fad509ed247d15c287938bf456cfc4ec690f",
+      "bytes": 2542
+    },
+    {
+      "relative_path": "tools/workflow/policy.py",
+      "sha256": "1438f63fb65a35f12fcb03ad71dd49af738248eb9fd62753648a086c21ed6154",
+      "bytes": 1215
+    },
+    {
+      "relative_path": "tools/workflow/processes.py",
+      "sha256": "ee7d521648f4bddbf8d609de8740ad88f7c2645b129a8a4d0722bbcc158ec3ff",
+      "bytes": 8417
+    },
+    {
+      "relative_path": "tools/workflow/profiles.py",
+      "sha256": "fee354430fee0a382dd8b7f9956fb5278415f9bd7e642c2685f618f28112d423",
+      "bytes": 689
+    },
+    {
+      "relative_path": "tools/workflow/reporting.py",
+      "sha256": "e97b5100436a48bc756dd4a87c8af2db7d711b268a72cad449f2902419b7430e",
+      "bytes": 2963
+    },
+    {
+      "relative_path": "tools/workflow/review_evidence.py",
+      "sha256": "050bde6bc8fae731d36d15dc8afac1237dc9c04cdf12b2f6cdf3ccd4f241be59",
+      "bytes": 5805
+    },
+    {
+      "relative_path": "tools/workflow/runner.py",
+      "sha256": "9d5532e16a35924bc89c9d88b866e6fac995570063a93289cc477564021f3ca0",
+      "bytes": 42690
+    },
+    {
+      "relative_path": "tools/workflow/simulation.py",
+      "sha256": "e5871365750acb40e7597547de7c1864b3aba7f9c7e4d0795ac4b2c1a046025f",
+      "bytes": 9443
+    },
+    {
+      "relative_path": "tools/workflow/synthetic_eval.py",
+      "sha256": "6bcbaffd439c1d97b02ac1546650d9cf677ac2c318353bdce352f2ad6c531d76",
+      "bytes": 2679
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_admission.py",
+      "sha256": "2e78ae2c52053b6ac7c6e7f83f078d0ffe4449ea87e28614a442a0963e838744",
+      "bytes": 8076
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_agents.py",
+      "sha256": "4a3e46c1177e1356e42d1a8ae89ff9dd1cfb12746e48e35e9fd9911edc2f4381",
+      "bytes": 1765
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_e2e_contracts.py",
+      "sha256": "45214d028ba0aceae341965bae69cc6f919575900d81f49fb8214b133156757e",
+      "bytes": 5737
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_e2e_injections.py",
+      "sha256": "671257151dee80fa6794e767e1b2d41fc340b116845793c7acc4966d71e2532b",
+      "bytes": 5978
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_evaluation.py",
+      "sha256": "f5f99526809aed5941df667f4f40b1e77e9456bd05ba6c11e77a040df285f9f4",
+      "bytes": 2559
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_recovery.py",
+      "sha256": "d04caff9f5ee910cc3163eacf26be1866ecfd266360ae1c9a9e3fdcacf3795ca",
+      "bytes": 6461
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_review_evidence.py",
+      "sha256": "7ded82a79f565b986941b32ee785e733ec33e423ede709f0b597375d8ac73dd5",
+      "bytes": 13836
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_simulation_outcomes.py",
+      "sha256": "5a9a0a39f088ee57522ff84f974b20b08bdca9c3ad49d0d2acc9d268c4876232",
+      "bytes": 881
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_workflow.py",
+      "sha256": "1b0e7988da92cd616510850bb0d519b644f3e16018e642be75664eb6b7588775",
+      "bytes": 10023
+    },
+    {
+      "relative_path": "adapter_support/fixture_staging.py",
+      "sha256": "c44beccf067a6ec73e0cc10c413f2a1b578910ec7cb6291797d765ba335cfe02",
+      "bytes": 7319
+    },
+    {
+      "relative_path": "adapter_support/process_observation.py",
+      "sha256": "400e55ac14aa4006e22bdc3038f431d50032472441a22c5cf9616aed946db6b1",
+      "bytes": 2215
+    },
+    {
+      "relative_path": "adapter_support/signal_capture.py",
+      "sha256": "0ed25f4086d00c86df6df807c6dbc66ff2e8b1c5557a1d901bc915721da9025e",
+      "bytes": 6505
+    },
+    {
+      "relative_path": "adapter_support/weather_adapter.py",
+      "sha256": "a9530422fca013ea45405cbd30cdc6a1dbeee16b93004bfe706d4fe9045f56a0",
+      "bytes": 10427
+    },
+    {
+      "relative_path": "tests/conftest.py",
+      "sha256": "d9344a30eb2296cb6ce28e0f9c1937c64c17b33cb75e87c403c61a1a024c50ef",
+      "bytes": 4864
+    },
+    {
+      "relative_path": "tests/test_adapter_fixture_staging.py",
+      "sha256": "b6bf4088948132b179f2e4a8611e9776b6950ce7fbc7c0d5ebac81904a9ce069",
+      "bytes": 7631
+    },
+    {
+      "relative_path": "tests/test_adapter_signal_capture.py",
+      "sha256": "065d44c8c44ca5083d2bdaef27f553af06259f770fcc4eab93dd731b922e010a",
+      "bytes": 3519
+    },
+    {
+      "relative_path": "tests/test_controller_process_observation.py",
+      "sha256": "f73769e7e00d1c1c8fc19cdc9eb8883ba54a74abc4b298177a456489f30bac22",
+      "bytes": 7657
+    },
+    {
+      "relative_path": "tests/test_one_script_per_skill.py",
+      "sha256": "300e914c4d2ffa4440146b813d3d6aee2b1b569f77df868f3e0583fb662497b7",
+      "bytes": 1210
+    },
+    {
+      "relative_path": "tests/test_weather_adapter.py",
+      "sha256": "0b5c0474b04ab2ab1c776c2116d5cfdb47fd5cf15877b831944d0a2f5d60a079",
+      "bytes": 6953
+    },
+    {
+      "relative_path": "tools/workflow/tests/test_dispatch_evidence.py",
+      "sha256": "cea498e02b1f2aebd56e659d4103b62aef25abf3612354edaf2f55d27d0eee2e",
+      "bytes": 5908
+    }
+  ],
+  "identity_limit": "Hashes establish content integrity relative to recorded inputs, not signer authentication."
+}

@@ -1,0 +1,51 @@
+...........................................F.FFF..........               [100%]
+================================== FAILURES ===================================
+________ test_direct_stop_observer_errors_cannot_prevent_owned_cleanup ________
+tests\test_controller_process_observation.py:46: in test_direct_stop_observer_errors_cannot_prevent_owned_cleanup
+    assert receipt["backend_exit_code"] == 0
+E   assert 1 == 0
+_____________ test_actual_stop_with_owned_child_and_decoy[guard] ______________
+tests\test_controller_process_observation.py:150: in test_actual_stop_with_owned_child_and_decoy
+    assert returned["details"]["backend_exit_code"] == 0, returned
+E   AssertionError: {'sequence': 3, 'monotonic_ns': 180716031000000, 'event': 'stop_backend_return', 'requested_root_pid': 34200, ...}
+E   assert 1 == 0
+_________ test_actual_stop_with_owned_child_and_decoy[observer_error] _________
+tests\test_controller_process_observation.py:150: in test_actual_stop_with_owned_child_and_decoy
+    assert returned["details"]["backend_exit_code"] == 0, returned
+E   AssertionError: {'sequence': 3, 'monotonic_ns': 180722093000000, 'event': 'stop_backend_return', 'requested_root_pid': 10216, ...}
+E   assert 1 == 0
+_____ test_actual_stop_with_owned_child_and_decoy[exception_unregistered] _____
+tests\test_controller_process_observation.py:150: in test_actual_stop_with_owned_child_and_decoy
+    assert returned["details"]["backend_exit_code"] == 0, returned
+E   AssertionError: {'sequence': 3, 'monotonic_ns': 180728937000000, 'event': 'stop_backend_return', 'requested_root_pid': 30364, ...}
+E   assert 1 == 0
+============================== warnings summary ===============================
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+  C:\Users\neilha\weather-skills-demo\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+  C:\Users\neilha\weather-skills-demo\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+tests/test_adapter_fixture_staging.py::test_real_pinned_history_loader_and_dataset_open
+  C:\Users\neilha\weather-skills-demo\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_controller_process_observation.py::test_direct_stop_observer_errors_cannot_prevent_owned_cleanup
+FAILED tests/test_controller_process_observation.py::test_actual_stop_with_owned_child_and_decoy[guard]
+FAILED tests/test_controller_process_observation.py::test_actual_stop_with_owned_child_and_decoy[observer_error]
+FAILED tests/test_controller_process_observation.py::test_actual_stop_with_owned_child_and_decoy[exception_unregistered]
+4 failed, 54 passed, 13 warnings in 110.31s (0:01:50)

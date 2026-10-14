@@ -15,6 +15,7 @@ def report(root):
     processes = [
         json.loads(p.read_text(encoding="utf-8"))
         for p in sorted((root / "processes").glob("process-*.json"))
+        if not p.name.endswith(".start.json")  # start receipts are not final records
     ]
     roles = checkpoint.get("role_receipts", [])
     fixture = any(r.get("mode") == "fixture" for r in roles)
@@ -33,7 +34,8 @@ def report(root):
         "process_count": len(processes),
         "role_count": len(roles),
         "minimum_free_gib": min(
-            (p["min_free_gib"] for p in processes if "min_free_gib" in p), default=None
+            (p["min_free_gib"] for p in processes if p.get("min_free_gib") is not None),
+            default=None,
         ),
         "repairs_used": checkpoint.get("repairs_used", 0),
         "resumes": checkpoint.get("resumes", 0),

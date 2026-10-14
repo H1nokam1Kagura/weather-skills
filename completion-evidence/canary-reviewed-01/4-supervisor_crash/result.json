@@ -1,0 +1,28 @@
+{
+  "case": "supervisor_crash",
+  "status": "UNKNOWN",
+  "evidence": [
+    {
+      "seq": 1,
+      "monotonic_ns": 181758312000000,
+      "event": "child_retained_before_crash",
+      "pid": 37448
+    },
+    {
+      "seq": 2,
+      "monotonic_ns": 181758343000000,
+      "event": "supervisor_exit",
+      "exit_code": 73
+    },
+    {
+      "seq": 3,
+      "monotonic_ns": 181758343000000,
+      "event": "independent_child_wait",
+      "native_result": 0
+    }
+  ],
+  "exhaustive_signal_capture": false,
+  "scope": "trusted direct-launch synthetic fixtures",
+  "independent_fixture_exit_observed": true,
+  "reason": "Supervisor crash: mandatory job accounting/journal unavailable; fixture exit is not boundary-zero evidence."
+}

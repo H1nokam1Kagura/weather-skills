@@ -1,0 +1,166 @@
+{
+  "stage": "PR_FORMAT_AND_LINT_FIXES",
+  "historical_evidence": "Existing source/run pins record the earlier tested bytes and remain unchanged. Post-format test receipt records current producer hashes. No frozen baseline repinning.",
+  "files": [
+    {
+      "path": "tools/workflow/__init__.py",
+      "sha256": "7d7e374a177320d9333516298b5ae1cc79c7bcfa119217c2c373fc652c5a80eb"
+    },
+    {
+      "path": "tools/workflow/__main__.py",
+      "sha256": "777bc40681267256f1bed5ee808aaf82bff8ae61767aa2b52cfcc40b4e4b5125"
+    },
+    {
+      "path": "tools/workflow/admission.py",
+      "sha256": "2df04fbbd8c55734f90e870f72d77170ec6d82d558aa7c049e6564678cfe19f4"
+    },
+    {
+      "path": "tools/workflow/agents.py",
+      "sha256": "37d0cc162e765b7ec04baaff6d8fb4535af5efffecf078544bd554b6ddaafac7"
+    },
+    {
+      "path": "tools/workflow/catalog.py",
+      "sha256": "4a7fa56e169f80faffb158987328e9bb85873cc9d09e8d130fae4710a079822c"
+    },
+    {
+      "path": "tools/workflow/contracts.py",
+      "sha256": "83baf8a3f2daddceaafde924f8507eff986f54ff1c27471288c59efb2a199fd4"
+    },
+    {
+      "path": "tools/workflow/e2e_admission.py",
+      "sha256": "0d105fcaa8ae9e23bf6bef1a9094a08fbd668d8f7f51f9b844dd4887ab8b0cf1"
+    },
+    {
+      "path": "tools/workflow/e2e_contracts.py",
+      "sha256": "ed029215cb3d647c086c8d6da3f648b2ad513f0f41da78261ad163fc7a879a3e"
+    },
+    {
+      "path": "tools/workflow/e2e_injections.py",
+      "sha256": "80461aed92724a556623e2ca8be01e383f19b0e7833b193f8801627e54050c8a"
+    },
+    {
+      "path": "tools/workflow/evaluation.py",
+      "sha256": "e2ae807fc17a3157a67c26595dc5e074b058ddd56386776b95528babfeb74ea3"
+    },
+    {
+      "path": "tools/workflow/persistence.py",
+      "sha256": "1ba020eb748bdf6ec4b951e9d5b7fad509ed247d15c287938bf456cfc4ec690f"
+    },
+    {
+      "path": "tools/workflow/policy.py",
+      "sha256": "1438f63fb65a35f12fcb03ad71dd49af738248eb9fd62753648a086c21ed6154"
+    },
+    {
+      "path": "tools/workflow/processes.py",
+      "sha256": "ab19a48a916f44538897b5345809743e1efba0a5fdd34555d3dbf2c89ba9eb1a"
+    },
+    {
+      "path": "tools/workflow/profiles.py",
+      "sha256": "fee354430fee0a382dd8b7f9956fb5278415f9bd7e642c2685f618f28112d423"
+    },
+    {
+      "path": "tools/workflow/reporting.py",
+      "sha256": "e97b5100436a48bc756dd4a87c8af2db7d711b268a72cad449f2902419b7430e"
+    },
+    {
+      "path": "tools/workflow/review_evidence.py",
+      "sha256": "29759b44812afeed6cae31ae2f073c5c647d935c9fe359c6f0e087161409f616"
+    },
+    {
+      "path": "tools/workflow/runner.py",
+      "sha256": "91b91f04f65313af8d1a6d3d7feb605d3656c67b04d872aec4f6ae8fb8f33c64"
+    },
+    {
+      "path": "tools/workflow/simulation.py",
+      "sha256": "e5871365750acb40e7597547de7c1864b3aba7f9c7e4d0795ac4b2c1a046025f"
+    },
+    {
+      "path": "tools/workflow/synthetic_eval.py",
+      "sha256": "6bcbaffd439c1d97b02ac1546650d9cf677ac2c318353bdce352f2ad6c531d76"
+    },
+    {
+      "path": "tools/workflow/tests/test_admission.py",
+      "sha256": "2e78ae2c52053b6ac7c6e7f83f078d0ffe4449ea87e28614a442a0963e838744"
+    },
+    {
+      "path": "tools/workflow/tests/test_agents.py",
+      "sha256": "4a3e46c1177e1356e42d1a8ae89ff9dd1cfb12746e48e35e9fd9911edc2f4381"
+    },
+    {
+      "path": "tools/workflow/tests/test_e2e_contracts.py",
+      "sha256": "45214d028ba0aceae341965bae69cc6f919575900d81f49fb8214b133156757e"
+    },
+    {
+      "path": "tools/workflow/tests/test_e2e_injections.py",
+      "sha256": "671257151dee80fa6794e767e1b2d41fc340b116845793c7acc4966d71e2532b"
+    },
+    {
+      "path": "tools/workflow/tests/test_evaluation.py",
+      "sha256": "f5f99526809aed5941df667f4f40b1e77e9456bd05ba6c11e77a040df285f9f4"
+    },
+    {
+      "path": "tools/workflow/tests/test_recovery.py",
+      "sha256": "d04caff9f5ee910cc3163eacf26be1866ecfd266360ae1c9a9e3fdcacf3795ca"
+    },
+    {
+      "path": "tools/workflow/tests/test_review_evidence.py",
+      "sha256": "cc0223498cbe503e8eff879337a2f26f50035c27c603c6402b02e92a7436e6d5"
+    },
+    {
+      "path": "tools/workflow/tests/test_simulation_outcomes.py",
+      "sha256": "5a9a0a39f088ee57522ff84f974b20b08bdca9c3ad49d0d2acc9d268c4876232"
+    },
+    {
+      "path": "tools/workflow/tests/test_workflow.py",
+      "sha256": "1b0e7988da92cd616510850bb0d519b644f3e16018e642be75664eb6b7588775"
+    },
+    {
+      "path": "adapter_support/fixture_staging.py",
+      "sha256": "1fd4da41b32984bb62e9dea3382117fd0344d1c480acc5d151a6df918f44775e"
+    },
+    {
+      "path": "adapter_support/process_observation.py",
+      "sha256": "0e73fb9deaa6b9186699e4053b69d6874aba8bf30018effbc8c1e617d08d6768"
+    },
+    {
+      "path": "adapter_support/signal_capture.py",
+      "sha256": "130361fddd50a11774c1ded2adac50507c986232423468f32b289c2b3120bffe"
+    },
+    {
+      "path": "adapter_support/weather_adapter.py",
+      "sha256": "bd24fb276c7ef3811d310474cbccb59ff9a2e44c5870e6b21c765b33cb31a369"
+    },
+    {
+      "path": "tests/conftest.py",
+      "sha256": "d9344a30eb2296cb6ce28e0f9c1937c64c17b33cb75e87c403c61a1a024c50ef"
+    },
+    {
+      "path": "tests/test_adapter_fixture_staging.py",
+      "sha256": "9992b086aa1c4ff4883cbeeacfb2603cc15c3f4452714543837da1013e730419"
+    },
+    {
+      "path": "tests/test_adapter_signal_capture.py",
+      "sha256": "2c5d5ae15544b19b75c691c951dbfad5d5bb27cc7fe6e5bf05155e62360e9f1f"
+    },
+    {
+      "path": "tests/test_controller_process_observation.py",
+      "sha256": "19f80a43622fe993f0554a12280a0eaf7ce1831224ba94b202de83ad878cccbd"
+    },
+    {
+      "path": "tests/test_one_script_per_skill.py",
+      "sha256": "300e914c4d2ffa4440146b813d3d6aee2b1b569f77df868f3e0583fb662497b7"
+    },
+    {
+      "path": "tests/test_weather_adapter.py",
+      "sha256": "466a2dca0025898165860d71292d382d5613f4e45df73811c4f969d7d6b730d0"
+    },
+    {
+      "path": "tools/workflow/tests/test_dispatch_evidence.py",
+      "sha256": "a5c010fe11b55197c5aa3f083c1b92b68e0af4686670e87dfd165e94ec62ef05"
+    },
+    {
+      "path": "completion-evidence/containment_canary.py",
+      "sha256": "f83efed42b72e80370c8ffffb2dbf59206dfd5c54064cee2825d131c87af2140"
+    }
+  ]
+}

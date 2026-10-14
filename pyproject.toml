@@ -41,7 +41,7 @@ skills-runner = { git = "https://github.com/tescalada/skills-runner" }
 weather-skills-core = { git = "https://github.com/rhiza-research/weather-skills-core", rev = "a4110e30c8637ea99d79f752499d00e4cd65fafb" }
 
 [tool.pytest.ini_options]
-testpaths = ["skills", "registry", "tools/workflow/tests"]
+testpaths = ["skills", "registry", "tools/workflow/tests", "tests"]
 python_files = ["test_*.py"]
 pythonpath = ["tests", "."]
 filterwarnings = [
@@ -52,6 +52,15 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Raw pinned bytes (frozen v2.7 + input supplement); verified by sha256, never reformatted.
+extend-exclude = ["container_harness/pinned"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+# The repo-root conftest.py (pytest hook binding the frozen v2.7 resolver) would otherwise make
+# ruff's default src=["."] classify `conftest` as first-party. Skill tests import their shared
+# helpers with `from conftest import ...` (resolved from tests/ via the pytest pythonpath, not
+# from the root hook file), and those imports are sorted as third-party; pin that explicitly.
+known-third-party = ["conftest"]

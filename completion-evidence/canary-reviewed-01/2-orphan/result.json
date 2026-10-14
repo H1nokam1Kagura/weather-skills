@@ -1,0 +1,81 @@
+{
+  "case": "orphan",
+  "status": "CLEAN",
+  "evidence": [
+    {
+      "seq": 1,
+      "monotonic_ns": 181756625000000,
+      "event": "job_ready",
+      "flags": 8192,
+      "noninheritable": true
+    },
+    {
+      "seq": 2,
+      "monotonic_ns": 181756687000000,
+      "event": "admitted_suspended",
+      "pid": 40300,
+      "membership": true
+    },
+    {
+      "seq": 3,
+      "monotonic_ns": 181756687000000,
+      "event": "resumed",
+      "pid": 40300,
+      "prior_suspend_count": 1
+    },
+    {
+      "seq": 4,
+      "monotonic_ns": 181757265000000,
+      "event": "root_wait",
+      "native_result": 0
+    },
+    {
+      "seq": 5,
+      "monotonic_ns": 181757265000000,
+      "event": "active_query",
+      "result": 1,
+      "active": 3,
+      "total": 4
+    },
+    {
+      "seq": 6,
+      "monotonic_ns": 181757312000000,
+      "event": "active_query",
+      "result": 1,
+      "active": 2,
+      "total": 4
+    },
+    {
+      "seq": 7,
+      "monotonic_ns": 181757375000000,
+      "event": "active_query",
+      "result": 1,
+      "active": 2,
+      "total": 4
+    },
+    {
+      "seq": 8,
+      "monotonic_ns": 181757375000000,
+      "event": "termination_request",
+      "api": "TerminateJobObject"
+    },
+    {
+      "seq": 9,
+      "monotonic_ns": 181757375000000,
+      "event": "termination_return",
+      "result": 1,
+      "error": null
+    },
+    {
+      "seq": 10,
+      "monotonic_ns": 181757375000000,
+      "event": "active_query",
+      "result": 1,
+      "active": 0,
+      "total": 4
+    }
+  ],
+  "exhaustive_signal_capture": false,
+  "scope": "trusted direct-launch synthetic fixtures",
+  "zero_observed": true
+}

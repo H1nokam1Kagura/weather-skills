@@ -16,6 +16,9 @@ CATALOG = {
     "check-artifact": ("check_artifact.py", "check_artifact"),
     "verify-run": ("verify_run.py", "verify_run"),
 }
+# The runtime manifest an approval binds carries a build identity (FX-RUNTIME-MANIFEST-BUMP,
+# field build_id). Read from this repo-relative file when present; absent stays absent.
+RUNTIME_MANIFEST = "runtime-manifest.json"
 
 
 def safe_path(path):
@@ -125,6 +128,9 @@ def build_manifest(repo):
         "packages": {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()},
         "core_origin": origin,
     }
+    runtime_file = repo / RUNTIME_MANIFEST
+    if runtime_file.exists():
+        manifest["@runtime"]["build_id"] = runtime_build_id(runtime_file)
     import tomllib
 
     definition_file = repo / "skills/onset-date/references/onset_definitions.toml"
@@ -140,6 +146,18 @@ def build_manifest(repo):
     ):
         raise Refused("definition changed; cached-onset/v1 must be reviewed")
     return manifest
+
+
+def runtime_build_id(path):
+    """The build_id of a runtime manifest file: a JSON object with a nonempty string."""
+    try:
+        value = json.loads(safe_path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise Refused("runtime manifest unreadable", gate="review_binding") from exc
+    build_id = value.get("build_id") if isinstance(value, dict) else None
+    if not isinstance(build_id, str) or not build_id:
+        raise Refused("runtime manifest lacks a build_id", gate="review_binding")
+    return build_id
 
 
 def child_environment(scratch=None):
@@ -158,6 +176,9 @@ def child_environment(scratch=None):
         OMP_NUM_THREADS="1",
         OPENBLAS_NUM_THREADS="1",
         MKL_NUM_THREADS="1",
+        # The controller runs every skill with its own interpreter (no network, no uv), so
+        # verify-run replays recorded steps the same way instead of `uv run --script`.
+        WEATHER_SKILLS_REPLAY_RUNNER="python",
     )
     if scratch is not None:
         scratch = safe_path(scratch)

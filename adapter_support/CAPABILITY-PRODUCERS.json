@@ -1,0 +1,309 @@
+{
+  "schema": "weather-adapter.capability-producers/1",
+  "authority": "Owner ruling D4 (CR-09): every declared capability requires a reviewed capability-to-producer record; an empty signal list is never emitted as exhaustive evidence. Source: simkit/handoffs/completion-20261012/decisions/OWNER-RULINGS.json.",
+  "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids and symbols.HARNESS_CONTROLLER_PID as a harness-observations input file. The projection accepts and merges it; CAP-EXHAUSTIVE-WRITES and CAP-SIGNAL-CAPTURE are NOT declared by carrying those values (statuses unchanged until the traced harness is reviewed).",
+  "base": "controller 0e862c8 (feat/simkit-completion-snowyowl); line numbers refer to that base",
+  "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED and reviewer is a non-empty string. reviewer/reviewed_at are left null for the coordinator. PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
+  "frozen_shapes": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json structures (frozen v2.7, read-only)",
+  "tests_file": "tests/test_evidence_projection_v27.py",
+  "capabilities": {
+    "CAP-RECEIPTS": {
+      "d4_gated": true,
+      "method": "capture_evidence",
+      "status": "PARTIAL",
+      "producers": [
+        {"file": "tools/workflow/runner.py", "line": 384, "symbol": "Controller.dispatch_event", "emits": "controller-global sequence, resume_phase, run_id; dispatch-event-NNNNNN.json hashed into checkpoint evidence"},
+        {"file": "tools/workflow/runner.py", "line": 524, "symbol": "Controller.ask", "emits": "dispatch_attempt / invocation_prepared / dispatch_returned / dispatch_failed; receipt.controller_dispatch {attempt_id, sequence, occurrence, resume_phase}"},
+        {"file": "tools/workflow/agents.py", "line": 60, "symbol": "Roles.ask", "emits": "receipt {role, invocation_id, session_id, input_hash, output_hash, cost_usd, model_usage}"},
+        {"file": "tools/workflow/runner.py", "line": 420, "symbol": "Controller.process_event", "emits": "launch_check / process_launch / process_exit / signal_stop on the same clock"},
+        {"file": "tools/workflow/processes.py", "line": 279, "symbol": "Processes.run", "emits": "launch_check {tool, free_ram_gib, budget_ok, launched, reading_source} (line 285), process_launch {serial, tool, argv, pid, parent_pid} + process-NNN.start.json (lines 342-353), process_exit {exit_code, stdout_bytes, stderr_bytes, wall_seconds, stop_reason} (line 264)"},
+        {"file": "tools/workflow/runner.py", "line": 806, "symbol": "Controller.record_plan_validation", "emits": "plan_validations {plan_hash, argv, parser_accepted, verdict, failed_fields, source} + plan_validation event"},
+        {"file": "tools/workflow/runner.py", "line": 440, "symbol": "Controller.advance", "emits": "transition events (state clocks)"},
+        {"file": "tools/workflow/runner.py", "line": 1262, "symbol": "Controller.finish", "emits": "terminal event and result.json terminal"},
+        {"file": "tools/workflow/runner.py", "line": 239, "symbol": "Controller.checkpoint", "emits": "spent, budget, elapsed_s, total_seconds, repairs_used, max_repairs, resumes"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "HarnessLaunchObserver", "emits": "harness-computed *_hash_at_launch (before_tool) and gate artifact_content_hash (after_tool)"}
+      ],
+      "evidence_fields": [
+        "invocation_receipts[*] {role (compiler occurrence k -> compiler_k, occurrence 1), session_id, occurrence (receipt ordinal per role), phase, seq (= dispatch_returned sequence), verdict (reviewer output / verifier_verdicts / checker receipt)}",
+        "process_receipts[*] {tool, artifact, argv (controller command minus interpreter and catalogued script), command, start, end, exit_code, pid, parent_pid, phase, producing, wall_seconds, output_bytes, approval_*, *_hash_at_launch}",
+        "event_seq (states, receipts, process start/end, gate_reports, active_approval, terminal, plan_validations, claim_checks) + _absent for keys a finished gap-free sequence rules out",
+        "gate_reports['<tool>(<artifact>)'] (controller-accepted reports, else the tool file report) + artifact_content_hash",
+        "artifacts.<id> {present, content_hash (harness tree_hash at projection), path}",
+        "budget_ledger.final {consumed_model_usd, elapsed_seconds, repair_attempts_used, resume_attempts_used, combined_process_output_bytes, limits {max_model_usd, max_total_seconds, max_repair_attempts}}; launch_checks",
+        "controller_trace.states, final_state, plan_validations (+ plan as contract step list), authorizations, goal_check (PASS only)"
+      ],
+      "missing_fields": [
+        {"field": "event_seq['controller_trace.states[CAPTURED]']", "owner": "controller (no dispatch event for the initial state)"},
+        {"field": "process_receipts[*].flags", "owner": "controller (parsed preflight map is not recorded per launch in contract form)"},
+        {"field": "budget_ledger.final.automatic_resumes_used", "owner": "CAP-AUTO-RESUME (resume package)"},
+        {"field": "budget_ledger.final.limits.max_resume_attempts", "owner": "CAP-RESUME (limit not recorded in the checkpoint)"},
+        {"field": "budget_ledger.at_checkpoint", "owner": "CAP-RESUME"},
+        {"field": "controller_trace.goal_check on a failed goal check", "owner": "controller (failed fields only in message text; never parsed)"}
+      ],
+      "mapping_choices_for_review": [
+        "invocation occurrence = receipt ordinal per role; native attempt occurrence kept as native_attempt_occurrence",
+        "active_approval.approval_id = committed review binding hash (no native approval id)",
+        "gate_reports clock = exit sequence of the process whose stdout is the report",
+        "a guard-stopped process projects exit_code/end/wall_seconds null; its stop clock is stopped_at",
+        "role-CLI processes launched inside an open role dispatch window are excluded from process_receipts and listed in harness_observations.role_transport_processes (not exercised by tests: test roles use a stub transport)"
+      ],
+      "tests": [
+        "test_released_map_run_passes_frozen_v25_validators_and_v24_has_no_fail",
+        "test_released_projection_maps_native_records_without_filling",
+        "test_tampered_or_inconsistent_native_evidence_refuses_projection",
+        "test_run_without_dispatch_evidence_is_refused"
+      ],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-SYMBOLS": {
+      "d4_gated": true,
+      "method": "resolve_symbol",
+      "status": "PARTIAL",
+      "producers": [
+        {"file": "tools/workflow/runner.py", "line": 239, "symbol": "Controller.checkpoint", "emits": "request_hash, build_hash, plan, root, source"},
+        {"file": "tools/workflow/runner.py", "line": 780, "symbol": "Controller.record_plan_version", "emits": "plan_versions[k].plan_hash (HARNESS_PLAN_HASH:vN)"},
+        {"file": "tools/workflow/processes.py", "line": 342, "symbol": "Processes.run launch record", "emits": "pid, parent_pid (HARNESS_PID:<tool>, HARNESS_CONTROLLER_PID)"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"},
+        {"file": "tools/workflow/claim_gates.py", "line": 35, "symbol": "bind_definition_source", "emits": "definition source hash (HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling, D1)"},
+        {"file": "adapter_support/weather_adapter.py", "line": null, "symbol": "WeatherAdapter.prepare_fixture", "emits": "source_pre (harness tree_hash before the run)"}
+      ],
+      "evidence_fields": ["symbols{HARNESS_RUN_DIR, HARNESS_REQUEST_HASH(:current), HARNESS_MANIFEST_HASH:current, HARNESS_GOAL_HASH:current, HARNESS_GOAL_HASH:authorized (harness-supplied variant goal via the controller digest), HARNESS_PLAN_HASH:current/vN, HARNESS_HASH:source/source_pre/source_expected_after (when supplied), HARNESS_CONTROLLER_PID, HARNESS_PID:<tool> (single launch only), HARNESS_RESOLVED_ARTIFACT_PATH:onset/map, HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling}"],
+      "missing_fields": [
+        {"field": "HARNESS_CANDIDATE_LABEL:*", "owner": "CAP-SHADOW"},
+        {"field": "HARNESS_GOAL_HASH (bare)", "owner": "contract owner (meaning unspecified)"},
+        {"field": "HARNESS_HASH:onset_after_mutation, HARNESS_HASH:onset_partial_at_interrupt", "owner": "CAP-FIXTURE-OP / CAP-MIDPROCESS"},
+        {"field": "HARNESS_HASH:source_expected_after", "owner": "run_case does not yet derive it from the case fixture operations"}
+      ],
+      "notes": "HARNESS_CONTROLLER_PID is the in-process controller (shared with the harness); open question in P0-P3-P7-P8.",
+      "tests": ["test_symbol_resolver_is_a_closed_native_table", "test_released_projection_maps_native_records_without_filling"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-REASON-MAP": {
+      "d4_gated": true,
+      "method": "map_terminal_reason",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/runner.py", "line": 1231, "symbol": "Controller.terminal_for", "emits": "{outcome, reason, failed_gate} in the frozen vocabulary + terminal_mapping provenance"},
+        {"file": "tools/workflow/runner.py", "line": 1262, "symbol": "Controller.finish", "emits": "context.terminal, terminal dispatch event, result.json terminal"}
+      ],
+      "evidence_fields": ["controller_trace.terminal {outcome, reason, failed_gate}", "event_seq['controller_trace.terminal']"],
+      "missing_fields": [],
+      "mapping_choices_for_review": ["identity mapping; a gate code outside FAILED_GATES is omitted (scores NOT_OBSERVED) and reported, never replaced by a nearby gate"],
+      "tests": ["test_terminal_mapping_never_guesses_an_unmapped_gate", "test_claim_gate_block_projects_a_routed_record_and_no_review", "test_needs_info_stop_and_visible_synthetic_marker"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-ROLE-OUTPUT-SCHEMA": {
+      "d4_gated": true,
+      "method": "map_role_output",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/runner.py", "line": 524, "symbol": "Controller.ask", "emits": "role-NNN-<role>.json {input, output, receipt}, hashed into checkpoint evidence"},
+        {"file": "tools/workflow/runner.py", "line": 1556, "symbol": "Controller.record_verifier", "emits": "verifier_verdicts {verdict PASS|FAIL, sub_reason, returned_verdict} (D8)"},
+        {"file": "tools/workflow/runner.py", "line": 985, "symbol": "Controller.accept_review_output", "emits": "frozen reviewer shape accepted (UC-03)"}
+      ],
+      "evidence_fields": ["role_output.<role>[k] for every contract role (empty list when never invoked)", "compiler_N[0].goal", "planner/repairer: plan (controller plan.steps), controller_plan (verbatim), claims (from claims or plan_claims), needs_info, rationale, response", "reviewer verbatim", "verifier {verdict (D8), sub_reason, returned_output}", "evidence_checker verbatim"],
+      "missing_fields": [{"field": "role_output.shadow_policy outputs", "owner": "CAP-SHADOW (role not produced at base; emitted as [] only because the role is never invoked)"}],
+      "mapping_choices_for_review": ["plan.steps -> plan (full plan kept as controller_plan)", "plan_claims -> claims", "verifier verdict = controller-recorded D8 verdict, raw output kept as returned_output", "unknown output fields are passed through and listed in notes.unmapped_role_output_fields"],
+      "tests": ["test_released_projection_maps_native_records_without_filling", "test_needs_info_stop_and_visible_synthetic_marker"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-BOUND-SOURCES": {
+      "d4_gated": true,
+      "method": "capture_bound_sources",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/review_evidence.py", "line": 190, "symbol": "capture", "emits": "review-capture-NNN.json {payload, stdin, stdin_hash, input_hash, review_evidence envelope, dispatch_status}"},
+        {"file": "tools/workflow/review_evidence.py", "line": 134, "symbol": "envelope", "emits": "request/goal/plan/manifest/source hashes, plan_claims, sources"},
+        {"file": "tools/workflow/claim_gates.py", "line": 35, "symbol": "bind_definition_source", "emits": "D1 bound source under 'definition:agrhymet-sos-rolling'"},
+        {"file": "tools/workflow/runner.py", "line": 440, "symbol": "Controller.advance", "emits": "accepted_review + committed_transition after the durable REVIEW_APPROVED commit"}
+      ],
+      "evidence_fields": ["harness_observations.review_snapshots[*] {reviewer_occurrence (receipt ordinal), request_hash, goal_hash, plan_hash, manifest_hash, source_hash, plan_claims, sources}", "harness_observations.review_dispatch_failures (failed dispatches; never snapshots or receipts)", "controller_trace.active_approval"],
+      "missing_fields": [],
+      "tests": ["test_review_snapshots_one_per_reviewer_receipt_with_d1_source", "test_failed_reviewer_dispatch_is_reported_never_a_snapshot_or_receipt"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-RUN-PROVENANCE": {
+      "d4_gated": true,
+      "method": "tag_run_provenance",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/fixture_staging.py", "line": 42, "symbol": "stage_fixture", "emits": "harness manifest {tag synthetic, generator_provenance}; system-visible fixture carries no synthetic attribute"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "tag_outputs / run_provenance", "emits": "harness output-tags.json; scan of request, role input payloads and source metadata"},
+        {"file": "tools/workflow/runner.py", "line": 1593, "symbol": "Controller.execution_context", "emits": "classification/source_origin seen by every role (scanned)"}
+      ],
+      "evidence_fields": ["harness_observations.run_provenance {tag, manifest_hash, outputs_tagged, visible_to_system, scan, admission_note}"],
+      "missing_fields": [],
+      "notes": "Owner ruling D3: synthetic CHIRPS-identical input runs under production admission; admission_note states that 'production' is a consequence of the ruling, not an observed fetch. The scan covers what the system reads; it is a marker scan, not a proof of semantic invisibility.",
+      "tests": ["test_released_run_provenance_follows_ruling_d3", "test_needs_info_stop_and_visible_synthetic_marker", "test_zero_collected_outputs_are_never_tagged"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-PROFILE": {
+      "d4_gated": true,
+      "method": "select_profile",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/profiles.py", "line": 3, "symbol": "PROFILES / stages", "emits": "registered profile ids and state chains"},
+        {"file": "tools/workflow/contracts.py", "line": 126, "symbol": "validate_goal", "emits": "onset_data null title accepted (CR-02 / UC-04)"}
+      ],
+      "evidence_fields": ["case.profile -> profile.json variant, checked against the controller profile id and states"],
+      "missing_fields": [],
+      "tests": ["test_profile_selection_is_checked_against_the_controller_profile", "test_data_profile_run_with_null_title_releases_without_a_map"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-LEDGER-SEED": {
+      "d4_gated": true,
+      "method": "seed_ledger",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "tools/workflow/contracts.py", "line": 166, "symbol": "request_goal", "emits": "validates the seeded operator ledger: user-only authorization, verbatim quotes, goal_hash, CR-02 unattributed nulls"}
+      ],
+      "evidence_fields": ["workflow.request/1 from source_ledger + request_delta", "harness seeded-ledger.json {request, derivation, ledger_records}", "controller_trace.authorizations (from the observed request)"],
+      "missing_fields": [],
+      "mapping_choices_for_review": ["quote rule: whole scenario message per attributed field; null values unattributed except PROHIBITION_FIELDS (baseline); derivation.flagged_for_review=true"],
+      "tests": ["test_ledger_seed_applies_the_delta_once_and_refuses_unsupported_inputs", "test_data_profile_run_with_null_title_releases_without_a_map"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-HARNESS-OBS": {
+      "d4_gated": true,
+      "method": "observe_harness",
+      "status": "PARTIAL",
+      "producers": [
+        {"file": "tools/workflow/processes.py", "line": 285, "symbol": "Processes.run launch_check", "emits": "free_ram_gib, budget_ok, launched, reading_source per launch decision"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
+      ],
+      "evidence_fields": ["budget_ledger.launch_checks", "harness_observations.max_concurrent_children, harness_observations.shell_launches (container harness input only)"],
+      "missing_fields": [
+        {"field": "harness_observations.max_concurrent_children", "owner": "container harness (MISSING without the observations input)"},
+        {"field": "harness_observations.shell_launches", "owner": "container harness (MISSING without the observations input)"},
+        {"field": "harness_observations.data_fetch_attempts", "owner": "no design (network observation)"},
+        {"field": "harness_observations.min_free_ram_while_running_gib", "owner": "processes.py (min_free_gib falls back to a post-exit read when no sample was taken; not distinguishable)"}
+      ],
+      "tests": ["test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-SIGNAL-CAPTURE": {
+      "d4_gated": true,
+      "method": "capture_signal_targets",
+      "status": "PARTIAL",
+      "producers": [
+        {"file": "tools/workflow/signal_stop.py", "line": 645, "symbol": "stop_tree", "emits": "signal-stop/1 {signalled_pids, process_tree, exhaustive, exhaustive_reasons}"},
+        {"file": "tools/workflow/processes.py", "line": 423, "symbol": "Processes.run signal_stop event", "emits": "signal_stop dispatch event on the controller clock"},
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
+      ],
+      "evidence_fields": ["controller_trace.signalled_pids", "harness_observations.signal_capture_exhaustive (true only when every record is exhaustive)", "process_tree (launch pid->parent plus signal_stop trees)", "container route: signalled_pids, signal_capture_exhaustive and process_tree (creating parent) from the harness trace; every native launch must appear with the same parent and every native signal_stop pid must be observed, else the projection is refused; the native signal_stop projection and any differing parent-at-signal are kept in notes"],
+      "missing_fields": [{"field": "all fields when no signal_stop record exists and no harness observations input is supplied", "owner": "D4: absence of a stop record is never an empty exhaustive list"}, {"field": "fields the container harness reports missing (tracer death, truncation, unresolved targets)", "owner": "container harness (reason carried verbatim)"}],
+      "notes": "Not declared: status stays PARTIAL until the traced container harness is reviewed (container_route_ruling_2026-10-13).",
+      "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-EXHAUSTIVE-WRITES": {
+      "d4_gated": true,
+      "method": "assert_exhaustive_write_capture",
+      "status": "NOT_DECLARED",
+      "producers": [
+        {"file": "adapter_support/evidence_projection.py", "line": null, "symbol": "load_harness_observations / Projection.observed", "emits": "merges the container harness observations file (simkit.container-harness-evidence/1, container_harness/analyze_trace.py) when harness[\"observations_path\"] is supplied; checked against native launches; harness-reported missing stays MISSING with its reason"}
+      ],
+      "evidence_fields": ["filesystem_snapshot.created_paths (container harness input only; compared by exact string with artifacts.<id>.path, so the projection must run in the trace's path namespace)"],
+      "missing_fields": [{"field": "filesystem_snapshot.created_paths", "owner": "container harness (MISSING without the observations input, or when the harness reports it missing, e.g. tracer death or io_uring)"}],
+      "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). The value is carried when supplied, but the capability is not declared: no method is implemented and status stays NOT_DECLARED until the traced harness is reviewed.",
+      "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-NOT-IMPLEMENTED": {
+      "d4_gated": false,
+      "method": "run_case",
+      "status": "POLICY",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": null, "symbol": "WeatherAdapter.run_case / can_run", "emits": "opt-in lifecycle; refuses before any side effect when a required capability is undeclared"}
+      ],
+      "evidence_fields": ["frozen runner record status NOT_IMPLEMENTED|EXECUTED|HARNESS_ERROR"],
+      "missing_fields": [],
+      "tests": ["test_run_case_is_opt_in_and_refuses_undeclared_capabilities_before_side_effects", "test_every_frozen_case_stays_not_implemented_under_the_real_runner"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-CONTROLLER-HASH": {
+      "d4_gated": false,
+      "method": "controller_goal_hash",
+      "status": "PRODUCER_MAPPED",
+      "producers": [{"file": "tools/workflow/contracts.py", "line": 101, "symbol": "digest", "emits": "the controller's goal digest"}],
+      "evidence_fields": ["symbols['HARNESS_GOAL_HASH:authorized']"],
+      "missing_fields": [],
+      "notes": "Declared before D4 (P2, cross-model reviewed in review/kong-review-p2-p5.json). Not gated here; D4 sign-off for P2 capabilities is a coordinator decision.",
+      "tests": ["tests/test_weather_adapter_p2.py::test_goal_hash_is_the_controller_digest_and_key_order_invariant"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-REPAIR-CONFIG": {
+      "d4_gated": false,
+      "method": "configure_repair",
+      "status": "PRODUCER_MAPPED",
+      "producers": [{"file": "tools/workflow/runner.py", "line": 685, "symbol": "Controller.repair", "emits": "max_repairs / repairs_used"}],
+      "evidence_fields": ["budget_ledger.final.limits.max_repair_attempts", "budget_ledger.final.repair_attempts_used"],
+      "missing_fields": [],
+      "notes": "Declared before D4 (P2). Not gated here.",
+      "tests": ["tests/test_weather_adapter_p2.py::test_repair_limit_read_from_every_frozen_case_budget"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-DISPOSABLE-FIXTURE": {
+      "d4_gated": false,
+      "method": "prepare_fixture",
+      "status": "PRODUCER_MAPPED",
+      "producers": [{"file": "adapter_support/fixture_staging.py", "line": 42, "symbol": "stage_fixture", "emits": "staged Zarr + harness manifest"}],
+      "evidence_fields": ["symbols HARNESS_HASH:source_pre", "filesystem_snapshot.source_cache_hash_after"],
+      "missing_fields": [],
+      "notes": "Declared before D4 (P2). Not gated here.",
+      "tests": ["tests/test_weather_adapter_p2.py::test_fixture_layout_disjoint_fresh_and_hash_named"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-GATE-REPORT-PATCH": {
+      "d4_gated": false,
+      "method": "patch_gate_report",
+      "status": "PRODUCER_MAPPED",
+      "producers": [{"file": "tools/workflow/e2e_injections.py", "line": null, "symbol": "InjectionHooks after_tool json_patch", "emits": "delivered report record"}],
+      "evidence_fields": ["gate_reports (delivered vs raw report hashes)"],
+      "missing_fields": [],
+      "notes": "Declared before D4 (P2). Not gated here.",
+      "tests": ["tests/test_weather_adapter_p2.py::test_gate_report_patch_delivers_only_selected_report"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-SCHEDULE-DEPENDENCIES": {
+      "d4_gated": false,
+      "method": "dispatch_dependent_schedule",
+      "status": "PRODUCER_MAPPED",
+      "producers": [{"file": "tools/workflow/e2e_injections.py", "line": null, "symbol": "InjectionHooks.dependency_report", "emits": "per-entry dispositions"}],
+      "evidence_fields": ["schedule dispositions DELIVERED|INACTIVE|NOT_IMPLEMENTED|HARNESS_ERROR"],
+      "missing_fields": [],
+      "notes": "Declared before D4 (P5). Not gated here.",
+      "tests": ["tests/test_weather_adapter.py::test_dependency_dispatch_methods_report_observed_dispositions_only"],
+      "reviewer": null,
+      "reviewed_at": null
+    },
+    "CAP-REVIEW-APPROVAL-HOOK": {
+      "d4_gated": false,
+      "method": "dispatch_after_accepted_review",
+      "status": "PRODUCER_MAPPED",
+      "producers": [{"file": "tools/workflow/runner.py", "line": 474, "symbol": "Controller.accepted_approval", "emits": "after_review_approval boundary only after a durable committed APPROVE"}],
+      "evidence_fields": ["after_review_approval dispositions"],
+      "missing_fields": [],
+      "notes": "Declared before D4 (P5). Not gated here.",
+      "tests": ["tests/test_weather_adapter.py::test_dependency_dispatch_methods_report_observed_dispositions_only"],
+      "reviewer": null,
+      "reviewed_at": null
+    }
+  }
+}

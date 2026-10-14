@@ -1,0 +1,5 @@
+{"case": "normal", "status": "CLEAN", "result": "completion-evidence\\canary-reviewed-01\\0-normal\\result.json"}
+{"case": "timeout", "status": "CLEAN", "result": "completion-evidence\\canary-reviewed-01\\1-timeout\\result.json"}
+{"case": "orphan", "status": "CLEAN", "result": "completion-evidence\\canary-reviewed-01\\2-orphan\\result.json"}
+{"case": "observer_failure", "status": "UNKNOWN", "result": "completion-evidence\\canary-reviewed-01\\3-observer_failure\\result.json"}
+{"case": "supervisor_crash", "status": "UNKNOWN", "result": "completion-evidence\\canary-reviewed-01\\4-supervisor_crash\\result.json"}

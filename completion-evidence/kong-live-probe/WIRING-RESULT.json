@@ -1,0 +1,307 @@
+{
+  "schema": "kong-wiring-smoke/1",
+  "generated_utc": "2026-10-13T14:41:55.278785+00:00",
+  "transport": "kong-native-anthropic",
+  "retries": 0,
+  "shapes": [
+    {
+      "shape": "A-verifier-plain",
+      "role": "verifier",
+      "model_requested": "claude-sonnet-4-6",
+      "payload_classification": "synthetic, Not Sensitive",
+      "attempts": 1,
+      "outcome": "SUCCESS",
+      "output_top_level_keys": [
+        "binding_hash",
+        "scope",
+        "sub_reason",
+        "verdict"
+      ],
+      "wall_ms": 26437,
+      "worker": {
+        "sent": true,
+        "ok": true,
+        "model": "claude-sonnet-4-6",
+        "stop_reason": "end_turn",
+        "via": "1.1 kong/3.15.0.5-enterprise-edition",
+        "request_id": "8ea8b50bf373253f2bc6766cec85df18",
+        "latency_ms": 2218,
+        "text_starts_with_fence": true
+      },
+      "receipt": {
+        "role": "verifier",
+        "invocation_id": "1866c607-c394-42c3-bc40-45fdaab569a2",
+        "session_id": "43f6dbca-e59e-4065-b716-c51376c69ec1",
+        "input_hash": "58c74102a559fa5688ba7828c023f02468cd29e8a3d80a2d837309b6301a6d67",
+        "output_hash": "9b2c7bd397df9b13d86325864e20bc2d0a61b27b6cc58afe1cd40c8da37ceea3",
+        "cost_usd": null,
+        "cost_basis": "untracked",
+        "budget_guard": "off",
+        "model_requested": "claude-sonnet-4-6",
+        "model_observed": "claude-sonnet-4-6",
+        "model_match": true,
+        "settings": {
+          "max_tokens": 1024,
+          "temperature": null,
+          "system_prompt_hash": "sha256:6ae01a5a180ec87888f44689c0091d8a75f895d89952cbfe9500a62c3000671c",
+          "thinking": null,
+          "retries": 0,
+          "sdk": "anthropic-python 1.13.0"
+        },
+        "settings_sent": {
+          "model": "claude-sonnet-4-6",
+          "max_tokens": 1024
+        },
+        "sent_keys": [
+          "max_tokens",
+          "messages",
+          "model",
+          "system"
+        ],
+        "output_normalization": "json-object/optional-single-json-fence/v1",
+        "output_form": "json_fence",
+        "stdin_hash": "sha256:6ba08cc6b4827e3462b5033ef7801b70275e580862b065236d38a3ca42c79b5e",
+        "usage": {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "inference_geo": "global",
+          "input_tokens": 167,
+          "output_tokens": 54,
+          "output_tokens_details": null,
+          "server_tool_use": null,
+          "service_tier": "standard"
+        },
+        "stop_reason": "end_turn",
+        "response_id": "msg_011CfzQsaHeGWD83pZ1aXHhF",
+        "request_id": "8ea8b50bf373253f2bc6766cec85df18",
+        "via": "1.1 kong/3.15.0.5-enterprise-edition",
+        "latency_ms": 2218,
+        "gateway_mock": false,
+        "transport": "kong-native-anthropic",
+        "mode": "live"
+      },
+      "spent_after": 0.0,
+      "provenance": {
+        "schema": "workflow.role-transport/1",
+        "transport": "kong-native-anthropic",
+        "mode": "live",
+        "data_policy": "Not Sensitive synthetic content only (acknowledged)",
+        "default_model": "claude-sonnet-4-6",
+        "models": {
+          "repairer": "claude-sonnet-4-6",
+          "router": "claude-sonnet-4-6",
+          "compiler": "claude-sonnet-4-6",
+          "planner": "claude-sonnet-4-6",
+          "reviewer": "claude-sonnet-4-6",
+          "evidence_checker": "claude-sonnet-4-6",
+          "verifier": "claude-sonnet-4-6"
+        },
+        "model_evidence": {
+          "claude-sonnet-4-6": "PROBED native small_text PASS 2026-10-06 (run fc4dfd14)"
+        },
+        "max_tokens": 1024,
+        "temperature": null,
+        "thinking": null,
+        "retries": 0,
+        "output_normalization": "json-object/optional-single-json-fence/v1",
+        "budget_guard": "off",
+        "cost_tracking": "untracked",
+        "spent_field_semantics": "not a measure of Kong spend: calls are untracked and reserve nothing",
+        "budget_usd": 1
+      }
+    },
+    {
+      "shape": "B-reviewer-review-evidence",
+      "role": "reviewer",
+      "model_requested": "claude-sonnet-4-6",
+      "payload_classification": "synthetic, Not Sensitive",
+      "attempts": 1,
+      "outcome": "SUCCESS",
+      "output_top_level_keys": [
+        "binding_hash",
+        "findings",
+        "verdict"
+      ],
+      "wall_ms": 26313,
+      "worker": {
+        "sent": true,
+        "ok": true,
+        "model": "claude-sonnet-4-6",
+        "stop_reason": "end_turn",
+        "via": "1.1 kong/3.15.0.5-enterprise-edition",
+        "request_id": "6d8482682a2c0c4b05055d317e3a3601",
+        "latency_ms": 8844,
+        "text_starts_with_fence": true
+      },
+      "receipt": {
+        "role": "reviewer",
+        "invocation_id": "8e1de27e-a4e5-4207-a1b0-4786cb1df157",
+        "session_id": "14045b50-f8af-41db-8532-784232f74df6",
+        "input_hash": "dabc7e7c39a66687a294bd29dd6a2c383b7b5f5caec991295b80a859fe3cc432",
+        "output_hash": "ba5256b0bea17551c4971a32e00bd0cadd713f1e74bdb299bcd12b8c5e5519d6",
+        "cost_usd": null,
+        "cost_basis": "untracked",
+        "budget_guard": "off",
+        "model_requested": "claude-sonnet-4-6",
+        "model_observed": "claude-sonnet-4-6",
+        "model_match": true,
+        "settings": {
+          "max_tokens": 1024,
+          "temperature": null,
+          "system_prompt_hash": "sha256:6889daa7ad8015fbb0266f674ce34279b60904c8834875a99499313baf884c80",
+          "thinking": null,
+          "retries": 0,
+          "sdk": "anthropic-python 1.13.0"
+        },
+        "settings_sent": {
+          "model": "claude-sonnet-4-6",
+          "max_tokens": 1024
+        },
+        "sent_keys": [
+          "max_tokens",
+          "messages",
+          "model",
+          "system"
+        ],
+        "output_normalization": "json-object/optional-single-json-fence/v1",
+        "output_form": "json_fence",
+        "stdin_hash": "sha256:cfc9710c1acc3998afa380f94bdcd7a1c36235d1dd3b2a21bbbb2fe6507575cb",
+        "usage": {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "inference_geo": "global",
+          "input_tokens": 365,
+          "output_tokens": 383,
+          "output_tokens_details": null,
+          "server_tool_use": null,
+          "service_tier": "standard"
+        },
+        "stop_reason": "end_turn",
+        "response_id": "msg_011CfzQtzqYWy5nquzQtpcQL",
+        "request_id": "6d8482682a2c0c4b05055d317e3a3601",
+        "via": "1.1 kong/3.15.0.5-enterprise-edition",
+        "latency_ms": 8844,
+        "gateway_mock": false,
+        "transport": "kong-native-anthropic",
+        "mode": "live",
+        "dispatch": {
+          "stdin_hash": "sha256:cfc9710c1acc3998afa380f94bdcd7a1c36235d1dd3b2a21bbbb2fe6507575cb",
+          "system_prompt_hash": "sha256:6889daa7ad8015fbb0266f674ce34279b60904c8834875a99499313baf884c80"
+        }
+      },
+      "spent_after": 0.0,
+      "provenance": {
+        "schema": "workflow.role-transport/1",
+        "transport": "kong-native-anthropic",
+        "mode": "live",
+        "data_policy": "Not Sensitive synthetic content only (acknowledged)",
+        "default_model": "claude-sonnet-4-6",
+        "models": {
+          "repairer": "claude-sonnet-4-6",
+          "router": "claude-sonnet-4-6",
+          "compiler": "claude-sonnet-4-6",
+          "planner": "claude-sonnet-4-6",
+          "reviewer": "claude-sonnet-4-6",
+          "evidence_checker": "claude-sonnet-4-6",
+          "verifier": "claude-sonnet-4-6"
+        },
+        "model_evidence": {
+          "claude-sonnet-4-6": "PROBED native small_text PASS 2026-10-06 (run fc4dfd14)"
+        },
+        "max_tokens": 1024,
+        "temperature": null,
+        "thinking": null,
+        "retries": 0,
+        "output_normalization": "json-object/optional-single-json-fence/v1",
+        "budget_guard": "off",
+        "cost_tracking": "untracked",
+        "spent_field_semantics": "not a measure of Kong spend: calls are untracked and reserve nothing",
+        "budget_usd": 1
+      }
+    },
+    {
+      "shape": "C-planner-review-evidence-request",
+      "role": "planner",
+      "model_requested": "claude-haiku-4-5",
+      "payload_classification": "synthetic, Not Sensitive",
+      "attempts": 1,
+      "outcome": "UNKNOWN",
+      "evidence": {
+        "role": "planner",
+        "invocation_id": "a1f3f527-c66b-438e-954a-5f1c8498db94",
+        "outcome": "UNKNOWN",
+        "reason": "gateway call did not return a message",
+        "budget_guard": "off",
+        "status": 400,
+        "via": null,
+        "request_id": "f2c338128953ca05ed84677558b20f2f",
+        "error_type": "BadRequestError",
+        "hint": "see references/limits-and-errors.md",
+        "model_requested": "claude-haiku-4-5"
+      },
+      "wall_ms": 18203,
+      "worker": {
+        "sent": true,
+        "ok": null,
+        "model": null,
+        "stop_reason": null,
+        "via": null,
+        "request_id": null,
+        "latency_ms": 375,
+        "error": {
+          "status": 400,
+          "via": null,
+          "request_id": "f2c338128953ca05ed84677558b20f2f",
+          "hint": "see references/limits-and-errors.md"
+        },
+        "text_starts_with_fence": false
+      },
+      "spent_after": 0.0,
+      "provenance": {
+        "schema": "workflow.role-transport/1",
+        "transport": "kong-native-anthropic",
+        "mode": "live",
+        "data_policy": "Not Sensitive synthetic content only (acknowledged)",
+        "default_model": "claude-sonnet-4-6",
+        "models": {
+          "repairer": "claude-sonnet-4-6",
+          "router": "claude-sonnet-4-6",
+          "compiler": "claude-sonnet-4-6",
+          "planner": "claude-haiku-4-5",
+          "reviewer": "claude-sonnet-4-6",
+          "evidence_checker": "claude-sonnet-4-6",
+          "verifier": "claude-sonnet-4-6"
+        },
+        "model_evidence": {
+          "claude-haiku-4-5": "CODE native (ET fallback roster); PROBED routable on Unified only",
+          "claude-sonnet-4-6": "PROBED native small_text PASS 2026-10-06 (run fc4dfd14)"
+        },
+        "max_tokens": 1024,
+        "temperature": null,
+        "thinking": null,
+        "retries": 0,
+        "output_normalization": "json-object/optional-single-json-fence/v1",
+        "budget_guard": "off",
+        "cost_tracking": "untracked",
+        "spent_field_semantics": "not a measure of Kong spend: calls are untracked and reserve nothing",
+        "budget_usd": 1
+      }
+    }
+  ],
+  "post_run_diagnosis": {
+    "added": "after the run, by the wiring agent; not produced by wiring_smoke.py",
+    "shape": "C-planner-review-evidence-request",
+    "gateway_message": "Error code: 400 - {'message': 'property model validation failed: matches none of the enum values'}",
+    "source": "kit-sanitized worker error message from the run's scratch process record",
+    "reading": "Kong's native-route request validator does not accept the model id claude-haiku-4-5 (no via header: rejected at the gateway, not upstream). The call is recorded UNKNOWN per transport semantics; it was not retried. Consequence: claude-haiku-4-5 moved to kong_roles.NATIVE_REJECTED; the native roster is claude-sonnet-4-6 only.",
+    "prompt_shape_coverage": "planner/repairer review_evidence_request suffix not exercised live; it shares the transport path proven by shapes A and B and is covered offline by test_kong_wiring.py"
+  }
+}
