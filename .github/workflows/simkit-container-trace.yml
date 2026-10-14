@@ -57,7 +57,7 @@ jobs:
           python container_harness/launch.py run tree --image "$IMG" --out "$EV/tree"
           python container_harness/launch.py run tree --image "$IMG" --out "$EV/tree-untraced" --no-trace
           python container_harness/launch.py run kill-tracer --image "$IMG" --out "$EV/kill-tracer"
-          python container_harness/launch.py run tree --image "$IMG" --out "$EV/tracer-death" --kill-tracer-after 3
+          python container_harness/launch.py run tree --image "$IMG" --out "$EV/tracer-death" --kill-tracer-after 1
 
       - name: Canary (real controller, fixture roles, staged synthetic fixture, cached-onset/v1)
         run: |
