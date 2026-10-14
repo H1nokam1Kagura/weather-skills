@@ -162,6 +162,16 @@ if { [ "$MODE" = canary ] || [ "$MODE" = case ]; } && [ -s "$OUT/evidence.json" 
     "$OUT/projection.json" > "$OUT/projection.stdout" 2> "$OUT/projection.stderr"
   echo "in_container_projection_exit=$?" >> "$OUT/post_status.txt"
 fi
+if { [ "$MODE" = canary ] || [ "$MODE" = case ]; } && [ -d "$RUN_DIR" ]; then
+  # Diagnostic copy of the controller's own records (state, dispatch, tool/process/role JSON,
+  # reports): small regular files only, never artifacts/ or scratch/, so a refused gate can be
+  # read after the run. Untraced and post-exit; it does not alter created_paths.
+  mkdir -p "$OUT/run-copy"
+  (cd "$RUN_DIR" && find . \( -path ./artifacts -o -path ./scratch \) -prune -o -type f \
+     \( -name '*.json' -o -name '*.jsonl' -o -name '*.log' -o -name '*.txt' -o -name '*.html' \) \
+     -size -2M -print0 | xargs -0 -r cp --parents -t "$OUT/run-copy")
+  echo "run_copy_exit=$?" >> "$OUT/post_status.txt"
+fi
 if [ "$MODE" = case ]; then
   # Manifest of everything the case root holds after the run (the run dir itself is not copied
   # out: results leave the container only through /harness-out via docker cp).
