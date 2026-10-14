@@ -1489,11 +1489,17 @@ SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E13-P3-CTL",
     "DEV-E2E-V2_7-E13-P3-INJ",
 }
-
-
-# Committed d4_gated records awaiting their independent D4 review: unsigned (reviewer,
-# reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing it.
-PENDING_D4_REVIEW = {"CAP-FIXTURE-OP", "CAP-REREVIEW", "CAP-SHADOW"}
+# Committed d4_gated records awaiting their independent D4 review (wave 5): wholly unsigned
+# (reviewer, reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is
+# signing it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned.
+PENDING_D4_REVIEW = {
+    "CAP-FIXTURE-OP",
+    "CAP-REREVIEW",
+    "CAP-SHADOW",
+    "CAP-TRANSITION-REQUEST",
+    "CAP-LEDGER-APPEND",
+    "CAP-OPERATOR-RECORD-SETUP",
+}
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
@@ -1577,7 +1583,9 @@ def test_committed_d4_signatures_are_complete_and_pinned():
     """Every d4_gated record in the committed file carries a full signature (reviewer, time,
     reviewed commit, an APPROVE verdict and its report) and is therefore declared."""
     adapter = WeatherAdapter()
-    for capability, record in adapter.producers["capabilities"].items():
+    records = adapter.producers["capabilities"]
+    assert all(records[c].get("d4_gated") is True for c in PENDING_D4_REVIEW)
+    for capability, record in records.items():
         if record.get("d4_gated") is not True:
             continue
         if capability in PENDING_D4_REVIEW:

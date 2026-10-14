@@ -67,7 +67,7 @@ CATALOG_TOOLS = tuple(catalog.CATALOG)
 # never []. operator_actions has its own checked projection (pre_review_projection);
 # shadow_decisions has its own (shadow_projection.project, CAP-SHADOW).
 PENDING_TRACE_LISTS = {
-    "transition_requests": ("CAP-TRANSITION-REQUEST", None),
+    "shadow_decisions": ("CAP-SHADOW", None),
     "resume": ("CAP-RESUME", None),
     "interruptions": ("CAP-INTERRUPT", "index"),
     "diagnoses": ("CAP-DIAGNOSIS", "index"),
@@ -1242,6 +1242,7 @@ class Projection:
         operator_actions = prp.operator_actions(self, receipts)
         if operator_actions is not None:
             trace["operator_actions"] = operator_actions
+        olp.project(self, trace)  # transition_requests + ledger records (checked)
         self.pending_lists(trace)
         frx.rereview_lists(self, trace)
         processes, transport = self.process_receipts(approval)
@@ -1619,4 +1620,5 @@ def run_provenance(run_dir, harness_dir, markers, tags=None):
 
 # Imported last: pre_review_projection imports EvidenceMappingError from this module.
 from adapter_support import fixture_rereview_projection as frx  # noqa: E402
+from adapter_support import operator_ledger_projection as olp  # noqa: E402
 from adapter_support import pre_review_projection as prp  # noqa: E402
