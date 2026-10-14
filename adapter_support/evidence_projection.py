@@ -39,6 +39,7 @@ from tools.workflow.contracts import (
     TERMINAL_OUTCOMES,
     digest,
     expected_plan,
+    plan_version_hash,
     request_goal,
 )
 from tools.workflow.persistence import read_checkpoint
@@ -225,6 +226,21 @@ def load_harness_observations(path):
         "harness_notes": record.get("harness_notes"),
         "sha256": file_sha256(path),
     }
+
+
+_ARGUMENT_FIELD = re.compile(r"^plan\.steps\[\d+\]\.args\.(.+)$")
+
+
+def argument_labels(failed_fields):
+    """CAP-REASON-MAP: a failed plan argument (plan.steps[i].args.<name>) is also named by its
+    frozen label, the bare argument name (EC plan_validations failed_fields contains
+    output_path). The controller's dotted paths are kept verbatim and first; labels follow."""
+    labels = []
+    for field in failed_fields:
+        match = _ARGUMENT_FIELD.match(field) if isinstance(field, str) else None
+        if match and match.group(1) not in failed_fields and match.group(1) not in labels:
+            labels.append(match.group(1))
+    return [*failed_fields, *labels]
 
 
 def plan_steps(plan):
@@ -527,6 +543,8 @@ class Projection:
         out = []
         for event, record in zip(events, records, strict=True):
             value = _detached(record)
+            if isinstance(value.get("failed_fields"), list):
+                value["failed_fields"] = argument_labels(value["failed_fields"])
             plan = self.plan_for(record, role_output)
             if plan is not None:
                 value["plan"] = plan
@@ -549,10 +567,12 @@ class Projection:
         if isinstance(occurrence, int) and 1 <= occurrence <= len(outputs):
             candidates.append(outputs[occurrence - 1])
         candidates += role_output.get("planner", []) + role_output.get("repairer", [])
+        reviewed = "review_evidence" in self.n.context
         for output in candidates:
             plan = output.get("controller_plan") if isinstance(output, dict) else None
+            claims = output.get("claims") if reviewed and isinstance(output, dict) else None
             try:
-                if plan is not None and digest(plan) == record["plan_hash"]:
+                if plan is not None and plan_version_hash(plan, claims) == record["plan_hash"]:
                     return plan_steps(plan)
             except (TypeError, ValueError):
                 continue
@@ -1129,7 +1149,8 @@ class Projection:
         out["HARNESS_MANIFEST_HASH:current"] = cp["build_hash"]
         out["HARNESS_GOAL_HASH:current"] = digest(request_goal(cp["request"]))
         if cp.get("plan") is not None:
-            out["HARNESS_PLAN_HASH:current"] = digest(cp["plan"])
+            claims = (self.n.context.get("review_evidence") or {}).get("plan_claims")
+            out["HARNESS_PLAN_HASH:current"] = plan_version_hash(cp["plan"], claims)
         for i, version in enumerate(self.n.context.get("plan_versions", []), 1):
             out[f"HARNESS_PLAN_HASH:v{i}"] = version["plan_hash"]
         paths = self.artifact_paths()
@@ -1476,7 +1497,10 @@ class HarnessLaunchObserver:
                     "skill": event["skill"],
                     "request_hash": digest(controller.request),
                     "goal_hash": digest(controller.goal),
-                    "plan_hash": digest(controller.plan),
+                    "plan_hash": plan_version_hash(
+                        controller.plan,
+                        (controller.context.get("review_evidence") or {}).get("plan_claims"),
+                    ),
                     "manifest_hash": digest(runner.build_manifest(controller.repo)),
                     "source_hash": catalog.tree_hash(controller.source),
                 }

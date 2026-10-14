@@ -160,3 +160,71 @@ def test_entry_abort_is_harness_error(tmp_path):
     )
     res = cases_report.build(admission(rows), tmp_path / "cases")
     assert by_id(res)["P6-CTL"]["harness_error_source"] == "entry:staging_failed"
+
+
+def test_runner_harness_error_names_its_source_root_cause_and_text(tmp_path):
+    """A HARNESS_ERROR in the runner record itself is never 'unspecified': its exception type,
+    the controller's root error type (run-copy/result.json) and the error text reach the
+    score record and the RESULTS.md table."""
+    import case_driver
+
+    out = tmp_path / "harness-out"
+    (out / "run-copy").mkdir(parents=True)
+    record = {
+        "status": "HARNESS_ERROR",
+        "error": "EvidenceMappingError: role files do not correspond one-to-one to receipts",
+    }
+    (out / "run-copy" / "result.json").write_text(
+        json.dumps(
+            {
+                "status": "INCOMPLETE",
+                "error": "unresolved trusted symbol: HARNESS_SOURCE_HASH:definition.x",
+                "terminal_mapping": {
+                    "source": "runtime_fallback",
+                    "error_type": "UnsupportedInjection",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    record_path = out / "runner_record.json"
+    assert case_driver.runner_error_source(record, record_path) == {
+        "harness_error_source": "runner:EvidenceMappingError",
+        "root_error_type": "UnsupportedInjection",
+        "root_error": "unresolved trusted symbol: HARNESS_SOURCE_HASH:definition.x",
+    }
+    # The driver's own record keeps its source; no result.json means no root fields.
+    own = {
+        "status": "HARNESS_ERROR",
+        "error": "case_driver: OSError: x",
+        "harness_error_source": "case_driver",
+    }
+    assert case_driver.runner_error_source(own, tmp_path / "none" / "r.json") == {
+        "harness_error_source": "case_driver"
+    }
+    assert (
+        case_driver.runner_error_source({"error": None}, record_path)["harness_error_source"]
+        == "runner"
+    )
+
+    rows = [row("P7-INJ", "injection")]
+    artifact(
+        tmp_path,
+        "P7-INJ",
+        score={
+            "case_id": "P7-INJ",
+            "run_status": "HARNESS_ERROR",
+            "record_error": record["error"] + " | with a pipe",
+            **case_driver.runner_error_source(record, record_path),
+        },
+    )
+    res = cases_report.build(admission(rows), tmp_path / "cases")
+    got = by_id(res)["P7-INJ"]
+    assert got["harness_error_source"] == "runner:EvidenceMappingError"
+    assert got["root_error_type"] == "UnsupportedInjection"
+    assert got["root_error"].startswith("unresolved trusted symbol")
+    (line,) = [x for x in cases_report.markdown(res).splitlines() if x.startswith("| P7-INJ ")]
+    assert "runner:EvidenceMappingError" in line
+    assert "role files do not correspond" in line and "with a pipe" in line
+    assert "root UnsupportedInjection: unresolved trusted symbol" in line
+    assert line.count(" | ") == 4  # the error text's own pipe is escaped, the row stays 5 cells

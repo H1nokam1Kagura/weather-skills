@@ -16,7 +16,7 @@ from adapter_support import evidence_projection, pre_review_projection, role_sub
 from adapter_support.fixture_staging import stage_fixture
 from tools.workflow import review_evidence
 from tools.workflow.catalog import safe_path, tree_hash
-from tools.workflow.contracts import FIELDS, digest, request_goal
+from tools.workflow.contracts import FIELDS, digest, plan_version_hash, request_goal
 from tools.workflow.e2e_injections import InjectionHooks
 from tools.workflow.persistence import atomic_json, read_checkpoint
 from tools.workflow.profiles import PROFILES, stages
@@ -858,7 +858,7 @@ class WeatherAdapter(Adapter):
         hashes = {
             "request_hash": digest(payload["request"]),
             "goal_hash": digest(goal),
-            "plan_hash": digest(payload["plan"]),
+            "plan_hash": plan_version_hash(payload["plan"], envelope["plan_claims"]),
             "manifest_hash": checkpoint["build_hash"],
             "source_hash": checkpoint["source_hash"],
         }

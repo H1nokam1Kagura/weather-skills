@@ -740,7 +740,8 @@ def test_repair_appends_plan_version_and_failed_validation(tmp_path, monkeypatch
     context = read_checkpoint(c.root)["context"]
     failed, passed = context["plan_validations"]
     assert failed["verdict"] == "FAIL" and failed["parser_accepted"] is False
-    assert failed["failed_fields"] == ["plan.steps[1].args"]
+    # The offending argument is named, not just the args map that holds it.
+    assert failed["failed_fields"] == ["plan.steps[1].args.title"]
     assert failed["plan_hash"] == digest(bad_plan())
     assert failed["source"] == {"role": "planner", "occurrence": 1}
     assert passed["verdict"] == "PASS" and passed["source"] == {"role": "repairer", "occurrence": 1}
@@ -748,6 +749,36 @@ def test_repair_appends_plan_version_and_failed_validation(tmp_path, monkeypatch
         digest(bad_plan()),
         digest(expected_plan(GOAL)),
     ]
+
+
+def test_plan_failed_fields_name_each_offending_argument():
+    """E04-P1-INJ: an added, changed or removed argument is named at plan.steps[i].args.<name>."""
+    plan = expected_plan(GOAL)
+    plan["steps"][0]["args"]["output_path"] = "../shared_outputs/onset.nc"
+    assert contracts.plan_failed_fields(plan, GOAL) == ["plan.steps[0].args.output_path"]
+    plan = expected_plan(GOAL)
+    del plan["steps"][1]["args"]["start_date"]
+    plan["steps"][1]["args"]["title"] = "Different title"
+    assert contracts.plan_failed_fields(plan, GOAL) == [
+        "plan.steps[1].args.start_date",
+        "plan.steps[1].args.title",
+    ]
+    plan = expected_plan(GOAL)
+    plan["steps"][0]["args"] = ["not", "a", "map"]
+    assert contracts.plan_failed_fields(plan, GOAL) == ["plan.steps[0].args"]
+    assert contracts.plan_failed_fields(expected_plan(GOAL), GOAL) == []
+
+
+def test_plan_version_hash_covers_the_claims():
+    plan = expected_plan(GOAL)
+    claims = [{"claim_id": "C-1", "text": "t", "citations": [], "derivable": False}]
+    changed = [{**claims[0], "text": "restated"}]
+    assert contracts.plan_version_hash(plan) == digest(plan)
+    assert contracts.plan_version_hash(plan, claims) != digest(plan)
+    assert contracts.plan_version_hash(plan, claims) != contracts.plan_version_hash(plan, changed)
+    assert contracts.plan_version_hash(plan, claims) == contracts.plan_version_hash(
+        copy.deepcopy(plan), copy.deepcopy(claims)
+    )
 
 
 def test_parser_rejection_is_a_failed_validation_record(tmp_path, monkeypatch):

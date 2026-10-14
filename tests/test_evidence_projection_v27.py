@@ -32,7 +32,7 @@ from simkit.runner import run as simkit_run  # noqa: E402 - explicit pinned test
 
 from adapter_support import evidence_projection as ep  # noqa: E402
 from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter  # noqa: E402
-from tools.workflow import agents, runner  # noqa: E402
+from tools.workflow import agents, review_evidence, runner  # noqa: E402
 from tools.workflow.catalog import CATALOG  # noqa: E402
 from tools.workflow.contracts import digest, expected_plan  # noqa: E402
 from tools.workflow.processes import Processes  # noqa: E402
@@ -155,9 +155,17 @@ class RoleCli:
     total_seconds = 1800
 
     def __init__(
-        self, goal, planner=None, reviewer=None, checker=None, fail_roles=(), compiler=None
+        self,
+        goal,
+        planner=None,
+        reviewer=None,
+        checker=None,
+        fail_roles=(),
+        compiler=None,
+        repairer=None,
     ):
         self.goal, self.calls = goal, []
+        self.repairer = repairer
         # The controller process's own temp/cache locations at each (in-process) role call.
         self.process_env = []
         self.planner, self.reviewer, self.checker = planner, reviewer, checker
@@ -180,6 +188,8 @@ class RoleCli:
             value = (self.planner or self.default_planner)(payload)
         elif role == "evidence_checker":
             value = (self.checker or self.default_checker)(payload)
+        elif role == "repairer" and self.repairer is not None:
+            value = self.repairer(payload)
         elif role == "reviewer":
             value = (self.reviewer or self.default_reviewer)(payload)
         elif role == "verifier":
@@ -423,6 +433,50 @@ def blocked(lab):
     )
 
 
+def claims_repairer(goal):
+    """E13-P1 recovery: restate only the claims (verbatim), keeping the plan."""
+
+    def repairer(payload):
+        return {
+            "schema": review_evidence.SCHEMA,
+            "plan": expected_plan(goal),
+            "plan_claims": claims(goal),
+            "response": "Restated the window claim with the verbatim definition text.",
+        }
+
+    return repairer
+
+
+@pytest.fixture(scope="module")
+def claims_repaired(lab):
+    return lab.execute(
+        MAP_GOAL,
+        test_case(MAP_GOAL, case_id="CLAIMS-REPAIRED", max_repairs=1),
+        planner=non_verbatim_planner(MAP_GOAL),
+        repairer=claims_repairer(MAP_GOAL),
+    )
+
+
+def output_path_planner(goal):
+    """E04-P1-INJ: the planner output adds args.output_path to the onset step."""
+
+    def planner(payload):
+        value = RoleCli(goal).default_planner(payload)
+        value["plan"]["steps"][0]["args"]["output_path"] = "../shared_outputs/onset.nc"
+        return value
+
+    return planner
+
+
+@pytest.fixture(scope="module")
+def argument_refused(lab):
+    return lab.execute(
+        MAP_GOAL,
+        test_case(MAP_GOAL, case_id="ARGUMENT-REFUSED"),
+        planner=output_path_planner(MAP_GOAL),
+    )
+
+
 @pytest.fixture(scope="module")
 def needs_info(lab):
     # The scenario carries the generator identity: the system can see the synthetic tag.
@@ -543,10 +597,11 @@ def test_released_projection_maps_native_records_without_filling(released):
     assert symbols["HARNESS_RESOLVED_ARTIFACT_PATH:onset"] == onset["path"]
     # Absent producers stay absent (never []), and every gap names its owner.
     trace = ev["controller_trace"]
-    assert "transition_requests" not in trace
     # The recovery ledger exists in every run: nothing interrupted or resumed is an observed [].
     for name in sorted(ep.RECOVERY_LEDGER_LISTS):
         assert trace[name] == [], name
+    # The operator channel is open, so zero transition requests is observed: [] (E01-P1-CTL C1).
+    assert trace["transition_requests"] == []
     # The controller opened its operator channel and decided nothing: an observed [].
     assert trace["operator_actions"] == []
     assert "signalled_pids" not in trace
@@ -621,6 +676,82 @@ def test_claim_gate_block_projects_a_routed_record_and_no_review(blocked, frozen
     assert "active_approval" not in trace
     assert [p["tool"] for p in ev["process_receipts"]] == ["check-artifact"]
     assert "controller_trace.states[RELEASED]" in ev["event_seq"]["_absent"]
+    for name, found in findings(frozen, "DEV-E2E-V2_7-E13-P1-INJ", ev).items():
+        assert fails(found) == [], name
+
+
+def frozen_predicate(frozen, case_id, assertion_id):
+    (case,) = [c for c in frozen["cases"] if c["id"] == case_id]
+    (assertion,) = [a for a in case["assertions"] if a["id"] == assertion_id]
+    return assertion["predicate"]
+
+
+def test_refused_planner_plan_projects_one_validation_naming_the_argument(argument_refused, frozen):
+    """E04-P1-INJ: the planner-path refusal leaves one FAIL validation with its dispatch event,
+    the refused plan attached, and failed_fields naming output_path (CAP-REASON-MAP label)."""
+    ev = argument_refused.evidence
+    trace = ev["controller_trace"]
+    assert trace["terminal"]["outcome"] == "BLOCKED"
+    assert trace["terminal"]["failed_gate"] == "plan_validation"
+    assert trace["final_state"] == "GOAL_CHECKED"
+    (validation,) = trace["plan_validations"]
+    assert validation["verdict"] == "FAIL" and validation["parser_accepted"] is False
+    assert validation["failed_fields"] == ["plan.steps[0].args.output_path", "output_path"]
+    (planned,) = ev["role_output"]["planner"]
+    assert validation["plan"] == planned["plan"]
+    assert validation["plan"][0]["args"]["output_path"] == "../shared_outputs/onset.nc"
+    key = f"controller_trace.plan_validations[plan_hash={validation['plan_hash']}]"
+    assert isinstance(ev["event_seq"][key], int)
+    native = native_checkpoint(argument_refused.run)["context"]
+    (record,) = native["plan_validations"]
+    assert record["failed_fields"] == ["plan.steps[0].args.output_path"]  # native stays dotted
+    events = [
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in sorted(argument_refused.run.glob("dispatch-event-*.json"))
+    ]
+    (event,) = [e for e in events if e["kind"] == "plan_validation"]
+    assert event["validation"] == record and event["sequence"] == ev["event_seq"][key]
+    assert ev["role_output"]["reviewer"] == [] and ev["role_output"]["repairer"] == []
+    assert not [r for r in ev["process_receipts"] if r["producing"]]
+    case_id = "DEV-E2E-V2_7-E04-P1-INJ"
+    for assertion_id in ("C1", "C2"):
+        predicate = frozen_predicate(frozen, case_id, assertion_id)
+        assert score.evaluate(predicate, ev) == "PASS", assertion_id
+    for name, found in findings(frozen, case_id, ev).items():
+        assert fails(found) == [], name
+
+
+def test_claims_only_repair_projects_two_distinct_plan_versions(claims_repaired, frozen):
+    """E13-P1-INJ: the claims-only repair is plan version v2 with its own hash, carried by its
+    validation, claim check, checker output, review snapshot, approval and launches."""
+    ev = claims_repaired.evidence
+    trace, symbols = ev["controller_trace"], ev["symbols"]
+    assert trace["terminal"]["outcome"] == "RELEASED"
+    v1, v2 = symbols["HARNESS_PLAN_HASH:v1"], symbols["HARNESS_PLAN_HASH:v2"]
+    assert v1 != v2 and symbols["HARNESS_PLAN_HASH:current"] == v2
+    assert "HARNESS_PLAN_HASH:v3" not in symbols
+    assert [v["plan_hash"] for v in trace["plan_validations"]] == [v1, v2]
+    assert all(v["plan"] == expected_plan(MAP_GOAL)["steps"] for v in trace["plan_validations"])
+    first, second = (
+        ev["event_seq"][f"controller_trace.plan_validations[plan_hash={h}]"] for h in (v1, v2)
+    )
+    assert first < second
+    assert [c["plan_hash"] for c in trace["claim_checks"]] == [v1, v2]
+    assert [c["decision"] for c in trace["claim_checks"]] == [
+        "ROUTE_TO_REPAIR",
+        "PRESENT_FOR_REVIEW",
+    ]
+    assert trace["active_approval"]["plan_hash"] == v2
+    (checked,) = ev["role_output"]["evidence_checker"]
+    assert checked["plan_hash"] == v2
+    (reviewed,) = ev["role_output"]["reviewer"]
+    assert reviewed["approved_binding"]["plan_hash"] == v2
+    (snapshot,) = ev["harness_observations"]["review_snapshots"]
+    assert snapshot["plan_hash"] == v2
+    producing = [r for r in ev["process_receipts"] if r["producing"]]
+    assert producing and all(
+        r["approval_plan_hash"] == r["plan_hash_at_launch"] == v2 for r in producing
+    )
     for name, found in findings(frozen, "DEV-E2E-V2_7-E13-P1-INJ", ev).items():
         assert fails(found) == [], name
 
