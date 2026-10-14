@@ -19,6 +19,7 @@ from adapter_support import (
     shadow_projection,
 )
 from adapter_support.fixture_staging import stage_fixture
+from tools.check_capability_signatures import rereview_flagged
 from tools.workflow import review_evidence
 from tools.workflow.catalog import safe_path, tree_hash
 from tools.workflow.contracts import FIELDS, digest, plan_version_hash, request_goal
@@ -97,11 +98,15 @@ class WeatherAdapter(Adapter):
     def d4_declared(self, capability):
         """Owner ruling D4: a reviewed capability-to-producer record, status PRODUCER_MAPPED.
         A signature is a reviewer, a review time and the commit the review read; a name alone
-        does not declare (a later code change needs a re-review and a new pin)."""
+        does not declare (a later code change needs a re-review and a new pin). A record that
+        carries a non-empty rereview_required is undeclared until the flag is removed with a
+        new signature (D4 re-review G-1); tools/check_capability_signatures.py fails CI when a
+        signed record's producer files changed after its reviewed_commit without the flag."""
         record = self.producers["capabilities"].get(capability)
         return (
             isinstance(record, dict)
             and record.get("status") == "PRODUCER_MAPPED"
+            and not rereview_flagged(record)
             and all(
                 isinstance(record.get(key), str) and bool(record[key].strip())
                 for key in ("reviewer", "reviewed_at", "reviewed_commit")

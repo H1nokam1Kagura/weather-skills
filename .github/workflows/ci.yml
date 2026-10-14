@@ -33,6 +33,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: tests/test_capability_signatures.py diffs each D4 record's
+          # reviewed_commit against HEAD and fails closed on a shallow clone.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
