@@ -25,9 +25,11 @@ day-of-year 1..366 with no gaps). This skill:
    realizes `time = init_time + prediction_timedelta`.
 2. Optionally rolls the climatology up to a coarser `--window` (days) —
    see "Aggregating to a coarser window" below.
-3. Re-labels each date in `[--start-time, --end-time]` with its day-of-year
-   and gathers the matching climatology row, repeating rows for windows
-   spanning more than one year.
+3. Gives each date in `[--start-time, --end-time]` the climatology row for
+   the same month and day in the 1904 cycle (not the same day-of-year: in a
+   non-leap year Mar 1 is day 60, which in 1904 is Feb 29), repeating rows
+   for windows spanning more than one year. Feb 29 is used only in leap
+   years.
 
 One skill covers every mirrored climatology — the source is selected with
 `--dataset`.
@@ -142,9 +144,10 @@ units (e.g. `mm day-1` for precip); anything else (e.g. `sst`, `uwind10m`,
 `fetch.py` — `_KNOWN_UNITS` — for mirrors with no usable units metadata,
 whether missing entirely or present but not a parseable unit string, e.g.
 gefs tmp2m's raw `"avg. daily C"`; currently `degree_Celsius` for `sst` and
-`tmp2m`, `m/s` for `uwind10m`/`vwind10m`). Unlike variance, std shares the
-mean's units and converts linearly, so both variables go through the same
-unit-conversion path safely where one applies.
+`tmp2m`, `m/s` for `uwind10m`/`vwind10m`). The precip std is converted with its mean (a pure scale,
+so that is safe). No mirrored temperature source needs a unit conversion;
+a std must never take a temperature offset (`standardize-anomaly` converts
+a std by scale only).
 Global attrs include `weather_skills_source=sheerwater-mirror:<dataset>`,
 `climatology_dataset`, `climatology_variable`,
 `climatology_prediction_timedelta_days`, `climatology_window_days`.

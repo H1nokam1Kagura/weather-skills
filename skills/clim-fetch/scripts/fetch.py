@@ -192,9 +192,20 @@ def _roll_climatology(
     return out
 
 
+def _doy_1904(times) -> np.ndarray:
+    """Day-of-year of the same month/day in the 1904 leap-year cycle.
+
+    Not the date's own day-of-year: in a non-leap year Mar 1 is day 60, which in
+    1904 is Feb 29, so every date from March on would take the previous day's row.
+    """
+    times = pd.DatetimeIndex(times)
+    same_day = pd.to_datetime({"year": 1904, "month": times.month, "day": times.day})
+    return same_day.dt.dayofyear.to_numpy()
+
+
 def _expand_climatology(clim: xr.Dataset, start, end) -> xr.Dataset:
     """Broadcast day-of-year climatology onto every day in [start, end]."""
-    doy = clim["time"].dt.dayofyear.values
+    doy = _doy_1904(clim["time"].values)
     if sorted(doy.tolist()) != list(range(1, 367)):
         raise DataError(
             "expected a full 1904 leap-year climatology (day_of_year 1..366 "
@@ -205,7 +216,7 @@ def _expand_climatology(clim: xr.Dataset, start, end) -> xr.Dataset:
     clim = clim.drop_vars("time")
 
     target_dates = pd.date_range(start, end, freq="D")
-    target_doy = xr.DataArray(target_dates.dayofyear, dims="time", coords={"time": target_dates})
+    target_doy = xr.DataArray(_doy_1904(target_dates), dims="time", coords={"time": target_dates})
     expanded = clim.sel(day_of_year=target_doy)
     return expanded.drop_vars("day_of_year")
 
