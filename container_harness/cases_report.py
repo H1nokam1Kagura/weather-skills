@@ -99,6 +99,9 @@ def classify(row, art):
     if status == "HARNESS_ERROR":
         out["harness_error_source"] = score.get("harness_error_source") or "unspecified"
         out["error"] = score.get("record_error") or score.get("error")
+        for key in ("root_error_type", "root_error"):
+            if score.get(key) is not None:
+                out[key] = score[key]
     scored = score.get("scored") or {}
     if status == "EXECUTED":
         out["dimensions"] = scored.get("dimensions")
@@ -109,6 +112,26 @@ def classify(row, art):
         out["demoted"] = score["demoted"]
     out["scored"] = scored
     return out
+
+
+def _cell(text, limit=300):
+    """One markdown table cell: no pipe or newline breaks the row; long text is cut."""
+    text = " ".join(str(text).split()).replace("|", "\\|")
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def harness_error_detail(entry):
+    """RESULTS.md detail for a HARNESS_ERROR: its source, the error text, and the root cause
+    when the controller recorded a different one underneath (run-copy/result.json)."""
+    parts = [entry.get("harness_error_source", "")]
+    if entry.get("error"):
+        parts.append(_cell(entry["error"]))
+    if entry.get("root_error_type"):
+        root = entry["root_error_type"]
+        if entry.get("root_error"):
+            root += ": " + entry["root_error"]
+        parts.append("root " + _cell(root))
+    return " - ".join(p for p in parts if p)
 
 
 def build(admission, cases_dir, run_url=None):
@@ -236,7 +259,7 @@ def markdown(res):
                 + f", terminal={e.get('terminal')}"
             )
         elif e["status"] == "HARNESS_ERROR":
-            detail = e.get("harness_error_source", "")
+            detail = harness_error_detail(e)
         else:
             detail = e.get("demoted", "")
         lines.append(

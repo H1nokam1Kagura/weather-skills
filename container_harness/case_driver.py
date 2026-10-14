@@ -490,6 +490,38 @@ def load_json(path):
         return None
 
 
+_ERROR_TYPE = re.compile(r"^([A-Za-z_][\w.]*): ")
+
+
+def runner_error_source(record, record_path):
+    """Where a runner-record HARNESS_ERROR came from, never left unspecified.
+
+    ``harness_error_source`` is the record's own (case_driver) or ``runner:<ExceptionType>``
+    parsed from the frozen runner's "<Type>: <message>" error. The ROOT cause can sit
+    underneath it: an injection hook abort leaves the controller's result.json (copied to
+    run-copy/ beside the record) with terminal_mapping.error_type and its error, while the
+    runner reports only the secondary refusal that followed. Both are recorded.
+    """
+    error = record.get("error")
+    out = {}
+    match = _ERROR_TYPE.match(error) if isinstance(error, str) else None
+    out["harness_error_source"] = record.get("harness_error_source") or (
+        f"runner:{match.group(1)}" if match else "runner"
+    )
+    result = load_json(Path(record_path).parent / "run-copy" / "result.json")
+    if isinstance(result, dict):
+        mapping = (
+            result.get("terminal_mapping")
+            if isinstance(result.get("terminal_mapping"), dict)
+            else {}
+        )
+        if isinstance(mapping.get("error_type"), str):
+            out["root_error_type"] = mapping["error_type"]
+        if isinstance(result.get("error"), str):
+            out["root_error"] = result["error"]
+    return out
+
+
 def score(case_id, record_path, evidence_path, projection_path, out_path):
     result = {
         "schema": "simkit.gha-case-score/1",
@@ -518,6 +550,8 @@ def score(case_id, record_path, evidence_path, projection_path, out_path):
             }
             result["harness_error_source"] = "no_runner_record"
         status = record.get("status")
+        if status == "HARNESS_ERROR" and "harness_error_source" not in result:
+            result.update(runner_error_source(record, record_path))
         if status == "EXECUTED" and not record.get("controller_ran"):
             status = "NOT_EXECUTED"
             result["demoted"] = "frozen runner returned but the controller wrote no checkpoint"

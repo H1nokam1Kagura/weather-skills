@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from tools.workflow import agents, review_evidence, runner
-from tools.workflow.contracts import Refused, digest, expected_plan
+from tools.workflow.contracts import Refused, digest, expected_plan, plan_version_hash
 from tools.workflow.tests.test_workflow import GOAL, request
 
 
@@ -155,7 +155,9 @@ def test_actual_dispatch_captures_original_reviewed_bytes_and_binding(tmp_path, 
     )
     envelope = snapshot["review_evidence"]
     assert envelope["binding_hash"] == c.current_binding()
-    assert envelope["plan_hash"] == digest(expected_plan(GOAL))
+    # The reviewed plan version is the plan plus the claims emitted with it.
+    assert envelope["plan_hash"] == plan_version_hash(expected_plan(GOAL), envelope["plan_claims"])
+    assert envelope["plan_hash"] != digest(expected_plan(GOAL))
     assert envelope["plan_claims"] == actual["payload"]["review_evidence"]["plan_claims"]
     for source in envelope["sources"]:
         if source["source_id"] == review_evidence.DEFINITION_SOURCE_ID:

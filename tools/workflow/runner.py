@@ -42,6 +42,7 @@ from .contracts import (
     keys,
     needs_info,
     plan_failed_fields,
+    plan_version_hash,
     request_goal,
     tag,
     validate_plan,
@@ -128,6 +129,7 @@ TRANSITIONS = {
 # approval is active in, and the re-review cap per plan (UC-05: "if >2 then re-plan").
 APPROVED_STATES = ("REVIEW_APPROVED", "AUTHORIZED")
 MAX_REREVIEWS_PER_PLAN = 2
+CURRENT_CLAIMS = object()  # record_plan_validation: hash with the current plan's claims
 
 
 class ReturnToReview(Refused):
@@ -658,7 +660,7 @@ class Controller:
             "reviewer_session_id": reviewers[-1].get("session_id") if reviewers else None,
             "request_hash": self.request_hash,
             "goal_hash": digest(self.goal),
-            "plan_hash": digest(self.plan),
+            "plan_hash": self.plan_hash(),
             "manifest_hash": self.build_hash,
             "source_hash": self.source_hash,
             "binding_hash": self.binding,
@@ -946,7 +948,12 @@ class Controller:
         try:
             validate_plan(value["plan"], self.goal)
         except Refused:
-            self.record_plan_validation(value["plan"], "repairer", parser_accepted=False)
+            self.record_plan_validation(
+                value["plan"],
+                "repairer",
+                parser_accepted=False,
+                claims=self.candidate_claims(value),
+            )
             raise
         with gated("claim_evidence"):
             if "review_evidence" in self.context:
@@ -964,9 +971,28 @@ class Controller:
         if question is not None:
             self.stop_needs_info("planner", question, "plan_validation", answer, payload)
             return  # D30: an accepted operator answer re-planned
-        with gated("claim_evidence"):
-            self.accept_plan(answer)
+        try:
+            with gated("claim_evidence"):
+                self.accept_plan(answer)
+        except Refused:
+            self.record_refused_plan(answer, "planner")
+            raise
         self.record_plan_version("planner")
+
+    def record_refused_plan(self, value, role):
+        """A candidate plan refused while its envelope was unpacked (review_evidence.unpack_plan
+        runs validate_plan before preflight_plan could record it): record its FAIL validation,
+        once, so plan_validations names the refused plan as the repairer path does. A refusal
+        of anything but the plan itself (envelope shape, claims) is not a plan validation."""
+        plan = value.get("plan") if isinstance(value, dict) else None
+        if "review_evidence" not in self.context or plan is None:
+            return
+        try:
+            validate_plan(plan, self.goal)
+        except Refused:
+            self.record_plan_validation(
+                plan, role, parser_accepted=False, claims=self.candidate_claims(value)
+            )
 
     def stop_needs_info(self, role, question, gate, answer, planner_payload=None):
         """D9 CP-B3: an explicit NEEDS_INFO stop; no further role or process is started.
@@ -1029,10 +1055,25 @@ class Controller:
     def plan_source(self, role):
         return {"role": role, "occurrence": sum(r.get("role") == role for r in self.roles.receipts)}
 
+    def plan_claims(self):
+        """The claims envelope bound to the current plan (None without review evidence)."""
+        evidence = self.context.get("review_evidence")
+        return evidence.get("plan_claims") if evidence is not None else None
+
+    def plan_hash(self):
+        """The current plan version's hash: the plan plus its claims (plan_version_hash)."""
+        return plan_version_hash(self.plan, self.plan_claims())
+
+    def candidate_claims(self, value):
+        """The claims a candidate planner/repairer envelope carries, as accept_plan binds them."""
+        if "review_evidence" not in self.context or not isinstance(value, dict):
+            return None
+        return value.get("plan_claims", value.get("claims"))
+
     def record_plan_version(self, role):
         self.context["plan_source"] = self.plan_source(role)
         self.context.setdefault("plan_versions", []).append(
-            {"plan_hash": digest(self.plan), **self.context["plan_source"]}
+            {"plan_hash": self.plan_hash(), **self.context["plan_source"]}
         )
         self.checkpoint()
 
@@ -1055,12 +1096,18 @@ class Controller:
             argv[step_id if isinstance(step_id, str) else f"#{index}"] = tokens
         return argv
 
-    def record_plan_validation(self, plan, role, parser_accepted, failed_fields=None):
+    def record_plan_validation(
+        self, plan, role, parser_accepted, failed_fields=None, claims=CURRENT_CLAIMS
+    ):
+        """One plan_validations record and its dispatch event. ``claims`` defaults to the current
+        plan's claims; a candidate that was never accepted passes the claims it carried."""
         failed = plan_failed_fields(plan, self.goal) if failed_fields is None else failed_fields
         if not parser_accepted and not failed:
             failed = ["plan.steps.argv"]
+        if claims is CURRENT_CLAIMS:
+            claims = self.plan_claims()
         try:
-            plan_hash = digest(plan)
+            plan_hash = plan_version_hash(plan, claims)
         except (TypeError, ValueError):
             plan_hash = None
         record = {
@@ -1176,8 +1223,8 @@ class Controller:
                     gate="gate_evidence",
                     reason="artifact_identity_mismatch",
                 )
-        if self.context["active_approval"]["plan_hash"] != digest(self.plan):
-            changes.append({"object": "plan", "to_hash": digest(self.plan)})
+        if self.context["active_approval"]["plan_hash"] != self.plan_hash():
+            changes.append({"object": "plan", "to_hash": self.plan_hash()})
         if changes:
             raise ReturnToReview(
                 "approved binding changed: " + ", ".join(c["object"] for c in changes), changes
@@ -1219,7 +1266,7 @@ class Controller:
         # A request change was recorded where it was detected, just before the others.
         changed = self.context["material_changes"][-len(change.changes) :]
         indexes = [r["index"] for r in changed]
-        plan_hash = digest(self.plan)
+        plan_hash = self.plan_hash()
         # Re-review wait boundary: an accepted attributed operator replan (operator channel,
         # when this controller has one) returns to planning instead; a new plan starts its
         # own re-reviews (UC-05). Same repair and resume budgets either way.
@@ -1343,7 +1390,7 @@ class Controller:
         """
         evidence = self.context["review_evidence"]
         records = evidence["claim_checks"]
-        plan_hash = digest(self.plan)
+        plan_hash = self.plan_hash()
         if records and evidence.get("claim_check_binding") == self.binding:
             record = records[-1]
             if record["decision"] == "ROUTE_TO_REPAIR" or (

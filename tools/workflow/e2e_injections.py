@@ -14,7 +14,7 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
-from . import write_boundary
+from . import claim_gates, write_boundary
 from .catalog import RUNTIME_MANIFEST, tree_hash
 from .contracts import Refused, digest
 from .operator_ledger import append_record, read_record_ids
@@ -23,6 +23,24 @@ from .persistence import read_checkpoint
 
 class UnsupportedInjection(RuntimeError):
     """The declared stimulus cannot faithfully reach this implementation."""
+
+
+# HARNESS_SOURCE_HASH:<source id>; a source id may hold dots (definition.agrhymet-sos-rolling).
+SOURCE_SYMBOL = re.compile(r"HARNESS_SOURCE_HASH:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*")
+
+
+def bound_source_hash(symbol, controller):
+    """Resolve a HARNESS_SOURCE_HASH symbol against the sources the controller bound
+    (claim_gates.resolve_source_symbol): the review sources once bound, else the bound
+    reference definition. A symbol naming no single bound source cannot be delivered."""
+    evidence = (getattr(controller, "context", None) or {}).get("review_evidence") or {}
+    sources = evidence.get("sources")
+    if not sources and isinstance(evidence.get("definition_source"), dict):
+        sources = [evidence["definition_source"]]
+    try:
+        return claim_gates.resolve_source_symbol(symbol, sources or [])
+    except Refused as exc:
+        raise UnsupportedInjection(f"unresolved trusted symbol: {symbol} ({exc})") from exc
 
 
 class InjectedInterruption(RuntimeError):
@@ -298,6 +316,9 @@ class InjectionHooks:
             return [self.resolve(v, controller) for v in value]
         if not isinstance(value, str):
             return value
+        for token in SOURCE_SYMBOL.findall(value):
+            if token not in symbols:
+                symbols[token] = bound_source_hash(token, controller)
         for token in sorted(symbols, key=len, reverse=True):
             value = value.replace(token, str(symbols[token]))
         if re.search(r"HARNESS_[A-Z_]+(?::[A-Za-z0-9_-]+)?", value):

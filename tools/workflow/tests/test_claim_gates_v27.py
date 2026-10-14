@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from tools.workflow import agents, claim_gates, review_evidence, runner
-from tools.workflow.contracts import Refused, expected_plan
+from tools.workflow.contracts import Refused, digest, expected_plan, plan_version_hash
 from tools.workflow.evaluation import FixtureRoles
 from tools.workflow.tests.test_workflow import GOAL, request
 
@@ -422,6 +422,80 @@ def test_non_verbatim_quote_routes_to_repair_without_checker_or_reviewer(tmp_pat
         "C-WINDOW"
         in [call for call in stub.calls if call["role"] == "repairer"][0]["payload"]["failure"]
     )
+
+
+def test_claims_only_repair_is_a_new_plan_version_everywhere(tmp_path, monkeypatch):
+    """E13-P1-INJ: a repair that restates only the claims is a new plan version. Its hash
+    (plan + claims) differs from v1 in plan_versions, plan_validations, claim_checks, the
+    checker payload, the review envelope and the active approval, so v1 and v2 never collide."""
+
+    def t19(claims):
+        claims[0]["citations"][0]["quote"] = FROZEN_NON_VERBATIM_QUOTES[0]
+
+    stub = Stub(planner=patched_planner(t19))
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    planned = [call for call in stub.calls if call["role"] == "planner"]
+    assert len(planned) == 1
+    v1_claims = reference_claims()
+    t19(v1_claims)
+    v1 = plan_version_hash(expected_plan(GOAL), v1_claims)
+    v2 = plan_version_hash(expected_plan(GOAL), reference_claims())
+    assert v1 != v2 and digest(expected_plan(GOAL)) not in (v1, v2)
+    context = c.context
+    assert [v["plan_hash"] for v in context["plan_versions"]] == [v1, v2]
+    assert [v["source"]["role"] for v in context["plan_validations"]] == ["planner", "repairer"]
+    assert [v["plan_hash"] for v in context["plan_validations"]] == [v1, v2]
+    first, second = records(c)
+    assert (first["plan_hash"], second["plan_hash"]) == (v1, v2)
+    (checked,) = [call for call in stub.calls if call["role"] == "evidence_checker"]
+    assert checked["payload"]["plan_hash"] == v2
+    (reviewed,) = [call for call in stub.calls if call["role"] == "reviewer"]
+    assert reviewed["payload"]["review_evidence"]["plan_hash"] == v2
+    assert c.plan_hash() == v2 == context["active_approval"]["plan_hash"]
+    # A claims-only change keeps the steps: the review binding still covers the claims.
+    assert c.current_binding() == c.binding
+
+
+def test_refused_planner_plan_is_recorded_once_and_names_the_argument(tmp_path, monkeypatch):
+    """E04-P1-INJ: a planner plan refused while its envelope is unpacked still leaves exactly
+    one FAIL plan validation, naming the offending argument; no repair, checker or reviewer."""
+
+    def planner(payload, n):
+        value = default_planner(payload, n)
+        value["plan"]["steps"][0]["args"]["output_path"] = "../shared_outputs/onset.nc"
+        return value
+
+    stub = Stub(planner=planner)
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(Refused) as caught:
+        c._run()
+    assert caught.value.gate == "plan_validation"
+    (record,) = c.context["plan_validations"]
+    assert record["verdict"] == "FAIL" and record["parser_accepted"] is False
+    assert record["failed_fields"] == ["plan.steps[0].args.output_path"]
+    assert record["source"] == {"role": "planner", "occurrence": 1}
+    injected = planner({}, 1)
+    assert record["plan_hash"] == plan_version_hash(injected["plan"], injected["claims"])
+    assert "plan_versions" not in c.context and c.plan is None
+    assert c.state == "GOAL_CHECKED"
+    assert [call["role"] for call in stub.calls].count("planner") == 1
+    assert not {"repairer", "evidence_checker", "reviewer"} & {r["role"] for r in stub.calls}
+
+
+def test_refused_planner_envelope_is_not_a_plan_validation(tmp_path, monkeypatch):
+    """A refusal of the envelope or claims (not the plan) records no plan validation."""
+
+    def planner(payload, n):
+        value = default_planner(payload, n)
+        value["unexpected"] = True
+        return value
+
+    c = make_controller(tmp_path, monkeypatch, Stub(planner=planner))
+    with pytest.raises(Refused, match="unexpected or missing fields"):
+        c._run()
+    assert c.context.get("plan_validations", []) == []
 
 
 def test_non_verbatim_quote_with_no_repair_budget_never_reaches_reviewer(tmp_path, monkeypatch):

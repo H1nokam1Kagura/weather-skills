@@ -128,6 +128,21 @@ def test_ledger_created_by_run_is_observed_empty(tmp_path, monkeypatch):
     assert read_checkpoint(c.root)["context"]["operator_actions"] == []
 
 
+def test_open_channel_observes_zero_transition_requests(tmp_path, monkeypatch):
+    """E01-P1-CTL: with the channel open, a run that received no request emits [] (observed),
+    never an absent stream; without a channel nothing is fabricated."""
+    c = make(tmp_path, monkeypatch)
+    assert c.context["transition_requests"] == []
+    assert c.run()["terminal"]["outcome"] == "RELEASED"
+    assert read_checkpoint(c.root)["context"]["transition_requests"] == []
+    record = c.request_transition({"from_state": c.state, "to_state": "CAPTURED"})
+    assert record["sequence"] == 1 and c.context["transition_requests"] == [record]
+    (tmp_path / "bare").mkdir()
+    bare = make(tmp_path / "bare", monkeypatch, ledger=False)
+    assert bare.run()["terminal"]["outcome"] == "RELEASED"
+    assert "transition_requests" not in read_checkpoint(bare.root)["context"]
+
+
 def test_preexisting_ledger_is_refused(tmp_path, monkeypatch):
     (tmp_path / "operator-ledger.jsonl").write_text("{}\n")
     with pytest.raises(Refused, match="created by this run") as caught:

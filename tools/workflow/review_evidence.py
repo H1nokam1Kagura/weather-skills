@@ -7,7 +7,7 @@ identity and verbatim checks that refuse, never a recorded gate verdict.
 import hashlib
 import json
 
-from .contracts import Refused, digest, keys, validate_plan
+from .contracts import Refused, digest, keys, plan_version_hash, validate_plan
 
 SCHEMA = "workflow.review-envelope/1"
 DEFINITION_SOURCE_ID = "definition.agrhymet-sos-rolling"
@@ -140,7 +140,8 @@ def envelope(controller):
         "schema": SCHEMA,
         "request_hash": controller.request_hash,
         "goal_hash": digest(controller.goal),
-        "plan_hash": digest(controller.plan),
+        # The plan version: the plan plus the claims emitted with it (plan_version_hash).
+        "plan_hash": plan_version_hash(controller.plan, evidence["plan_claims"]),
         "manifest_hash": controller.build_hash,
         "source_hash": controller.source_hash,
         "binding_hash": controller.binding,
