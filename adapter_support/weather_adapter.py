@@ -26,6 +26,9 @@ SOURCE_HASH_ALGORITHM = "tools.workflow.catalog.tree_hash"
 REPORT_HASH_ALGORITHM = "tools.workflow.review_evidence.text_hash"
 SUPPORTED_REPAIR_LIMITS = (0, 1)
 PRODUCERS_FILE = Path(__file__).with_name("CAPABILITY-PRODUCERS.json")
+# run_case's in-process harness inputs, persisted for the post-trace re-projection.
+PROJECTION_INPUTS_SCHEMA = "weather-adapter.evidence-projection-inputs/1"
+PROJECTION_INPUTS_FILE = "evidence-projection-inputs.json"
 # CAP-LEDGER-SEED quote rule (harness-authored, flagged for review): every non-null goal value
 # is attributed to the whole scenario message; a null value is attributed to it only for a
 # field the scenario states as a prohibition, else seeded explicitly unattributed (CR-02).
@@ -148,16 +151,43 @@ class WeatherAdapter(Adapter):
         }
 
     def observe_harness(self, run_dir, harness=None):
-        """CAP-HARNESS-OBS (partial): observed launch checks only; whole-tree fields MISSING."""
+        """CAP-HARNESS-OBS: the controller's launch checks plus the whole-tree fields the
+        container harness observed (``harness["observations_path"]``): max_concurrent_children,
+        shell_launches, data_fetch_attempts (trace) and min_free_ram_while_running_gib (harness
+        RAM sampler). A field not observed is listed in ``missing`` with its reason, never 0."""
         projection = self.capture_evidence(run_dir, harness)
-        return {
-            "launch_checks": projection["evidence"]["budget_ledger"]["launch_checks"],
-            "missing": [m for m in projection["missing"] if m["capability"] == "CAP-HARNESS-OBS"],
-        }
+        observations = projection["evidence"]["harness_observations"]
+        out = {"launch_checks": projection["evidence"]["budget_ledger"]["launch_checks"]}
+        for key in (
+            "max_concurrent_children",
+            "shell_launches",
+            "data_fetch_attempts",
+            "min_free_ram_while_running_gib",
+        ):
+            if key in observations:
+                out[key] = observations[key]
+        out["missing"] = [m for m in projection["missing"] if m["capability"] == "CAP-HARNESS-OBS"]
+        return out
+
+    def assert_exhaustive_write_capture(self, run_dir, harness=None):
+        """CAP-EXHAUSTIVE-WRITES: {status EXHAUSTIVE, created_paths, ...} only when the container
+        harness trace is complete (tracer_status OK, no trace-derived field missing) and every
+        present artifact is among the created paths; else {status MISSING, reason} with the
+        harness's reason. This is what licenses empty_is_exhaustive (EVIDENCE_CONTRACT
+        filesystem_snapshot); an empty list is never exhaustive by itself (D4)."""
+        projection = self.capture_evidence(run_dir, harness)
+        status = next(n["write_capture"] for n in projection["notes"] if "write_capture" in n)
+        if status["status"] == "EXHAUSTIVE":
+            status = {
+                **status,
+                "created_paths": projection["evidence"]["filesystem_snapshot"]["created_paths"],
+            }
+        return status
 
     def capture_signal_targets(self, run_dir, harness=None):
-        """CAP-SIGNAL-CAPTURE (partial): signal_stop records, or the container harness trace
-        when ``harness["observations_path"]`` is supplied; absence is never []."""
+        """CAP-SIGNAL-CAPTURE: the container harness trace when ``harness["observations_path"]``
+        is supplied (checked against the controller's own launches and signal_stop records),
+        else native signal_stop records; absence is never []."""
         projection = self.capture_evidence(run_dir, harness)
         evidence = projection["evidence"]
         if "signalled_pids" not in evidence["controller_trace"]:
@@ -263,7 +293,8 @@ class WeatherAdapter(Adapter):
 
         ``profile`` is the harness mapping: profile_document, source_ledger, case_root,
         source, generator_provenance, presented_fetch_version, definition_source, repo,
-        roles_factory(run_dir), processes_factory(run_dir), input_supplement.
+        roles_factory(run_dir), processes_factory(run_dir), input_supplement, and optionally
+        projection_inputs_channel (see persist_projection_inputs).
         """
         if not self.enable_run_case:
             raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
@@ -307,16 +338,20 @@ class WeatherAdapter(Adapter):
         evidence_projection.tag_outputs(run_dir, harness_dir, artifacts)
         provenance_record = prepared["manifest"]["generator_provenance"]
         markers = [provenance_record["generator"], provenance_record["generator_sha256"]]
-        projection = self.capture_evidence(
-            run_dir,
-            {
-                "launch_observations": observer.records,
-                "processes_root": getattr(processes, "root", None),
-                "source_pre": prepared["source_pre"]["value"],
-                "authorized_goal": variant["goal"],
-                "run_provenance": self.tag_run_provenance(run_dir, harness_dir, markers),
-            },
+        processes_root = getattr(processes, "root", None)
+        harness_inputs = {
+            "launch_observations": observer.records,
+            "processes_root": None if processes_root is None else str(processes_root),
+            "source_pre": prepared["source_pre"]["value"],
+            "authorized_goal": variant["goal"],
+            "run_provenance": self.tag_run_provenance(run_dir, harness_dir, markers),
+        }
+        # Persisted before projecting, so a post-trace re-projection has them even when the
+        # in-process projection refuses.
+        self.persist_projection_inputs(
+            case, run_dir, harness_dir, harness_inputs, profile.get("projection_inputs_channel")
         )
+        projection = self.capture_evidence(run_dir, harness_inputs)
         projection["harness"] = {
             "case_id": case["id"],
             "input_supplement": profile.get("input_supplement"),
@@ -325,6 +360,31 @@ class WeatherAdapter(Adapter):
         }
         atomic_json(harness_dir / "evidence-projection.json", projection)
         return projection["evidence"]
+
+    def persist_projection_inputs(self, case, run_dir, harness_dir, inputs, channel=None):
+        """The in-process harness inputs of run_case, for the post-trace re-projection
+        (container_harness/project_in_container.py --inputs).
+
+        ``channel`` (profile["projection_inputs_channel"]): a writable text stream the harness
+        opened outside the traced tree (the container entry shell's fd 4 onto /harness-out).
+        Writing to an inherited descriptor creates no path, so the record does not appear in
+        filesystem_snapshot.created_paths, whose frozen allow-list is HARNESS_RUN_DIR
+        (all_under, every v2.7 case); the harness/ directory is outside it. Without a channel
+        (in-process route) the record is written atomically to
+        harness/evidence-projection-inputs.json.
+        """
+        record = {
+            "schema": PROJECTION_INPUTS_SCHEMA,
+            "case_id": case["id"],
+            "run_dir": str(run_dir),
+            **inputs,
+        }
+        if channel is not None:
+            channel.write(json.dumps(record, allow_nan=False))
+            channel.flush()
+            return "channel"
+        atomic_json(Path(harness_dir) / PROJECTION_INPUTS_FILE, record)
+        return str(Path(harness_dir) / PROJECTION_INPUTS_FILE)
 
     def diagnostic_capability_status(self):
         return {

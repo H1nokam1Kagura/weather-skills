@@ -15,7 +15,9 @@ Rules (WAVE3-BRIEF rule 1, owner ruling D4):
 * Write and whole-tree signal evidence come only from the container harness (OWNER-RULINGS
   container_route_ruling_2026-10-13): its trace analyzer writes a harness-observations file
   (``simkit.container-harness-evidence/1``) carrying ``filesystem_snapshot.created_paths``,
-  ``process_tree``, ``controller_trace.signalled_pids`` and ``symbols.HARNESS_CONTROLLER_PID``.
+  ``process_tree``, ``controller_trace.signalled_pids``, ``symbols.HARNESS_CONTROLLER_PID``,
+  the whole-tree counts (``max_concurrent_children``, ``shell_launches``,
+  ``data_fetch_attempts``) and the harness RAM sampler's ``min_free_ram_while_running_gib``.
   It is merged when supplied (``harness["observations_path"]``) and checked against the native
   records; without it those fields stay MISSING. Carrying the values does not declare
   CAP-EXHAUSTIVE-WRITES or CAP-SIGNAL-CAPTURE: that needs a reviewed D4 record.
@@ -27,6 +29,7 @@ it is never partially projected.
 import copy
 import hashlib
 import json
+import math
 import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -84,7 +87,12 @@ HARNESS_OBSERVED_FIELDS = {
     "symbols.HARNESS_CONTROLLER_PID": "CAP-SYMBOLS",
     "harness_observations.max_concurrent_children": "CAP-HARNESS-OBS",
     "harness_observations.shell_launches": "CAP-HARNESS-OBS",
+    "harness_observations.data_fetch_attempts": "CAP-HARNESS-OBS",
+    "harness_observations.min_free_ram_while_running_gib": "CAP-HARNESS-OBS",
 }
+# Harness fields that do not come from the trace (analyze_trace.RAM_FIELD: the harness RAM
+# sampler). A gap in one says nothing about the completeness of the trace.
+HARNESS_UNTRACED_FIELDS = ("harness_observations.min_free_ram_while_running_gib",)
 DISPATCH_EVENT = re.compile(r"dispatch-event-(\d{6})\.json")
 ROLE_FILE = re.compile(r"role-(\d{3})-([a-z_]+)\.json")
 
@@ -182,9 +190,18 @@ def load_harness_observations(path):
         "symbols.HARNESS_CONTROLLER_PID",
         "harness_observations.max_concurrent_children",
         "harness_observations.shell_launches",
+        "harness_observations.data_fetch_attempts",
     ):
         if field in fields and not _is_count(fields[field]):
             raise EvidenceMappingError(f"{field} must be a non-negative integer")
+    ram = fields.get("harness_observations.min_free_ram_while_running_gib")
+    if ram is not None and not (
+        isinstance(ram, (int, float))
+        and not isinstance(ram, bool)
+        and math.isfinite(ram)
+        and ram >= 0
+    ):
+        raise EvidenceMappingError("min_free_ram_while_running_gib must be a finite GiB reading")
     observations = record.get("harness_observations") or {}
     return {
         "fields": fields,
@@ -1064,24 +1081,23 @@ class Projection:
         return tree, controller
 
     def harness_observations(self):
+        """CAP-HARNESS-OBS whole-tree fields: only from the container harness. The in-process
+        route has no whole-tree observer; the controller's own per-tool RAM samples
+        (process_exit min_free_gib) are the system under test's guard readings, sampled only
+        while a tool runs, and are never presented as the harness's running minimum."""
         harness = {}
-        for key in ("max_concurrent_children", "shell_launches"):
-            value = self.observed(
-                f"harness_observations.{key}",
-                "no whole-tree observer (concurrency, shell launches) exists",
-            )
+        for key, fallback in (
+            ("max_concurrent_children", "no whole-tree observer (concurrency) without the trace"),
+            ("shell_launches", "no whole-tree observer (shell launches) without the trace"),
+            ("data_fetch_attempts", "no whole-tree network observer without the trace"),
+            (
+                "min_free_ram_while_running_gib",
+                "no harness RAM sampler outside the container route",
+            ),
+        ):
+            value = self.observed(f"harness_observations.{key}", fallback)
             if value is not _ABSENT:
                 harness[key] = value
-        self.gap(
-            "harness_observations.data_fetch_attempts",
-            "CAP-HARNESS-OBS",
-            "no whole-tree fetch observer exists",
-        )
-        self.gap(
-            "harness_observations.min_free_ram_while_running_gib",
-            "CAP-HARNESS-OBS",
-            "per-process minimum falls back to a post-exit read when no sample was taken",
-        )
         return harness
 
     # ---- symbols (CAP-SYMBOLS)
@@ -1191,8 +1207,9 @@ class Projection:
                         "harness_missing": self.obs["missing"],
                         "tracer_status": self.obs["tracer_status"],
                         "harness_notes": self.obs["harness_notes"],
-                        "declaration": "carried, not declared: CAP-EXHAUSTIVE-WRITES and "
-                        "CAP-SIGNAL-CAPTURE need a reviewed D4 record",
+                        "declaration": "carrying values declares nothing: CAP-EXHAUSTIVE-WRITES, "
+                        "CAP-SIGNAL-CAPTURE and CAP-HARNESS-OBS are declared only by a "
+                        "reviewed D4 record (CAPABILITY-PRODUCERS.json)",
                     }
                 }
             )
@@ -1303,7 +1320,71 @@ def project_run(run_dir, harness=None):
     native = NativeRun(run_dir, harness.get("processes_root"))
     path = harness.get("observations_path")
     observations = load_harness_observations(path) if path is not None else None
-    return Projection(native, harness, observations).run()
+    projection = Projection(native, harness, observations).run()
+    projection["notes"].append({"write_capture": write_capture_status(projection)})
+    return projection
+
+
+def write_capture_status(projection):
+    """CAP-EXHAUSTIVE-WRITES: is ``filesystem_snapshot.created_paths`` exhaustive?
+
+    EXHAUSTIVE only when the container harness observations were merged, the tracer status is
+    OK, the harness reports no trace-derived field missing (any such gap is doubt on the trace;
+    the untraced RAM sampler is not), created_paths was carried, and every present artifact's
+    path is among the created paths (frozen score.py's own cross-check: a miss means the
+    projection is outside the trace's path namespace or the capture has a gap). Otherwise
+    MISSING with the harness's reason. An empty list is exhaustive only through this check,
+    never by being empty (D4).
+    """
+    note = next(
+        (
+            n["harness_observations_input"]
+            for n in projection["notes"]
+            if "harness_observations_input" in n
+        ),
+        None,
+    )
+    if note is None:
+        return {
+            "status": "MISSING",
+            "reason": "no container harness observations supplied "
+            "(container_route_ruling_2026-10-13)",
+        }
+    tracer = note.get("tracer_status")
+    tracer_status = tracer.get("status") if isinstance(tracer, dict) else None
+    if tracer_status != "OK":
+        return {"status": "MISSING", "reason": f"container harness tracer_status {tracer_status}"}
+    gaps = {
+        field: reason
+        for field, reason in note["harness_missing"].items()
+        if field not in HARNESS_UNTRACED_FIELDS
+    }
+    if gaps:
+        field = (
+            "filesystem_snapshot.created_paths"
+            if "filesystem_snapshot.created_paths" in gaps
+            else sorted(gaps)[0]
+        )
+        return {"status": "MISSING", "reason": f"container harness: {field}: {gaps[field]}"}
+    evidence = projection["evidence"]
+    created = evidence["filesystem_snapshot"].get("created_paths")
+    if not isinstance(created, list):
+        return {"status": "MISSING", "reason": "container harness did not carry created_paths"}
+    recorded = set(created)
+    for name, artifact in sorted((evidence.get("artifacts") or {}).items()):
+        if artifact.get("present") is True and artifact.get("path") not in recorded:
+            return {
+                "status": "MISSING",
+                "reason": f"artifact {name} is present at {artifact.get('path')} but not in "
+                "created_paths (projection outside the trace's path namespace, or a capture gap)",
+            }
+    return {
+        "status": "EXHAUSTIVE",
+        "licenses": "empty_is_exhaustive",
+        "created_paths_count": len(created),
+        "tracer_status": tracer_status,
+        "observations_sha256": note["sha256"],
+    }
 
 
 class HarnessLaunchObserver:

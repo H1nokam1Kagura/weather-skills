@@ -12,7 +12,8 @@ usage (inside the harness image, cwd /opt/ctl):
         THE traced controller process: the frozen runner dispatches the one case to
         WeatherAdapter(enable_run_case=True).run_case, which re-checks admission, stages the
         owned fixture, runs the real Controller and projects what it recorded. The runner record
-        goes to fd 3 (opened by the root entry shell onto /harness-out; never a traced path).
+        goes to fd 3 and run_case's projection inputs to fd 4 (both opened by the root entry
+        shell onto /harness-out; never a traced path, so neither is a created path).
     python -m container_harness.case_driver score CASE_ID RECORD EVIDENCE PROJECTION OUT
         Untraced, after the traced tree exited, same container and path namespace: the pinned
         frozen guarded scorer over the record whose evidence is the in-container projection
@@ -273,6 +274,20 @@ def _record_channel():
         return sys.stdout
 
 
+def _inputs_channel():
+    """fd 4, opened by the root entry shell onto /harness-out/projection_inputs.json (never a
+    traced path): run_case writes its in-process harness inputs there for the post-trace
+    projection. Used only when fd 4 is verifiably that file; otherwise None (run_case then
+    writes harness/evidence-projection-inputs.json, the in-process route)."""
+    try:
+        target = os.readlink("/proc/self/fd/4")
+    except OSError:
+        return None
+    if not target.endswith("/projection_inputs.json"):
+        return None
+    return os.fdopen(4, "w", encoding="utf-8")
+
+
 def _relay_roles():
     from tools.workflow.relay_roles import RelayRoles
 
@@ -282,6 +297,7 @@ def _relay_roles():
 def run(case_id, work):
     work = Path(work)
     out = _record_channel()
+    inputs_channel = _inputs_channel()
     record = {"case_id": case_id, "status": "HARNESS_ERROR", "evidence": None}
     try:
         root, _ = frozen_root()
@@ -338,6 +354,9 @@ def run(case_id, work):
                 "supplement_id": spec["supplement_id"],
                 "generator_sha256": pins["fixture_generator"]["sha256"],
             },
+            # run_case's harness inputs leave through fd 4, not harness/ (outside the frozen
+            # created_paths allow-list HARNESS_RUN_DIR).
+            "projection_inputs_channel": inputs_channel,
         }
         (record,) = frozen_run([case], adapter, profile, only={case_id})
     except Exception as exc:  # noqa: BLE001 - recorded as the driver's own HARNESS_ERROR
