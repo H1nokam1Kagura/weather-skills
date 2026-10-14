@@ -12,7 +12,7 @@ from pathlib import Path
 
 from simkit.adapter import Adapter
 
-from adapter_support import evidence_projection
+from adapter_support import evidence_projection, role_substitution
 from adapter_support.fixture_staging import stage_fixture
 from tools.workflow import review_evidence
 from tools.workflow.catalog import safe_path, tree_hash
@@ -316,6 +316,9 @@ class WeatherAdapter(Adapter):
         if missing:
             raise AdapterRefusal(f"case requires undeclared capabilities: {missing}")
         variant = self.select_profile(case, profile["profile_document"])
+        # The schedule is mapped or refused here, before any side effect (CAP-ROLE-SUBSTITUTE).
+        role_substitution.refuse_unsupported_schedule(case)
+        schedule_plan = self.substitute_role_output(case, variant["goal"])
         max_repairs = self.configure_repair(case)
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
         channel = profile.get("projection_inputs_channel")
@@ -335,15 +338,20 @@ class WeatherAdapter(Adapter):
         harness_files = {"seeded-ledger.json": seeded}
         if channel is None:
             atomic_json(harness_dir / "seeded-ledger.json", seeded)
-        observer = evidence_projection.HarnessLaunchObserver()
         processes = profile["processes_factory"](run_dir)
+        roles = profile["roles_factory"](run_dir)
+        # The case schedule runs chained behind the launch observer, whose records stay intact.
+        schedule_hooks = role_substitution.case_hooks(schedule_plan, roles, prepared["case_root"])
+        observer = evidence_projection.HarnessLaunchObserver(chained=schedule_hooks)
+        if schedule_hooks is not None:
+            schedule_hooks.prepare(seeded["request"], prepared["source"])
         controller = Controller(
             profile["repo"],
             seeded["request"],
             prepared["source"],
             run_dir,
             processes,
-            profile["roles_factory"](run_dir),
+            roles,
             max_repairs=max_repairs,
             hooks=observer,
             review_evidence_mode=True,
@@ -376,6 +384,8 @@ class WeatherAdapter(Adapter):
             "seeded_ledger": seeded["derivation"],
             "fixture_staged": "pre-staged" if profile.get("prepared_fixture") else "run_case",
         }
+        if schedule_hooks is not None:
+            summary["case_schedule"] = schedule_hooks.report()
         if channel is None:
             # Persisted before projecting, so a post-trace re-projection has them even when
             # the in-process projection refuses.
@@ -470,6 +480,20 @@ class WeatherAdapter(Adapter):
             return "channel"
         atomic_json(Path(harness_dir) / PROJECTION_INPUTS_FILE, record)
         return str(Path(harness_dir) / PROJECTION_INPUTS_FILE)
+
+    def substitute_role_output(self, case, goal=None):
+        """CAP-ROLE-SUBSTITUTE: the case's after_role role-output entries mapped onto the
+        native role outputs (with a dry run against the substituted baseline when ``goal`` is
+        given), or AdapterRefusal. Delivery is CaseScheduleHooks at the controller's own
+        after_role emit; the substituted invocation keeps its receipt and session ID."""
+        return role_substitution.substitution_plan(case, goal)
+
+    def substituted_roles_factory(self, case, goal, run_dir):
+        """Driver hook (container_harness/case_driver.py): the Controller roles for a case
+        whose agent_roles are all substituted. ``run_dir`` is the controller run directory;
+        the double writes nothing there (the controller records every receipt itself)."""
+        self.substitute_role_output(case, goal)
+        return role_substitution.SubstitutedRoles(case, goal)
 
     def diagnostic_capability_status(self):
         return {

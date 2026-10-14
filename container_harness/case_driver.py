@@ -340,6 +340,78 @@ def _relay_roles():
     return RelayRoles.from_env()
 
 
+DEFINITION_PATH = Path(__file__).resolve().parent / "pinned" / "definitions"
+DEFINITION_PATH = DEFINITION_PATH / "agrhymet-sos-rolling.txt"
+
+
+def reference_definition(path=DEFINITION_PATH):
+    """Ruling D1: the controller binds the reference definition text under
+    'definition:agrhymet-sos-rolling'. The text is a pinned, byte-exact input (LF-only by
+    .gitattributes); its hash is checked against the frozen v2.7 source hash here, and a
+    mismatch refuses the run instead of binding a different text."""
+    from adapter_support.role_substitution import FROZEN_DEFINITION_SOURCE_HASH
+    from tools.workflow.review_evidence import text_hash
+
+    path = Path(path)
+    observed = text_hash(path.read_bytes().decode("utf-8"))
+    if observed != FROZEN_DEFINITION_SOURCE_HASH:
+        raise RuntimeError(
+            f"pinned reference definition {path} hashes to {observed}, "
+            f"not the frozen {FROZEN_DEFINITION_SOURCE_HASH}"
+        )
+    return path
+
+
+def case_profile(
+    case,
+    adapter,
+    document,
+    work,
+    *,
+    spec,
+    pins,
+    version,
+    live,
+    prepared,
+    inputs_channel,
+    processes_factory,
+    definition=DEFINITION_PATH,
+):
+    """The run_case profile the traced ``run`` passes (one builder, also driven by tests)."""
+    work = Path(work)
+    goal = adapter.select_profile(case, document)["goal"]
+    factory = getattr(adapter, SUBST_FACTORY, None)
+    return {
+        "profile_document": document,
+        "source_ledger": document["reference_fixture"]["source_ledger"],
+        "case_root": work / "case",
+        "source": work / "gen" / "fixture-nc" / "precip.nc",
+        "generator_provenance": _generator_provenance(spec, pins),
+        "presented_fetch_version": version,
+        "prepared_fixture": prepared,
+        # D1: the pinned reference definition, hash-verified (a path: Controller binds it via
+        # claim_gates.bind_definition_source, reading bytes).
+        "definition_source": reference_definition(definition),
+        "repo": CTL,
+        "roles_factory": (
+            # Key-free client of the host Kong relay (owner ruling: the key never enters
+            # this container; only SIMKIT_RELAY_URL/TOKEN/RUN_ID/MODEL are present).
+            (lambda run_dir: _relay_roles())
+            if live
+            else (lambda run_dir: factory(case, goal, run_dir))
+        ),
+        # Real memory reader: UC-07 reading is the container VM's figure (owner ruling).
+        "processes_factory": processes_factory,
+        "input_supplement": {
+            "supplement_id": spec["supplement_id"],
+            "generator_sha256": pins["fixture_generator"]["sha256"],
+        },
+        # run_case's harness bookkeeping leaves through fd 4, not harness/ (outside the frozen
+        # created_paths allow-list HARNESS_RUN_DIR).
+        "projection_inputs_channel": inputs_channel,
+    }
+
+
 def run(case_id, work):
     work = Path(work)
     out = _record_channel()
@@ -367,7 +439,6 @@ def run(case_id, work):
             raise RuntimeError(
                 f"{BLOCKED_SUBST}: adapter has no {SUBST_FACTORY}(case, goal, run_dir)"
             )
-        goal = adapter.select_profile(case, document)["goal"]
         prepared_path = work / PREPARED_NAME
         prepared = (
             json.loads(prepared_path.read_text(encoding="utf-8"))
@@ -378,35 +449,19 @@ def run(case_id, work):
             # In the traced container the fixture must be staged before the trace; staging
             # here would put source/ and harness/ in created_paths, outside HARNESS_RUN_DIR.
             raise RuntimeError("no pre-staged fixture (case_driver prepare did not run)")
-        profile = {
-            "profile_document": document,
-            "source_ledger": document["reference_fixture"]["source_ledger"],
-            "case_root": work / "case",
-            "source": work / "gen" / "fixture-nc" / "precip.nc",
-            "generator_provenance": _generator_provenance(spec, pins),
-            "presented_fetch_version": _fetch_version(),
-            "prepared_fixture": prepared,
-            # No reference definition text ships in the controller repo: passed as absent, so
-            # definition-bound review evidence stays MISSING rather than filled.
-            "definition_source": None,
-            "repo": CTL,
-            "roles_factory": (
-                # Key-free client of the host Kong relay (owner ruling: the key never enters
-                # this container; only SIMKIT_RELAY_URL/TOKEN/RUN_ID/MODEL are present).
-                (lambda run_dir: _relay_roles())
-                if live
-                else (lambda run_dir: factory(case, goal, run_dir))
-            ),
-            # Real memory reader: UC-07 reading is the container VM's figure (owner ruling).
-            "processes_factory": lambda run_dir: Processes(Path(run_dir) / "processes"),
-            "input_supplement": {
-                "supplement_id": spec["supplement_id"],
-                "generator_sha256": pins["fixture_generator"]["sha256"],
-            },
-            # run_case's harness inputs leave through fd 4, not harness/ (outside the frozen
-            # created_paths allow-list HARNESS_RUN_DIR).
-            "projection_inputs_channel": inputs_channel,
-        }
+        profile = case_profile(
+            case,
+            adapter,
+            document,
+            work,
+            spec=spec,
+            pins=pins,
+            version=_fetch_version(),
+            live=live,
+            prepared=prepared,
+            inputs_channel=inputs_channel,
+            processes_factory=lambda run_dir: Processes(Path(run_dir) / "processes"),
+        )
         (record,) = frozen_run([case], adapter, profile, only={case_id})
     except Exception as exc:  # noqa: BLE001 - recorded as the driver's own HARNESS_ERROR
         record = {

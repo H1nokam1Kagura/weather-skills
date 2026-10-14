@@ -1,0 +1,3 @@
+# Byte-exact pinned inputs: their sha256 is bound by the controller (ruling D1). Never
+# convert line endings on checkout, or a Windows clone changes the bound hash.
+container_harness/pinned/definitions/** text eol=lf
