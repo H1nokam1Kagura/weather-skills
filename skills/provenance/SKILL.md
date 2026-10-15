@@ -83,7 +83,7 @@ an empty directory. Each step is pinned to its recorded commit:
   `uvx --from git+<repo>@<commit> forecasting-skills <skill> …`. A step with
   no recorded commit runs from the `dev` branch of the default repo, which
   may have moved since.
-- A step from any other repo (e.g. plotting skills, which have no CLI) clones
+- A step from any other repo (which may have no CLI) clones
   that repo once per commit into `./_checkouts` and runs the skill's single
   script with `uv run --script`.
 
@@ -95,7 +95,7 @@ an empty directory. Each step is pinned to its recorded commit:
   join with every branch as an `--input`, in recorded order. `verify` gets
   `--forecast`/`--obs`, `standardize-anomaly` `--input`/`--climatology`, and
   `point-value` `--input`/`--points`. A join may sit anywhere on the path
-  (`difference` then `plot`); nested joins recurse.
+  (a join whose output feeds further steps); nested joins recurse.
 - An older two-input PNG that stores separate tEXt keys reproduces each
   labeled branch, then emits one final plot command.
 - A branch whose head is not a fetcher still emits the `<UPSTREAM>` caveat
@@ -146,15 +146,15 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/provenance.py -i /tmp/forecast.zarr --check
   flags (`--time-dim`). Booleans become a bare flag when true and are
   omitted when false; list values become one repeated flag per element
   (a list of lists — `-v tp t2m` — becomes one flag with several values);
-  object values (a plot `--spec`) are passed as JSON; `None` values are
+  object values (a JSON spec) are passed as JSON; `None` values are
   omitted.
 - **What the record cannot say.** The history keeps argparse dests, not the
   command line, so some steps need hand-editing: a `--no-<flag>`
   (`BooleanOptionalAction`) is recorded as `False` and dropped; path-valued
-  args (`--geojson`, `--reference-grid`, a `--spec` file) keep the path as
+  args (`--geojson`, `--reference-grid`, a spec file) keep the path as
   typed, relative to the original directory; the same file passed twice
-  (`-i x -i x`) is recorded once; and plot `--x`/`--y`/`--layer` and
-  `plot-verify` inputs are emitted as repeated `--input`.
+  (`-i x -i x`) is recorded once; and a skill whose inputs use flags other
+  than `--input` (and is not one of the joins above) gets repeated `--input`.
 - **Fetch-step credentials.** Fetch steps read credentials from the
   environment at run time. The emitted script calls the fetcher but embeds
   no secret value.

@@ -247,7 +247,7 @@ def _command(step: dict, inputs: list, output: str) -> str:
                 # append + nargs="+" (`-v tp t2m`): one flag, several values.
                 parts += [flag] + [shlex.quote(str(v)) for v in item]
             elif isinstance(item, dict):
-                # A structured arg (a plot --spec) goes back as JSON, not a repr.
+                # A structured arg (a JSON spec) goes back as JSON, not a repr.
                 parts += [flag, shlex.quote(json.dumps(item, sort_keys=True))]
             else:
                 parts += [flag, shlex.quote(str(item))]
@@ -266,7 +266,7 @@ def _command(step: dict, inputs: list, output: str) -> str:
 def _emit_graph(chain: list, prefix: str, final_output: str) -> list:
     """Emit one command per step; a join step first reproduces each parent subgraph.
 
-    A join can sit anywhere on the path (``difference`` then ``plot``), so every
+    A join can sit anywhere on the path (its output feeding later steps), so every
     step is checked, and nested joins recurse.
     """
     lines = []
