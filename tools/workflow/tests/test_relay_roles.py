@@ -203,6 +203,8 @@ def success_envelope(payload=PAYLOAD, value=ANSWER, **receipt_changes):
         transport="kong-native-anthropic",
         mode="live",
         relay_id="r-1",
+        transport_encoding=None,  # PAYLOAD repeats nothing: sent plain
+        transport_bytes={},
     )
     receipt.update(receipt_changes)
     receipt.setdefault("response_id", None)
@@ -226,7 +228,11 @@ def test_receipt_fields_match_a_real_kongroles_receipt(tmp_path):
     roles = kong_roles(tmp_path, Process(envelope()))
     roles.ask("verifier", PAYLOAD)
     assert set(roles.receipts[0]) == KONG_RECEIPT_FIELDS
-    assert RECEIPT_FIELDS == KONG_RECEIPT_FIELDS | {"relay_id"}
+    assert RECEIPT_FIELDS == KONG_RECEIPT_FIELDS | {
+        "relay_id",
+        "transport_encoding",
+        "transport_bytes",
+    }
 
 
 def test_role_gates_match_the_runner_call_site_mapping():
@@ -257,7 +263,9 @@ def test_success_end_to_end_returns_kong_receipt_plus_relay_id(tmp_path, relay_h
     assert agent.ask("verifier", PAYLOAD) == ANSWER
     (receipt,) = agent.receipts
     host_receipt = relay.roles.receipts[0]
-    assert {k: v for k, v in receipt.items() if k != "relay_id"} == host_receipt
+    relay_fields = relay_roles.RELAY_RECEIPT_FIELDS
+    assert {k: v for k, v in receipt.items() if k not in relay_fields} == host_receipt
+    assert receipt["transport_encoding"] is None  # PAYLOAD repeats nothing: sent plain
     assert receipt["input_hash"] == digest(PAYLOAD) and receipt["output_hash"] == digest(ANSWER)
     assert agent.sessions == {receipt["session_id"]}
     assert agent.spent == pytest.approx(receipt["cost_usd"]) and receipt["cost_usd"] > 0

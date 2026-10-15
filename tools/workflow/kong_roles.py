@@ -58,6 +58,8 @@ Settings the live relay sets (``relay/kong_relay_host.py``; the defaults here ar
   that. Temperature 0 lowers variance; it does not make a model deterministic.
 - ``session_source="response_id"``: the receipt's ``session_id`` is the provider's response id
   (observed after the call), and a response without one is refused.
+- ``ask(..., model_input=...)``: the relay's model-facing rendering of a deduplicated
+  (``dedup-sha256/1``) request replaces the user message; nothing else changes.
 
 Outcome semantics (mirrors ``Roles``; UNKNOWN never becomes success):
 - ``Refused``: nothing was sent (unknown role, budget, policy, worker failed pre-send), or a
@@ -377,8 +379,15 @@ class KongRoles:
         env.update(self.worker_env)
         return env
 
-    def ask(self, role, payload):
+    def ask(self, role, payload, *, model_input=None):
+        """``model_input``: the live relay's model-facing rendering of a ``dedup-sha256/1``
+        request (``relay/kong_relay_host.py``), sent as the user message instead of
+        ``json.dumps(payload)``. The relay has verified it is a lossless encoding of
+        ``payload``; ``input_hash`` and ``stdin_hash`` stay those of the logical payload text
+        (the controller binds them), and the relay records the model-facing hash and size."""
         self.last_call = {"role": role, "sent": False, "usage": None, "cost_usd": None}
+        if model_input is not None and (not isinstance(model_input, str) or not model_input):
+            raise Refused("model_input must be a non-empty string")
         if role not in PROMPTS or self.budget - self.spent < MIN_HEADROOM_USD:
             raise Refused("role unavailable or aggregate model budget exhausted")
         if not self.kit_python.is_file():
@@ -403,7 +412,7 @@ class KongRoles:
             "max_tokens": max_tokens,
             "temperature": self.temperature,
             "system": prompt,
-            "user": user,
+            "user": user if model_input is None else model_input,
         }
         command = [str(self.kit_python), "-I", "-c", WORKER_SOURCE, str(self.kit_root / "scripts")]
         spent_before = self.spent
@@ -451,6 +460,10 @@ class KongRoles:
             "retry_after": retry_after_seconds(envelope.get("retry_after")),
             "model_requested": model,
         }
+        # What the worker echoed it sent (temperature included), for the relay audit line.
+        self.last_call.update(
+            settings_sent=envelope.get("sent_settings"), sent_keys=envelope.get("sent_keys")
+        )
         if not envelope["sent"]:
             self.last_call["sent"] = False
             self.spent = spent_before  # provably nothing left the worker

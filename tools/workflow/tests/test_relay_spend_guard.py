@@ -338,6 +338,8 @@ def fake_success_relay():
             transport="kong-native-anthropic",
             mode="live",
             relay_id="r-1",
+            transport_encoding=None,  # PAYLOAD repeats nothing: sent plain
+            transport_bytes={},
             **changes,
         )
         data = json.dumps(

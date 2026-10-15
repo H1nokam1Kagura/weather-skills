@@ -10,7 +10,8 @@ name from the environment it read, so tool children started later never inherit 
 
 Same ``ask(role, payload)`` contract and attributes as ``agents.Roles`` / ``kong_roles.KongRoles``
 (``receipts``, ``spent``, ``budget``, ``model``, ``sessions``, ``dispatch_*``, ``processes``).
-Each receipt is exactly the KongRoles receipt produced on the host plus ``relay_id``; its
+Each receipt is exactly the KongRoles receipt produced on the host plus ``relay_id``,
+``transport_encoding`` and ``transport_bytes`` (``RELAY_RECEIPT_FIELDS``); its
 ``session_id`` must be the provider's ``response_id`` (observed, never minted before the call).
 
 Deliberately stdlib + ``contracts`` only, so it can be copied into a container with
@@ -36,8 +37,24 @@ Retries: one ``ask`` is at most one relay request, except the frozen pre-write t
 (CAP-TRANSPORT-RETRY): ``_transport_call`` mirrors ``recovery.transport_call`` (a parity test
 pins it) and retries once only when the exchange wrote no byte (``RelayTransport.serial`` did
 not move) and the controller's ``transport_retry_recorder`` recorded the retry durably.
+
+Transport encoding ``dedup-sha256/1`` (live sub-wave 2, ``live-role-payload-sizes.json``): the
+controller's planner/repairer/reviewer payloads carry the same ~55 KB of skill documentation
+twice (``documentation`` and ``review_evidence(_request).sources``), which puts the request
+body over the cap. The LIVE TRANSPORT deduplicates it losslessly; the controller payload, its
+recorded role input files and ``input_hash`` are untouched. ``dedup_encode`` replaces every
+JSON value (string or subtree) whose serialization is at least ``DEDUP_MIN_BYTES`` and that
+occurs two or more times with ``{"$shared": "<sha256 of its json.dumps text>"}`` and stores it
+once in a top-level ``shared`` table (first-appearance order, entries themselves encoded the
+same way). The body declares ``original_sha256`` (``contracts.digest`` of the payload, the
+receipt ``input_hash``) and ``original_text_sha256`` (sha256 of ``json.dumps(payload)``, which
+also pins key order). The host decodes with ``dedup_decode`` and refuses on any mismatch
+(``reason_code: dedup_mismatch``, nothing forwarded). When nothing repeats, or the payload
+itself holds a ``{"$shared": ...}`` object, encoding is SKIPPED ENTIRELY: the body is exactly
+``{"role", "payload"}`` as before and the receipt says ``transport_encoding: null``.
 """
 
+import hashlib
 import http.client
 import json
 import math
@@ -56,11 +73,22 @@ ENV_URL, ENV_TOKEN, ENV_RUN, ENV_MODEL = (
     "SIMKIT_RELAY_MODEL",
 )
 ASK_PATH, HEALTH_PATH = "/v1/ask", "/v1/health"
-# Request body cap (LIVE-WAVE-BRIEF sub-wave 1: planner/reviewer payloads reach 42-63 KB).
+# Request body cap, applied to the body actually sent (the ENCODED body when dedup applies).
 # Under the host relay's HARD_MAX_BODY (90,000, relay/kong_relay_host.py), which sits under the
 # Kong kit's KNOWN_GOOD_BODY_BYTES (97,600: the largest body observed to pass). The host adds
 # the system prompt, and the kit worker re-checks the full gateway body before sending.
 DEFAULT_MAX_BODY = 88_000
+DEDUP_ENCODING = "dedup-sha256/1"
+DEDUP_MIN_BYTES = 2048  # a value is shared only if its json.dumps text is at least this long
+SHARED_KEY = "$shared"
+PLAIN_KEYS = frozenset({"role", "payload"})
+ENCODED_KEYS = PLAIN_KEYS | {
+    "transport_encoding",
+    "shared",
+    "original_sha256",
+    "original_text_sha256",
+}
+DEDUP_MISMATCH = "dedup_mismatch"  # the host's refusal code when a decode does not verify
 MAX_RESPONSE = 1024 * 1024
 SPEND_CAP_CODE = "relay_spend_cap"  # the relay's spend-guard refusal; maps to gate "budget"
 
@@ -96,7 +124,10 @@ KONG_RECEIPT_FIELDS = frozenset(
         "mode",
     }
 )
-RECEIPT_FIELDS = KONG_RECEIPT_FIELDS | {"relay_id"}
+# The relay adds its id and how the payload travelled: ``transport_encoding`` (null or
+# DEDUP_ENCODING) and ``transport_bytes`` (request body / decoded payload / model-facing sizes).
+RELAY_RECEIPT_FIELDS = frozenset({"relay_id", "transport_encoding", "transport_bytes"})
+RECEIPT_FIELDS = KONG_RECEIPT_FIELDS | RELAY_RECEIPT_FIELDS
 # KongRoles adds ``dispatch`` only to a reviewer receipt whose payload carries review_evidence.
 OPTIONAL_RECEIPT_FIELDS = {"reviewer": frozenset({"dispatch"})}
 
@@ -163,6 +194,135 @@ def classify_fault(status=None, error_type=None, kind=None):
 
 def role_gate(role):
     return ROLE_GATES.get(role, "transition")
+
+
+# ------------------------------------------------------------------ dedup-sha256/1
+
+
+class DedupMismatch(ValueError):
+    """An encoded body that does not decode to exactly the payload it declares."""
+
+
+def _text(value):
+    return json.dumps(value, allow_nan=False)  # the serializer the role input is sent with
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _is_ref(node):
+    return isinstance(node, dict) and len(node) == 1 and SHARED_KEY in node
+
+
+def dedup_encode(payload, min_bytes=DEDUP_MIN_BYTES):
+    """The extra body fields for ``payload`` under DEDUP_ENCODING, or None to send it plain.
+
+    Deterministic: the same payload always yields the same encoding. A shared value is keyed by
+    the sha256 of its exact ``json.dumps`` text (key order included), so decoding restores the
+    identical serialization. None when no value of at least ``min_bytes`` repeats, or when the
+    payload already holds an object shaped like a reference (it could not be told apart)."""
+    counts = {}
+
+    def count(node):
+        if _is_ref(node):
+            raise DedupMismatch("payload holds a reference-shaped object")
+        children = (
+            node.values() if isinstance(node, dict) else node if isinstance(node, list) else ()
+        )
+        for child in children:
+            count(child)
+        if isinstance(node, (dict, list, str)):
+            text = _text(node)
+            if len(text.encode("utf-8")) >= min_bytes:
+                counts[text] = counts.get(text, 0) + 1
+
+    try:
+        count(payload)
+    except DedupMismatch:
+        return None
+    repeated = {text for text, n in counts.items() if n >= 2}
+    if not repeated:
+        return None
+    shared = {}
+
+    def inner(node):
+        if isinstance(node, dict):
+            return {key: replace(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [replace(value) for value in node]
+        return node
+
+    def replace(node):
+        if isinstance(node, (dict, list, str)):
+            text = _text(node)
+            if text in repeated:
+                ref = _sha(text)
+                if ref not in shared:
+                    shared[ref] = None  # reserve first-appearance order, outer before inner
+                    shared[ref] = inner(node)
+                return {SHARED_KEY: ref}
+        return inner(node)
+
+    encoded = inner(payload)  # the root itself is never a reference
+    return {
+        "payload": encoded,
+        "transport_encoding": DEDUP_ENCODING,
+        "shared": shared,
+        "original_sha256": digest(payload),
+        "original_text_sha256": _sha(_text(payload)),
+    }
+
+
+def dedup_decode(request):
+    """The original payload of an encoded request (``ENCODED_KEYS``); DedupMismatch unless every
+    shared entry hashes to its key, every reference resolves, every entry is used, and the
+    result matches both declared hashes."""
+    if request.get("transport_encoding") != DEDUP_ENCODING:
+        raise DedupMismatch("unknown transport encoding")
+    shared = request.get("shared")
+    if not isinstance(shared, dict) or not shared:
+        raise DedupMismatch("shared table missing or empty")
+    resolved, resolving, used = {}, set(), set()
+
+    def resolve(ref):
+        if not isinstance(ref, str) or ref not in shared:
+            raise DedupMismatch("reference to an unknown shared value")
+        used.add(ref)
+        if ref not in resolved:
+            if ref in resolving:
+                raise DedupMismatch("cyclic shared reference")
+            resolving.add(ref)
+            value = walk(shared[ref])
+            resolving.discard(ref)
+            if _sha(_text(value)) != ref:
+                raise DedupMismatch("shared value does not hash to its reference")
+            resolved[ref] = value
+        return json.loads(json.dumps(resolved[ref]))  # a detached copy per position
+
+    def walk(node):
+        if _is_ref(node):
+            return resolve(node[SHARED_KEY])
+        if isinstance(node, dict):
+            return {key: walk(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [walk(value) for value in node]
+        return node
+
+    try:
+        payload = walk(request.get("payload"))
+        text = _text(payload)
+    except (TypeError, ValueError, RecursionError) as exc:
+        if isinstance(exc, DedupMismatch):
+            raise
+        raise DedupMismatch(f"encoded payload does not decode: {type(exc).__name__}") from exc
+    if used != set(shared):
+        raise DedupMismatch("shared table holds an unreferenced value")
+    if digest(payload) != request.get("original_sha256"):
+        raise DedupMismatch("decoded payload does not match original_sha256")
+    if _sha(text) != request.get("original_text_sha256"):
+        raise DedupMismatch("decoded payload text does not match original_text_sha256")
+    return payload
 
 
 class RelayOutcomeUnknown(RuntimeError):
@@ -319,11 +479,21 @@ class RelayRoles:
         if self.budget - self.spent < 0.05:
             raise Refused("aggregate model budget exhausted", gate="budget")
         try:
-            body = json.dumps({"role": role, "payload": payload}, allow_nan=False).encode()
             input_hash = digest(payload)
+            encoded = dedup_encode(payload)
+            request = (
+                {"role": role, "payload": payload}
+                if encoded is None
+                else {
+                    "role": role,
+                    **encoded,
+                }
+            )
+            body = json.dumps(request, allow_nan=False).encode()
         except (TypeError, ValueError) as exc:
             raise Refused(f"{role} payload is not strict JSON: {exc}", gate=gate) from exc
-        if len(body) > self.max_body:
+        encoding = None if encoded is None else DEDUP_ENCODING
+        if len(body) > self.max_body:  # the body actually sent: encoded when dedup applies
             raise Refused(
                 f"{role} relay request is {len(body)} bytes, over the {self.max_body} cap",
                 gate=gate,
@@ -411,7 +581,7 @@ class RelayRoles:
             if not isinstance(receipt, dict) or not (
                 RECEIPT_FIELDS <= set(receipt) <= RECEIPT_FIELDS | optional
             ):
-                raise ValueError("receipt fields differ from the KongRoles receipt + relay_id")
+                raise ValueError("receipt fields differ from the KongRoles receipt + relay fields")
             cost = receipt["cost_usd"]
             if _finite(cost):
                 self.spent = spent_before + cost
@@ -423,6 +593,11 @@ class RelayRoles:
                 raise ValueError("receipt relay_id differs from the envelope")
             if receipt["role"] != role or receipt["input_hash"] != input_hash:
                 raise ValueError("receipt is not for this request")
+            sizes = receipt["transport_bytes"]
+            if receipt["transport_encoding"] != encoding or not isinstance(sizes, dict):
+                raise ValueError("receipt transport encoding differs from the request sent")
+            if encoding is not None and sizes.get("request_body_bytes") != len(body):
+                raise ValueError("receipt transport sizes are not for this request")
             if not isinstance(value, dict):
                 raise ValueError("role output must be an object")
             if receipt["output_hash"] != digest(value):
