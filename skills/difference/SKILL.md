@@ -67,6 +67,12 @@ rather than writing an empty result.
 A shared dim with no index coordinate is paired by position (element *i* of A
 minus element *i* of B); differing sizes exit non-zero.
 
+Broadcasting is one-sided: if A and B each have a dim the other lacks (a
+`time` series minus a `dayofyear` climatology, a `step` forecast minus `time`
+observations) the skill exits non-zero instead of pairing every label of one
+with every label of the other. Put both on the same axis first (`step-to-time`;
+`clim-fetch` expands a climatology onto the field's `time`).
+
 ### Operand dtypes
 
 Boolean and unsigned-integer variables are cast before subtracting: boolean
@@ -80,14 +86,19 @@ integer, floating-point, and other dtypes are left untouched.
 Values are subtracted with their units: B is converted to A's units first
 (`mm hr-1` from `mm day-1` works; °C minus K works), and the output keeps A's
 attrs. Incompatible units (a rate minus an amount, `mm day-1` minus `mm`) exit
-non-zero. A temperature difference is written in `delta_degC`, the unit of a
-temperature *difference* (2 delta_degC = 2 K), so converting it never adds the
-273.15 offset of an absolute temperature.
+non-zero. A temperature difference (including K minus K) is written in
+`delta_degC`, the unit of a temperature *difference* (2 delta_degC = 2 K), so
+converting it never adds the 273.15 offset of an absolute temperature.
+Precipitation totals (amount units or `cell_methods` sum) whose
+`aggregation_period` differs (a 7-day total minus a 30-day total) exit
+non-zero; aggregate both to one `--period` first.
 
 ### Output
 
 One data variable per differenced variable, holding A − B on the aligned
-(and broadcast) dims. Dataset attrs from the first input are preserved.
+(and broadcast) dims. Each variable carries A's attrs only (B's
+`aggregation_period`, `cell_methods`, etc. are dropped); dataset attrs come
+from the first input.
 
 ### Provenance
 

@@ -8,6 +8,7 @@
 
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.standard_utils import ensure_normalized_longitude
+from weather_skills_core.units import AGGREGATION_PERIOD_ATTR, looks_like_precip_total, ureg
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -48,6 +49,28 @@ def difference(ds, variable, **kwargs):
     out = {}
     for v in vars_:
         a, b = ds_a[v], ds_b[v]
+        only_a = [d for d in a.dims if d not in b.dims]
+        only_b = [d for d in b.dims if d not in a.dims]
+        if only_a and only_b:
+            # (time) minus (dayofyear) would broadcast into a time x dayofyear cube
+            raise UsageError(
+                f"{v!r}: A has dims {only_a} that B lacks and B has {only_b} that A lacks; "
+                "broadcasting would pair every A label with every B label. Put both on "
+                "the same axis first (e.g. step-to-time, or expand a climatology onto "
+                "the field's time axis)"
+            )
+        period_a = a.attrs.get(AGGREGATION_PERIOD_ATTR)
+        period_b = b.attrs.get(AGGREGATION_PERIOD_ATTR)
+        if (
+            period_a
+            and period_b
+            and (looks_like_precip_total(a) or looks_like_precip_total(b))
+            and ureg.Quantity(period_a) != ureg.Quantity(period_b)
+        ):
+            raise UsageError(
+                f"{v!r}: A is a {period_a} total and B a {period_b} total; subtract "
+                "totals over the same period (aggregate-temporal both to one --period)"
+            )
         # Promote bool/uint so A−B cannot wrap
         if a.dtype.kind == "b":
             a = a.astype(np.int16)
@@ -66,10 +89,24 @@ def difference(ds, variable, **kwargs):
         empty = [d for d in diff.dims if diff.sizes[d] == 0]
         if empty:
             raise UsageError(
-                f"{v!r}: no overlapping {empty} labels between A and B; put both on one "
-                "grid with coarsen --reference-grid (or downscale) first"
+                f"{v!r}: no overlapping {empty} labels between A and B. Labels must match "
+                "exactly: for lat/lon, put both on one grid with coarsen --reference-grid "
+                "(or downscale); for time, step-to-time a forecast and aggregate both "
+                "with the same bins"
             )
-        out[v] = diff.assign_attrs(ds_a[v].attrs)
+        # K − K is a kelvin result; write it as a difference so unit-convert does
+        # not read it as an absolute temperature and subtract 273.15.
+        units = diff.pint.units
+        if (
+            units is not None
+            and units.dimensionality == "[temperature]"
+            and "delta_" not in str(units)
+        ):
+            diff = diff.pint.to("delta_degC")
+        # Replace, not merge: B's attrs (a baseline's aggregation_period or
+        # cell_methods) must not leak onto A's field.
+        diff.attrs = dict(ds_a[v].attrs)
+        out[v] = diff
     return xr.Dataset(out)
 
 

@@ -65,6 +65,13 @@ def test_difference_converts_units_and_keeps_temperature_differences(tmp_path, d
     assert r["t2m"].values == pytest.approx(2.0)
     assert r["t2m"].attrs["units"] == "delta_degC"
 
+    # K minus K (or minus degC) is still a difference, not an absolute kelvin
+    # value that unit-convert would shift by 273.15
+    for b in (_field("t2m", 298.15, "K", standard_name=t), _field("t2m", 25.0, "degC")):
+        r = _run(tmp_path, difference, _field("t2m", 300.15, "K", standard_name=t), b)
+        assert r["t2m"].values == pytest.approx(2.0)
+        assert r["t2m"].attrs["units"] == "delta_degC"
+
     r = _run(
         tmp_path, difference, _field("precip", 24.0, "mm day-1"), _field("precip", 0.5, "mm hr-1")
     )
@@ -83,5 +90,44 @@ def test_difference_converts_units_and_keeps_temperature_differences(tmp_path, d
 def test_difference_refuses_instead_of_writing_garbage(tmp_path, difference, b, args):
     with pytest.raises(SystemExit) as exc:
         _run(tmp_path, difference, _field("precip", 2.0, "mm day-1"), b, *args)
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_difference_keeps_only_a_attrs(tmp_path, difference):
+    # A daily field minus a weekly baseline must not inherit the baseline's
+    # aggregation_period (plot would multiply the daily rate by 7)
+    a = _field("precip", 3.0, "mm day-1")
+    b = _field("precip", 1.0, "mm day-1")
+    b["precip"].attrs.update(aggregation_period="7 day", cell_methods="time: mean")
+    r = _run(tmp_path, difference, a, b)
+    assert "aggregation_period" not in r["precip"].attrs
+    assert "cell_methods" not in r["precip"].attrs
+
+
+def _timed(dim, labels, value=1.0, units="mm day-1"):
+    return xr.Dataset(
+        {"precip": ((dim, "latitude"), np.full((len(labels), 2), value), {"units": units})},
+        coords={dim: labels, "latitude": [1.0, 2.0]},
+    )
+
+
+def _total(period):
+    ds = _field("precip", 10.0, "mm")
+    ds["precip"].attrs.update(aggregation_period=period, cell_methods="time: sum")
+    return ds
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        # time series minus a dayofyear climatology: would broadcast time x dayofyear
+        (_timed("time", np.arange(3).astype("datetime64[D]")), _timed("dayofyear", [1, 2])),
+        (_total("7 day"), _total("30 day")),  # weekly total minus monthly total
+    ],
+)
+def test_difference_refuses_mismatched_axes_and_periods(tmp_path, difference, a, b):
+    with pytest.raises(SystemExit) as exc:
+        _run(tmp_path, difference, a, b)
     assert exc.value.code == 2
     assert not (tmp_path / "out.zarr").exists()
