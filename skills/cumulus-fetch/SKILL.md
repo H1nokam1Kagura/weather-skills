@@ -77,8 +77,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest
 - `--dataset` — `precip` (default, the 0.25°
   `total_precipitation_24h_acc_imerg_0p25`), `precip_1deg` (native 1°
   `total_precipitation_24h_acc_imerg`), or `precip_era5` (ERA5-trained
-  `total_precipitation_24h_acc_era5`). A variable folder name also works.
-- `--date` — forecast init date `YYYY-MM-DD`. Default: latest published init.
+  `total_precipitation_24h_acc_era5`). One of those three folder names also
+  works; anything else is an error (exit 2).
+- `--date` — forecast init date `YYYY-MM-DD` (the latest `HH` store that day).
+  Default: latest published init.
   Calendar day: `resolve-time latest`. Latest published init: `--probe-latest`.
 - `--probe-latest [dataset-id]` — print the latest init `YYYY-MM-DD` on stdout
   and exit. No `-o`.
@@ -90,14 +92,14 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest
   `tp`. Any other name is an error. Accepted: `tp`, `precip`, `precipitation`,
   `total_precipitation`, `total_precipitation_24h_acc_imerg_0p25`,
   `total_precipitation_24h_acc_imerg`, `total_precipitation_24h_acc_era5`.
-- `--workers` — max concurrent Zarr chunk requests (default 8).
+- `--workers` — max concurrent Zarr chunk requests (default 8, at least 1).
 - `--output`, `-o` — output Zarr path (overwritten if it exists).
 
 ### Output
 
 A consolidated weather-skills standard dataset Zarr with dims
-`(number, step, latitude, longitude)` and a scalar `time` coord (the 00 UTC
-init). `number` is 0..29 (renamed from the store's `ensemble_member`;
+`(number, step, latitude, longitude)` and a scalar `time` coord (the init,
+from the store's `HH`). `number` is 0..29 (renamed from the store's `ensemble_member`;
 exchangeable draws, member 0 is not a control). Source stores are
 already 24h period totals — fetch writes `tp` as a per-step **rate**
 (`mm day-1`), **left-labeled** so `step = 0` is the first 24h
@@ -105,6 +107,10 @@ already 24h period totals — fetch writes `tp` as a per-step **rate**
 run `deaccumulate`. Next steps are `aggregate-temporal` then
 `convert-to-totals` for period `mm`. Stamped with
 `weather_skills_source=cumulus:<variable folder>`.
+
+An init still being written can have all-NaN long leads: they are dropped
+(never padded) with a `WARNING` on stderr; an init with no data in the bbox
+is an error. Pass `--date` with an earlier init for every lead.
 
 ### Provenance
 

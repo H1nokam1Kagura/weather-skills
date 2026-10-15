@@ -165,9 +165,18 @@ def fetch(dataset, date, bbox, variable, probe_latest, workers, **kwargs):
     with the SAS in ``AZURE_STORAGE_SAS_TOKEN``, optionally subsets by
     ``--bbox``, and returns a Dataset for the decorator to write.
     """
+    import numpy as np
+
     probe = probe_latest
     name = probe or dataset
     folder = _DATASETS.get(name, name)
+    if folder not in _DATASETS.values():
+        raise UsageError(
+            f"unknown Cumulus dataset {name!r}. Available: {', '.join(_DATASETS)} "
+            f"(or a folder name: {', '.join(_DATASETS.values())})."
+        )
+    if workers < 1:
+        raise UsageError(f"--workers must be at least 1 (got {workers}).")
     prefix = f"az://{_ACCOUNT}/{_ROOT}/{folder}/"
 
     if probe is not None:
@@ -196,6 +205,24 @@ def fetch(dataset, date, bbox, variable, probe_latest, workers, **kwargs):
 
     ds = _open_store(f"az://{_ROOT}/{folder}/{store}", bbox, workers)
     ds = _to_standard(ds)
+    # A fresh init may still be writing its long leads (all-NaN). Error when
+    # nothing is there; drop an empty tail and say so instead of writing it.
+    empty = ds["tp"].isnull().all(("number", "latitude", "longitude")).values
+    if empty.all():
+        raise DataError(
+            f"Cumulus init {store} has no data in the requested bbox (still publishing?). "
+            "Pass --date with an earlier init."
+        )
+    last = int(np.nonzero(~empty)[0][-1])
+    if last < ds.sizes["step"] - 1:
+        days = ds["step"].values / np.timedelta64(1, "D")
+        print(
+            f"WARNING: Cumulus init {store} has no data from step {days[last + 1]:g} d "
+            f"(of {days[-1]:g} d; still publishing?). Dropped the empty leads (not padded); "
+            "pass --date with an earlier init for every lead.",
+            file=sys.stderr,
+        )
+        ds = ds.isel(step=slice(0, last + 1))
     if bbox is None:
         ds = ensure_normalized_longitude(ds)
 

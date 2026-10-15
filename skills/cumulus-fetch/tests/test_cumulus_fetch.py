@@ -161,3 +161,48 @@ def test_malformed_sas_exits_2(fetch_mod, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         run_skill(fetch_mod.fetch, "--probe-latest")
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("workers", ["0", "-1"])
+def test_nonpositive_workers_exits_2(tmp_path, fetch_mod, remote, workers):
+    # zarr async.concurrency 0 deadlocks the read instead of failing.
+    with pytest.raises(SystemExit) as exc:
+        run_skill(fetch_mod.fetch, "--workers", workers, "-o", str(tmp_path / "out.zarr"))
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("flag", ["--dataset", "--probe-latest"])
+def test_unknown_dataset_exits_2(tmp_path, fetch_mod, remote, flag):
+    # Any other folder's field would be renamed to tp and stamped as precipitation.
+    with pytest.raises(SystemExit) as exc:
+        run_skill(fetch_mod.fetch, flag, "2m_temperature", "-o", str(tmp_path / "out.zarr"))
+    assert exc.value.code == 2
+
+
+def test_folder_name_accepted_as_dataset(tmp_path, fetch_mod, remote):
+    folder = "total_precipitation_24h_acc_era5"
+    run_skill(fetch_mod.fetch, "--dataset", folder, "-o", str(tmp_path / "era5.zarr"))
+    assert f"/zarr/{folder}/2026-09-18-00.zarr" in remote["url"]
+
+
+def test_trailing_empty_leads_dropped_and_reported(
+    tmp_path, fetch_mod, monkeypatch, remote, capsys
+):
+    monkeypatch.setattr(
+        fetch_mod, "_open_store", lambda *a: _live_store(values=(5.0, np.nan, 2.0, np.nan, np.nan))
+    )
+    out = tmp_path / "partial.zarr"
+    run_skill(fetch_mod.fetch, "-o", str(out))
+    assert "WARNING" in capsys.readouterr().err
+    with xr.open_zarr(out, consolidated=True) as ds:
+        days = np.asarray(ds["step"].values).astype("timedelta64[D]").astype(int)
+        assert list(days) == [0, 1, 2]
+        # The interior gap stays NaN: never filled.
+        np.testing.assert_allclose(ds["tp"].values[0, :, 0, 0], [5.0, np.nan, 2.0])
+
+
+def test_all_empty_store_exits_1(tmp_path, fetch_mod, monkeypatch, remote):
+    monkeypatch.setattr(fetch_mod, "_open_store", lambda *a: _live_store(values=(np.nan, np.nan)))
+    with pytest.raises(SystemExit) as exc:
+        run_skill(fetch_mod.fetch, "-o", str(tmp_path / "empty.zarr"))
+    assert exc.value.code == 1
