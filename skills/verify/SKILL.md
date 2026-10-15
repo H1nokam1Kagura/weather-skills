@@ -30,8 +30,17 @@ An **event** is `--variable` ≥ `--threshold` (default `1`, in the forecast's u
 | `-1` (`disagree`) | one is ≥ threshold and the other is not |
 | `0` (`below`) | both below the threshold |
 
-NaNs in either input stay NaN. Ensemble `number` is averaged before
-comparison. Inputs are inner-joined (overlapping coordinates only).
+### Alignment, ensembles, NaNs (all metrics)
+
+- Inputs are inner-joined (overlapping coordinates only); no overlap on a dim
+  is an error. A scalar `time` (after `select`) is checked the same way, so
+  two single-time inputs must carry the same date.
+- A forecast with a `step` dim is refused unless `--obs` has `step` too — run
+  `step-to-time` first.
+- Ensemble `number` is averaged before scoring: every metric scores the
+  ensemble mean, not per member. A NaN member leaves that cell NaN.
+- NaNs in either input stay NaN and are left out of the printed score (a NaN
+  cell is neither an event nor a miss).
 
 ### Units
 
@@ -41,6 +50,7 @@ observations against a °C forecast, `mm hr-1` against `mm day-1`), so
 weekly total in `mm` against a rate in `mm day-1` — exit non-zero; put both on
 one basis with `aggregate-temporal` / `convert-to-totals` first. `bias` and
 `mae` carry the forecast's units (a temperature error is `delta_degC`).
+Units on only one input exit non-zero; neither having units is allowed.
 
 Plot hits with `plot` (discrete red / gray / green map). For a lead-week
 grid of obs, forecast, and verification maps, use `plot-verify`.
@@ -99,7 +109,7 @@ shared lat/lon labels.
 One verification data variable (`event_hit`, `bias`, or `mae`). Hits output
 carries CF `flag_values` `-1, 0, 1` and `flag_meanings`
 `disagree below hit`. Bias and MAE keep the input `units`. A regional score
-is printed to stdout (hit rate for hits; cos-lat weighted mean for bias/mae
+is printed to stdout (hit rate = hits / obs events for hits; cos-lat weighted mean for bias/mae
 on a grid, plain mean on stations).
 
 If the inputs share no labels on some dim, the error names that dim and

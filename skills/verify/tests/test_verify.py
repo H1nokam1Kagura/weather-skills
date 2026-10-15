@@ -245,3 +245,50 @@ def test_no_overlap_error_names_the_dim(tmp_path, verify_fn, capsys):
     err = capsys.readouterr().err
     assert "no overlapping time labels" in err
     assert "2026-01-02" in err and "2026-01-01" in err
+
+
+def test_multi_init_step_cube_is_refused(tmp_path, verify_fn):
+    """A time (init) dim plus a step dim must not align the init with obs time."""
+    fc = make_forecast(n_step=2, name="precip")
+    fc["precip"].attrs["units"] = "mm day-1"
+    fc = fc.expand_dims(time=[np.datetime64("2026-01-01", "ns")])
+    obs = make_gridded(n_time=2, lats=(1.0, 2.0), lons=(10.0, 11.0))
+    with pytest.raises(SystemExit) as exc:
+        _verify(tmp_path, verify_fn, fc, obs, "--metric", "bias")
+    assert exc.value.code == 2
+
+
+def test_scalar_times_must_match(tmp_path, verify_fn, capsys):
+    """Single-time inputs (time selected to a scalar) on different dates are refused."""
+    fc = make_gridded(n_time=1, fill=3.0).isel(time=0)
+    obs = make_gridded(n_time=1, fill=1.0, start="2026-02-01").isel(time=0)
+    with pytest.raises(SystemExit) as exc:
+        _verify(tmp_path, verify_fn, fc, obs, "--metric", "bias")
+    assert exc.value.code == 2
+    assert "no overlapping time labels" in capsys.readouterr().err
+
+    ds = _verify(tmp_path, verify_fn, fc, obs.assign_coords(time=fc.time), "--metric", "bias")
+    assert ds["bias"].values == pytest.approx(2.0)
+
+
+def test_units_on_one_side_only_is_refused(tmp_path, verify_fn):
+    fc = make_gridded(n_time=1, fill=3.0, name="x")
+    fc["x"].attrs = {"units": "K"}
+    obs = make_gridded(n_time=1, fill=1.0, name="x")
+    obs["x"].attrs = {}
+    with pytest.raises(SystemExit) as exc:
+        _verify(tmp_path, verify_fn, fc, obs, "--metric", "bias")
+    assert exc.value.code == 2
+
+
+def test_ensemble_mean_and_nan_member(tmp_path, verify_fn):
+    """Members are averaged before scoring; a NaN member leaves that cell NaN."""
+    fc = make_forecast(n_step=1, members=3, name="precip")
+    fc["precip"].attrs["units"] = "mm day-1"
+    fc["precip"].values[:] = np.array([0.0, 0.0, 3.0])[:, None, None, None]
+    fc["precip"].values[2, 0, 0, 0] = np.nan
+    fc = fc.isel(step=0, drop=True).expand_dims(time=[np.datetime64("2026-01-01", "ns")])
+    obs = make_gridded(n_time=1, lats=(1.0, 2.0), lons=(10.0, 11.0), fill=0.0)
+    mae = _verify(tmp_path, verify_fn, fc, obs, "--metric", "mae")["mae"].isel(time=0).values
+    assert np.isnan(mae[0, 0])
+    np.testing.assert_allclose(mae.ravel()[1:], 1.0)

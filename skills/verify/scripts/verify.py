@@ -56,7 +56,7 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
             )
 
     fc, truth = forecast[fc_name], obs[obs_name]
-    if "step" in fc.dims and "time" not in fc.dims and "time" in truth.dims:
+    if "step" in fc.dims and "step" not in truth.dims:
         raise UsageError(
             "forecast still has a step axis; run step-to-time before verify "
             "so valid times can align with --obs."
@@ -90,10 +90,20 @@ def verify(forecast, obs, variable, metric, threshold, **kwargs):
     pair = []
     for da in (fc, truth):
         if "number" in da.dims:
-            da = da.mean("number", keep_attrs=True)
+            # A NaN member leaves the mean NaN (no mean over the members left).
+            da = da.mean("number", skipna=False, keep_attrs=True)
+        # A scalar time (after select) becomes a length-1 dim so the inner join
+        # below checks it against the other input instead of dropping it.
+        if "time" in da.coords and da["time"].ndim == 0:
+            da = da.expand_dims("time")
         pair.append(da)
     fc, truth = pair
     u_fc, u_obs = variable_units(fc), variable_units(truth)
+    if bool(u_fc) != bool(u_obs):
+        raise UsageError(
+            f"--forecast {fc_name!r} units={u_fc!r} but --obs {obs_name!r} units={u_obs!r}; "
+            "both inputs need units (or neither) to be compared."
+        )
     if u_fc and u_obs:
         # Compare in the forecast's units: deg C against K, mm hr-1 against mm day-1.
         try:
