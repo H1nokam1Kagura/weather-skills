@@ -94,19 +94,19 @@ CONTAINER_ONLY = {
     "U11",
 }
 ONSET_DELAY_S = 1.5
-ONSET_TOOL = '''
+ONSET_TOOL = """
 if name == "onset_date":
     import time
     import numpy as np
     import zarr
-    time.sleep(%r)
+    time.sleep(ONSET_DELAY_S)
     out = pathlib.Path(value("--output"))
     group = zarr.open_group(str(out), mode="w", zarr_format=2)
     missing = np.iinfo("int64").min
     values = np.array([[missing, 0], [1, 2]], dtype="int64")
     array = group.create_array("onset_precip_date", data=values, fill_value=missing)
     array.attrs["units"] = "days since 2025-09-16 00:00:00"
-elif name == "plot_onset":''' % (ONSET_DELAY_S,)
+elif name == "plot_onset":""".replace("ONSET_DELAY_S", repr(ONSET_DELAY_S))
 
 
 def zarr_tool_script():
@@ -364,7 +364,9 @@ def test_an_undeclared_implied_capability_refuses_before_side_effects(lab, froze
     profile = lab.profile(MAP_GOAL, case, stub=None)
     profile["case_root"] = tmp_path / "never"
     producers = signed(*(c for c in WAVE7 if c != "CAP-DENY-WRITE"))
-    with pytest.raises(AdapterRefusal, match=r"implies undeclared capabilities: \['CAP-DENY-WRITE'\]"):
+    with pytest.raises(
+        AdapterRefusal, match=r"implies undeclared capabilities: \['CAP-DENY-WRITE'\]"
+    ):
         WeatherAdapter(enable_run_case=True, producers=producers).run_case(case, profile)
     assert not profile["case_root"].exists()
 
@@ -386,7 +388,12 @@ def test_unsigned_wave7_records_and_e14_p2_ctl_stay_refused(lab, frozen, tmp_pat
         assert not profile["case_root"].exists()
 
 
-def test_without_fork_the_stop_route_is_refused_before_side_effects(lab, frozen, tmp_path, monkeypatch):  # noqa: F811
+def test_without_fork_the_stop_route_is_refused_before_side_effects(
+    lab,
+    frozen,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.setattr(resume_driver, "fork_available", lambda: False)
     for short, message in (
         ("E10-P1-CTL", "needs a real stop of a forked controller incarnation"),
@@ -437,7 +444,9 @@ def test_e14_p1_ctl_two_automatic_resumes_release_with_at_checkpoint(e14):
             "max_resume_attempts": counters["recovery_limits"]["max_automatic_resumes"],
         },
     }
-    assert notes(result.report, "at_checkpoint")[0]["basis"] == resume_projection.AT_CHECKPOINT_BASIS
+    assert (
+        notes(result.report, "at_checkpoint")[0]["basis"] == resume_projection.AT_CHECKPOINT_BASIS
+    )
     attribution = result.adapter.attribute_resumes(result.run, result.harness)
     assert attribution["automatic_resumes_used"] == 2
     assert [a["initiated_by"] for a in attribution["attribution"]] == ["automatic", "automatic"]
@@ -504,9 +513,10 @@ def test_e14_p2_inj_pre_launch_denial_is_interrupted_with_no_producing_launch(e1
     (denial,) = denials["run_dir_denials"]
     assert denial["boundary"] == "pending_checkpoint" and denial["artifact"] == "onset"
     assert denial["denial_source"] == "injected_fault"
-    assert result.adapter.record_mechanical_repair(result.run, result.harness)[
-        "mechanical_repairs"
-    ] == []
+    assert (
+        result.adapter.record_mechanical_repair(result.run, result.harness)["mechanical_repairs"]
+        == []
+    )
     assert not [p for p in result.evidence["process_receipts"] if p.get("producing")]
     assert scored(result)["terminal"] == "PASS"
     decided = verdicts(result, *case_assertions(result))
@@ -719,8 +729,11 @@ def test_killed_output_bytes_are_harness_observed_or_missing_never_zero():
         {"serial": 3, "pid": 43, "end": None},
     ]
     projection.missing = [
-        {"path": f"process_receipts[serial={s}].output_bytes", "capability": "CAP-RECEIPTS",
-         "reason": "no exit receipt"}
+        {
+            "path": f"process_receipts[serial={s}].output_bytes",
+            "capability": "CAP-RECEIPTS",
+            "reason": "no exit receipt",
+        }
         for s in (1, 2, 3)
     ]
     resume_projection.killed_output_bytes(projection, receipts)
