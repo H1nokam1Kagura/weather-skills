@@ -67,7 +67,13 @@ def _storage_options() -> dict[str, str]:
 
 def _azure_error(exc: Exception, what: str) -> DataError:
     """Wrap an Azure failure as a DataError, with the SAS signature redacted."""
-    text = re.sub(r"(sig=)[^&\s'\"<>]+", r"\1REDACTED", f"{type(exc).__name__}: {exc}", flags=re.I)
+    # Also the URL-encoded form (sig%3D...) some clients echo in errors.
+    text = re.sub(
+        r"(sig(?:=|%3D))[^&\s'\"<>%]+(?:%[0-9A-F]{2}[^&\s'\"<>%]*)*",
+        r"\1REDACTED",
+        f"{type(exc).__name__}: {exc}",
+        flags=re.I,
+    )
     hint = ""
     if any(s in text.lower() for s in ("401", "403", "forbidden", "authenticat", "authoriz")):
         hint = f" Check {_SAS_ENV}: it needs list and read (sp=rl) on {_ACCOUNT}/{_CONTAINER}."

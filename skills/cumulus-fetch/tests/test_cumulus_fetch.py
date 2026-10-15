@@ -206,3 +206,10 @@ def test_all_empty_store_exits_1(tmp_path, fetch_mod, monkeypatch, remote):
     with pytest.raises(SystemExit) as exc:
         run_skill(fetch_mod.fetch, "-o", str(tmp_path / "empty.zarr"))
     assert exc.value.code == 1
+
+
+def test_azure_error_redacts_url_encoded_signature(fetch_mod):
+    exc = RuntimeError("GET https://x/c?sv=1%26sig%3DAbC%252Bd%253D failed")
+    message = str(fetch_mod._azure_error(exc, "failed"))
+    assert "AbC" not in message
+    assert "sig%3DREDACTED" in message
