@@ -79,8 +79,9 @@ def _resolve_variables(requested, data_vars, dataset: str):
     stores a single `temperature` field (46-day `pressure_level` group),
     `-v t` selects that field. Common precip nicknames
     (`precip`, `precipitation`, `tp`, `total_precipitation`) map to
-    `precipitation_surface` when that field exists. `t2m` / `sst` map to
-    the 46-day daily-mean surface names.
+    `precipitation_surface` when that field exists. `t2m` / `d2m` map to
+    the instant `*_2m` field, else the 46-day daily mean (`average_*_2m`); `sst` to
+    `sea_surface_temperature`.
     """
     if not requested:
         return None
@@ -109,6 +110,10 @@ def _resolve_variables(requested, data_vars, dataset: str):
             _take(prefix)
             continue
         aliased = _PRECIP_ALIASES.get(token) or _SURFACE_ALIASES.get(token)
+        # `t2m` / `d2m` are the instant `temperature_2m` / `dew_point_temperature_2m`
+        # where a store has them (GFS, GEFS, IFS 15-day); else the 46-day daily mean.
+        if aliased and aliased.removeprefix("average_") in name_set:
+            aliased = aliased.removeprefix("average_")
         if aliased in name_set:
             _take(aliased)
             continue
@@ -313,10 +318,8 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, **k
         start_iso = start_time.isoformat()
         end_iso = end_time.isoformat()
 
-    if bbox is not None:
-        ds = bbox_subset(ds, bbox, lat_dim="latitude", lon_dim="longitude")
-    else:
-        ds = ensure_normalized_longitude(ds, lon_dim="longitude")
+    if variable:
+        ds = ds[_resolve_variables(variable, ds.data_vars, dataset)]
 
     if is_forecast:
         inits = ds["init_time"].values
@@ -344,13 +347,29 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, **k
         # --end-time is an inclusive calendar day: keep every sub-daily step of
         # that day (IMERG half-hourly), not just its 00:00 instant.
         day_end = np.datetime64(end_iso) + np.timedelta64(1, "D") - np.timedelta64(1, "ns")
+        native = ds["time"].values[:2]
+        spacing = native[1] - native[0] if len(native) > 1 else np.timedelta64(1, "D")
         ds = ds.sel(time=slice(np.datetime64(start_iso), day_end))
         if ds.sizes.get("time", 0) == 0:
             raise DataError(f"{dataset} has no data in {start_iso}..{end_iso}.")
         ds = ds.drop_vars([c for c in _DROP_COORDS if c in ds.coords])
+        # The catalog only lists published times, so a window running past the
+        # latest (or before the first) time comes back shorter. Say so; never pad.
+        times = ds["time"].values
+        if times[0] > np.datetime64(start_iso) or times[-1] + spacing <= day_end:
+            print(
+                f"WARNING: {dataset} covers only {str(times[0])[:16]}..{str(times[-1])[:16]} "
+                f"of the requested {start_iso}..{end_iso}; writing that partial window "
+                "(not padded).",
+                file=sys.stderr,
+            )
 
-    if variable:
-        ds = ds[_resolve_variables(variable, ds.data_vars, dataset)]
+    # Spatial subset after the time/variable selection: an antimeridian bbox
+    # concatenates two longitude wings, which reads every selected value.
+    if bbox is not None:
+        ds = bbox_subset(ds, bbox, lat_dim="latitude", lon_dim="longitude")
+    else:
+        ds = ensure_normalized_longitude(ds, lon_dim="longitude")
 
     # Catalog averaged fields (precip, 46-day daily means) are labelled at the END
     # of their interval, so lead 0 is all-NaN. When every selected field is NaN
@@ -358,6 +377,30 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, **k
     # step to the previous step value: step = interval start. Using the previous
     # value (not a fixed spacing) stays correct for GEFS 3 h -> 6 h leads.
     # Instant fields (t2m on GEFS, winds, pressure levels) keep lead 0.
+    if is_forecast and len(ds.data_vars) > 0:
+        # Read the subset once: the NaN checks below would otherwise re-read it.
+        ds = ds.load()
+        empty = np.ones(ds.sizes["step"], dtype=bool)
+        for name in ds.data_vars:
+            other = [d for d in ds[name].dims if d != "step"]
+            empty &= ds[name].isnull().all(other).values
+        if empty.all():
+            raise DataError(
+                f"{dataset} {date_iso} init has no data for the requested variables and "
+                "bbox (still publishing?); try the previous day's init."
+            )
+        # A fresh init is still publishing its long leads (all-NaN). Drop that
+        # tail and say so instead of writing empty leads.
+        last = int(np.nonzero(~empty)[0][-1])
+        if last < ds.sizes["step"] - 1:
+            hours = ds["step"].values / np.timedelta64(1, "h")
+            print(
+                f"WARNING: {dataset} {date_iso} init has no data after catalog lead "
+                f"{hours[last]:g} h (of {hours[-1]:g} h; still publishing?). Dropped the "
+                "empty leads (not padded); use the previous day's init for every lead.",
+                file=sys.stderr,
+            )
+            ds = ds.isel(step=slice(0, last + 1))
     if is_forecast and ds.sizes.get("step", 0) > 1 and len(ds.data_vars) > 0:
         first = ds.isel(step=0)
         if all(bool(first[name].isnull().all()) for name in ds.data_vars):

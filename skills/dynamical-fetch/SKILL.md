@@ -113,7 +113,7 @@ Do **not** reuse names from other fetchers. ARCO-ERA5 and ECMWF S2S use
 |---|---|---|
 | Precipitation | `precipitation_surface` | `precip`, `precipitation`, `tp`, `total_precipitation` |
 | Sea-surface temperature | `sea_surface_temperature` | `sst` |
-| 2 m temperature | `temperature_2m` (15-day) or `average_temperature_2m` (46-day) | `t2m` maps to the 46-day daily mean |
+| 2 m temperature | `temperature_2m` (GFS, GEFS, IFS 15-day) or `average_temperature_2m` (46-day) | `t2m` → `temperature_2m`, else the 46-day daily mean |
 | Pressure-level temperature | `temperature_850hpa` or `-v t` | prefix `temperature` |
 | Geopotential height | `geopotential_height_500hpa` or `-v gh` | prefix `geopotential_height` |
 
@@ -122,8 +122,7 @@ IMERG Late/Early and CHIRPS final/preliminary publish `precipitation_surface`
 resolve to that field; they do not pull `precipitation_quality_index_surface`.
 Those surface names are the ones on GEFS, GFS, and
 `ecmwf-ifs-ens-forecast-15-day-0-25-degree`. SST is
-`sea_surface_temperature` on the catalog (IFS 15-day and 46-day); `-v sst`
-maps to that field. Catalog
+`sea_surface_temperature`, on the 46-day product only; `-v sst` maps to it. Catalog
 fields ending in `_Nhpa` are stacked onto a `vertical` coordinate (hPa) and
 renamed to the prefix (`temperature_850hpa` + `temperature_925hpa` →
 `temperature`). Height-above-ground fields (`temperature_2m`, `wind_u_80m`)
@@ -141,12 +140,13 @@ out of scope for this fetcher.
 
 - `--dataset` — catalog dataset id from the table above (validated against
   `dynamical_catalog.list()`; an unknown id prints the available list and exits).
-- `--probe-latest [dataset-id]` — print the latest init or analysis time (`YYYY-MM-DD`) on stdout and exit. No `-o`. Pass the catalog id here or as `--dataset`. On a forecast, the latest init may still be publishing (long leads all-NaN for a few hours; stderr says so) — use the previous day's init when you need every lead. On a sub-daily analysis (IMERG, MRMS) the latest day is usually partial; stderr prints the last timestamp. For a complete window, end on the day before.
-- `--date` — forecast init date (**forecast datasets only**). Absolute ISO date `YYYY-MM-DD`. Selects the **00 UTC** initialization. Latest listed init: `--probe-latest <id>`. A very fresh GEFS 35-day init can still be filling its long leads.
-- `--start-time`, `--end-time` — inclusive date range (**analysis datasets only**). Absolute ISO dates `YYYY-MM-DD`. `--end-time` covers the **whole** end day: on half-hourly IMERG, `--start-time 2026-09-20 --end-time 2026-09-20` gives the 48 steps 00:00–23:30, same day range as `chirps-fetch`. Calendar windows: `resolve-time last-2w --as-of <probe-latest>`. Latest published time: `--probe-latest <this-id>`.
+- `--probe-latest [dataset-id]` — print the latest init or analysis time (`YYYY-MM-DD`) on stdout and exit. No `-o`. Pass the catalog id here or as `--dataset`. On a forecast, the latest init may still be publishing (long leads empty for a few hours; stderr says so) — use the previous day's init when you need every lead. On a sub-daily analysis (IMERG, MRMS) the latest day is usually partial; stderr prints the last timestamp. For a complete window, end on the day before.
+- `--date` — forecast init date (**forecast datasets only**). Absolute ISO date `YYYY-MM-DD`. Selects the **00 UTC** initialization. Latest listed init: `--probe-latest <id>`. A fresh init still filling its long leads (GEFS 35-day often stops at 384 h for hours): fetch drops the empty tail leads and prints `WARNING: ... no data after catalog lead N h` — never padded. An init with no data at all exits 1.
+- `--start-time`, `--end-time` — inclusive date range (**analysis datasets only**). Absolute ISO dates `YYYY-MM-DD`. `--end-time` covers the **whole** end day: on half-hourly IMERG, `--start-time 2026-09-20 --end-time 2026-09-20` gives the 48 steps 00:00–23:30, same day range as `chirps-fetch`. Calendar windows: `resolve-time last-2w --as-of <probe-latest>`. Latest published time: `--probe-latest <this-id>`. A window running past the latest (or before the first) published time writes only what exists and prints `WARNING: ... covers only <first>..<last>` (never padded); a window with no data exits 1.
 - `--bbox` — spatial subset `N/W/S/E` decimal degrees. The slice follows each
   axis's own order, so any region works regardless of how a dataset stores
-  latitude. Omit to fetch the dataset's full native grid. Named places: compose
+  latitude. W/E are −180..180; an antimeridian box is W > E (`10/170/-10/-170`);
+  0..360 values (`10/350/-5/370`) select nothing. Omit to fetch the dataset's full native grid. Named places: compose
   with the `resolve-region` skill.
 - `--variable`, `-v` — restrict to one data variable; repeat once per variable
   (`-v temperature_2m -v precipitation_surface`). Prefer catalog-exact names.
