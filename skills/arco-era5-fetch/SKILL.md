@@ -81,8 +81,17 @@ CF stamping on the output:
   pressure-level variable is selected, `level` carries `standard_name=air_pressure`,
   `units=hPa`, and `positive=down`.
 - **Data variables:** every variable carries a udunits-valid `units` and a
-  `long_name`. Known air-temperature and precip kinds are converted to
-  standard display units (`degree_Celsius`, `mm day-1`); remaining variables
+  `long_name`. Air temperatures (`2m_temperature`, pressure-level
+  `temperature`) become `degree_Celsius`. The hourly precip accumulations
+  (`total_precipitation`, `convective_precipitation`,
+  `large_scale_precipitation`, metres per hour) become `mm day-1` rates
+  (× 1000 × 24). ERA5 labels each accumulation at the END of its hour; the
+  output relabels it at the start, so a day's 00..23 UTC rows are that day's
+  24 hours (store hours 01..24). The last hour of the latest published day is
+  therefore NaN for precip (its accumulation is not out yet). Every variable is
+  stamped `data_interval="1 hour"`. Other accumulated or mean-rate fields
+  (radiation in `J m**-2`, `evaporation`, `runoff`, `snowfall`, `mean_*_rate`)
+  are not converted or relabelled and keep ERA5's end-of-hour label; remaining variables
   keep the ARCO store's `units`/`long_name`/`standard_name`. A few udunits-invalid
   unit placeholders the store uses
   (`(0 - 1)`, `~`, `dimensionless`, `m of water equivalent`) are normalized to a
@@ -99,13 +108,16 @@ Stamped with `weather_skills_source=arco-era5`.
 
 ### Memory, performance, and error handling
 
-`--bbox` and `--variable` are the levers that set how much data is pulled: the
-selection size is variables × levels × bbox cells × window length, read and
-written once — xarray prunes to the selection before pulling any array bytes, so
-an unselected variable or out-of-bbox cell is never materialized.
+`--variable` and the window length set how much is downloaded: store chunks
+are one hour × the full globe per variable (~4 MB for a surface field, ~150 MB
+for a 37-level pressure field), so every selected hour downloads whole global
+chunks and `--bbox` only shrinks what is kept, not what is read. An unselected
+variable is never read. Measured: one day of two surface variables over Kenya
+peaks at ~230 MB RSS (flat for three days); one day of pressure-level
+`temperature` downloads ~3.7 GB and peaks at ~1.2 GB RSS.
 
-The selection is materialized into host memory in a single eager `.to_zarr()`
-load, so a very large request (no `--bbox`, all variables, a pressure-level
+The selection is materialized into host memory in a single eager load, so a
+very large request (no `--bbox`, all variables, a pressure-level
 variable spanning all 37 levels, or a long window) is slow and may exhaust
 memory. The fetcher does not refuse a request on a size estimate — what to fetch
 is your call. Keep a request affordable by selecting the specific variables you

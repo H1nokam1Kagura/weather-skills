@@ -19,6 +19,7 @@ from weather_skills_core.standard_utils import (
     verify_cf_decode,
 )
 from weather_skills_core.units import (
+    classify_variable,
     precip_amounts_to_rates,
     stamp_data_interval,
     to_standard_units,
@@ -200,7 +201,32 @@ def fetch(start_time, end_time, bbox, variable, probe_latest, **kwargs):
     if bbox:
         ds = bbox_subset(ds, bbox, lat_dim="latitude", lon_dim="longitude")
 
-    ds = ds.sel(time=slice(np.datetime64(f"{start_iso}T00:00"), np.datetime64(f"{end_iso}T23:59")))
+    # ERA5 precip accumulations are labelled at the END of their hour (00 UTC
+    # holds 23-24 UTC of the day before); the standard labels an interval at its
+    # start. Read those variables one hour later and relabel them back, so each
+    # day's 00..23 rows are that day's 24 hours. Other variables are instants.
+    hour = np.timedelta64(1, "h")
+    first = np.datetime64(f"{start_iso}T00:00")
+    last = np.datetime64(f"{end_iso}T23:00")
+    accum = [
+        name
+        for name in ds.data_vars
+        if classify_variable(
+            name,
+            units=_fix_units(ds[name].attrs.get("units")),
+            standard_name=ds[name].attrs.get("standard_name"),
+        )
+        == "precip_amount"
+    ]
+    names = list(ds.data_vars)
+    window = ds.drop_vars(accum).sel(time=slice(first, last))
+    if accum:
+        import xarray as xr
+
+        shifted = ds[accum].sel(time=slice(first + hour, last + hour))
+        shifted = shifted.assign_coords(time=shifted["time"] - hour)
+        window = xr.merge([window, shifted], compat="override", join="outer")[names]
+    ds = window
     if ds.sizes.get("time", 0) == 0:
         raise DataError(f"ARCO-ERA5 has no data in {start_iso}..{end_iso}.")
 
@@ -274,6 +300,7 @@ def fetch(start_time, end_time, bbox, variable, probe_latest, **kwargs):
     )
     ds = to_standard_units(ds)
     ds = precip_amounts_to_rates(ds, interval="1 hour")
+    _stamp_coord_attrs(ds)  # unit conversion respells level "hPa" as "hectopascal"
     return stamp_data_interval(ds, period="1 hour")
 
 
