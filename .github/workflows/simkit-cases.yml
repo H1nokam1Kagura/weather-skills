@@ -13,6 +13,15 @@ name: simkit-cases
 # relay-smoke probes) and gets only SIMKIT_RELAY_URL/TOKEN/RUN_ID/MODEL (-e NAME, values in the
 # docker client env). Fixture/substituted containers keep --network none. Synthetic data only;
 # the relay audit carries status/via/request-id/model/usage only.
+#
+# Live spend guard (LIVE-WAVE-BRIEF sub-wave 4a; owner ruling live_spend_authorization_2026-10-15):
+# any selection with live-role cases needs an explicit live_max_cases, and admission fails above
+# it or above the 5M-token run cap (container_harness/relay_usage.py live-gate). Live case jobs
+# run at most 3 at a time; each passes its relay caps (from the admission matrix row, else
+# conservative defaults until case_driver fills them) to relay-start, keeps its exited container
+# for the docker-export key scan, then always removes it. The report carries per-case relay
+# usage, LIVE_TRANSPORT_FAULT / RELAY_GUARD_ABORT and the rerun-eligible list; a rerun dispatch
+# names the original run in rerun_of_run_id so both attempts are reported.
 on:
   workflow_dispatch:
     inputs:
@@ -21,9 +30,17 @@ on:
         required: true
         default: admission
       max_parallel:
-        description: "max concurrent case jobs"
+        description: "max concurrent case jobs (live-role runs are capped at 3)"
         required: false
         default: "8"
+      live_max_cases:
+        description: "REQUIRED for any run selecting live-role cases (paid): the most live cases this run may execute; admission fails above it"
+        required: false
+        default: ""
+      rerun_of_run_id:
+        description: "re-dispatch of rerun-eligible cases only: the ORIGINAL run's id; its results are reported alongside this run's, never replaced"
+        required: false
+        default: ""
   push:
     branches: [feat/simkit-gh-cases-snowyowl]
 
@@ -125,10 +142,14 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
+      live_count: ${{ steps.matrix.outputs.live_count }}
+      max_parallel: ${{ steps.matrix.outputs.max_parallel }}
       image: ${{ steps.build.outputs.image }}
     env:
       OUT: ${{ github.workspace }}/admission-out
       SELECTOR: ${{ github.event_name == 'push' && 'smoke' || github.event.inputs.selector }}
+      LIVE_MAX_CASES: ${{ github.event.inputs.live_max_cases }}
+      MAX_PARALLEL_INPUT: ${{ github.event.inputs.max_parallel }}
     steps:
       - uses: actions/checkout@v4
 
@@ -138,7 +159,7 @@ jobs:
 
       - name: Harness unit tests (analyzer + report; not in ci.yml testpaths)
         run: |
-          python -m pip install --quiet pytest==9.1.1
+          python -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
           # test_case_driver_fixture_ops needs the controller stack; ci.yml runs it there.
           python -B -m pytest -q -p no:cacheprovider container_harness/tests \
             --ignore=container_harness/tests/test_case_driver_fixture_ops.py
@@ -165,12 +186,20 @@ jobs:
       - name: Case matrix
         id: matrix
         run: |
-          python - "$OUT/ADMISSION.json" >> "$GITHUB_OUTPUT" <<'EOF'
-          import json, sys
+          python -B - "$OUT/ADMISSION.json" >> "$GITHUB_OUTPUT" <<'EOF'
+          import json, os, sys
+          sys.path.insert(0, "container_harness")
+          import relay_usage
           a = json.load(open(sys.argv[1]))
+          live = len(relay_usage.live_rows(a))
           print("matrix=" + json.dumps({"include": a["matrix"]}))
           print("count=" + str(len(a["matrix"])))
+          print("live_count=" + str(live))
+          print("max_parallel=" + str(relay_usage.max_parallel(os.environ.get("MAX_PARALLEL_INPUT"), live)))
           EOF
+          python -I container_harness/relay_usage.py live-gate "$OUT/ADMISSION.json" \
+            --live-max-cases "$LIVE_MAX_CASES" --out "$OUT/LIVE-GATE.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY" || true  # recorded here; enforced after the upload
           python -B - "$OUT/ADMISSION.json" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           import json, sys
           sys.path.insert(0, "container_harness")
@@ -222,6 +251,12 @@ jobs:
         run: |
           python -B -c "import json, sys; sys.path.insert(0, 'container_harness'); import cases_report as r; g = r.admission_gate(json.load(open('$OUT/ADMISSION.json'))); print('execution gate (admission):', json.dumps(g)); sys.exit(1 if g['status'] == 'FAIL' else 0)"
 
+      - name: Live spend gate (live_max_cases + run token cap; after the admission upload)
+        # Any selection with live-role cases (paid Kong calls) needs an explicit live_max_cases;
+        # more live cases than that, or per-case token caps summing above 5M, fail the run here,
+        # so no case job (and no Kong call) starts.
+        run: python -I container_harness/relay_usage.py live-gate "$OUT/ADMISSION.json" --live-max-cases "$LIVE_MAX_CASES" --out "$RUNNER_TEMP/live-gate.json"
+
   case:
     needs: admission
     if: needs.admission.outputs.count != '0' && needs.admission.outputs.count != ''
@@ -229,7 +264,8 @@ jobs:
     timeout-minutes: 40
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '8') }}
+      # the input (default 8); 3 when any live-role case is selected (relay_usage.max_parallel)
+      max-parallel: ${{ fromJSON(needs.admission.outputs.max_parallel || '8') }}
       matrix: ${{ fromJSON(needs.admission.outputs.matrix) }}
     env:
       CASE_OUT: ${{ github.workspace }}/case-out/${{ matrix.case_id }}
@@ -264,20 +300,37 @@ jobs:
         if: matrix.role_mode == 'live'
         run: bash container_harness/relay_ci.sh net-up "$RELAY_DIR"
 
+      - name: Relay caps from the admission matrix row (live-role case)
+        # expected_calls / max_requests / max_total_tokens / max_model_usd / live_roles come from
+        # the matrix row once case_driver (sub-wave 4b) fills them; until then conservative
+        # defaults (24 requests, 200000 tokens, USD 5, all relay roles). Each cap's source is
+        # recorded in relay-caps.json, copied into the case's relay evidence.
+        id: caps
+        if: matrix.role_mode == 'live'
+        env:
+          MATRIX_ROW: ${{ toJSON(matrix) }}
+        run: |
+          python -I container_harness/relay_usage.py caps --out "$RUNNER_TEMP/relay-caps.json" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/relay-caps.json"
+
       - name: Start host relay (live-role case; the only step that sees the Kong key)
         if: matrix.role_mode == 'live'
         env:
           KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
-          RELAY_ROLES: compiler planner repairer reviewer evidence_checker verifier router
-          RELAY_MAX_REQUESTS: "60"
+          RELAY_ROLES: ${{ steps.caps.outputs.roles }}
+          RELAY_MAX_REQUESTS: ${{ steps.caps.outputs.max_requests }}
+          RELAY_MAX_TOTAL_TOKENS: ${{ steps.caps.outputs.max_total_tokens }}
+          RELAY_BUDGET: ${{ steps.caps.outputs.budget_usd }}
           RELAY_MAX_TOKENS: "2048"
           RELAY_RUN_SECONDS: "2100"
         run: bash container_harness/relay_ci.sh relay-start "$RELAY_DIR"
 
       - name: Run case in the traced container (no network; live roles via the relay only)
+        # A live-role case keeps its exited container (name in $CASE_OUT/container.txt) for the
+        # docker-export key scan below; the removal step after it always runs.
         run: |
           relay=()
-          [ "${{ matrix.role_mode }}" = live ] && relay=(--relay-dir "$RELAY_DIR")
+          if [ "${{ matrix.role_mode }}" = live ]; then relay=(--relay-dir "$RELAY_DIR" --keep-container); fi
           python container_harness/launch.py run case --case-id "${{ matrix.case_id }}" \
             --image "$IMG" --out "$CASE_OUT" "${relay[@]}"
 
@@ -287,13 +340,28 @@ jobs:
           bash container_harness/relay_ci.sh teardown "$RELAY_DIR"
           mkdir -p "$CASE_OUT/relay"
           cp "$RELAY_DIR"/*.json "$RELAY_DIR"/*.jsonl "$RELAY_DIR"/*.txt "$RELAY_DIR"/relay.std* "$CASE_OUT/relay/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/relay-caps.json" "$CASE_OUT/relay/" 2>/dev/null || true
           test ! -e "$RELAY_DIR/secret"
 
-      - name: Key-absence scan of the case artifacts (live-role case; counts only)
+      - name: Key-absence scan of the exported container + case artifacts + relay dir (live-role case; counts only)
         if: always() && matrix.role_mode == 'live'
         env:
           KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
-        run: python -I container_harness/kong_key_scan.py --scan-dir "$CASE_OUT" --out "$RUNNER_TEMP/key-scan.json" && cp "$RUNNER_TEMP/key-scan.json" "$CASE_OUT/relay/"
+        run: |
+          c=$(cat "$CASE_OUT/container.txt" 2>/dev/null || true)
+          rc=0
+          python -I container_harness/kong_key_scan.py ${c:+--container "$c"} \
+            --scan-dir "$CASE_OUT" --scan-dir "$RELAY_DIR" --out "$RUNNER_TEMP/key-scan.json" || rc=$?
+          mkdir -p "$CASE_OUT/relay"
+          cp "$RUNNER_TEMP/key-scan.json" "$CASE_OUT/relay/" 2>/dev/null || true
+          exit "$rc"
+
+      - name: Remove the kept case container (live-role case; always, after the key scan)
+        if: always() && matrix.role_mode == 'live'
+        run: |
+          c=$(cat "$CASE_OUT/container.txt" 2>/dev/null || true)
+          if [ -n "$c" ]; then docker rm -f "$c" > /dev/null; fi
+          if [ -n "$c" ] && docker container inspect "$c" > /dev/null 2>&1; then exit 1; fi
 
       - name: Pack raw trace separately
         if: always()
@@ -326,6 +394,11 @@ jobs:
     if: always() && needs.admission.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read  # rerun_of_run_id: download the ORIGINAL run's simkit-results artifact
+    env:
+      RERUN_OF_RUN_ID: ${{ github.event.inputs.rerun_of_run_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -346,13 +419,27 @@ jobs:
           pattern: case-*
           path: report-in/cases
 
+      - name: Original run's results (rerun dispatch only; reported alongside, never replaced)
+        if: github.event.inputs.rerun_of_run_id != ''
+        # No continue-on-error: a rerun whose original cannot be read must not report as a
+        # first attempt (cases_report.py --prior-results also refuses an absent file).
+        uses: actions/download-artifact@v4
+        with:
+          name: simkit-results
+          path: report-in/prior
+          run-id: ${{ github.event.inputs.rerun_of_run_id }}
+          github-token: ${{ github.token }}
+
       - name: Aggregate RESULTS.json + RESULTS.md
         run: |
           mkdir -p results
           mkdir -p report-in/cases
+          prior=()
+          if [ -n "$RERUN_OF_RUN_ID" ]; then prior=(--prior-results report-in/prior/RESULTS.json); fi
           python -B container_harness/cases_report.py report-in/admission/ADMISSION.json report-in/cases \
             --out results/RESULTS.json --markdown results/RESULTS.md \
-            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${prior[@]}"
           cp report-in/admission/ADMISSION.json results/
           cat results/RESULTS.md >> "$GITHUB_STEP_SUMMARY"
 
