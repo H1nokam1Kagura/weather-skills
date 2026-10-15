@@ -622,3 +622,101 @@ def test_monthly_refuses_end_time(tmp_path, aggregate):
             "2026-02-01",
         )
     assert exc.value.code == 2
+
+
+def _weekly(tmp_path, aggregate, n_days):
+    src = write_zarr(make_gridded(n_time=n_days, fill=2.0), tmp_path / "daily.zarr")
+    weekly = tmp_path / "weekly.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(weekly), "--period", "weekly")
+    return weekly
+
+
+@pytest.mark.parametrize("period", ["monthly", "dekadal", "10 day", "daily"])
+def test_reaggregate_weekly_refuses_bins_that_split_weeks(tmp_path, aggregate, period):
+    """A week straddling a month edge would land whole in its label's month."""
+    weekly = _weekly(tmp_path, aggregate, 63)
+    out = tmp_path / "out.zarr"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(aggregate, "-i", str(weekly), "-o", str(out), "--period", period)
+    assert exc.value.code == 2
+    assert not out.exists()
+
+
+def test_reaggregate_weekly_refuses_end_time_off_the_week_grid(tmp_path, aggregate):
+    weekly = _weekly(tmp_path, aggregate, 28)  # weeks start 2026-01-01
+    out = tmp_path / "out.zarr"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            aggregate,
+            "-i",
+            str(weekly),
+            "-o",
+            str(out),
+            "--period",
+            "14 day",
+            "--end-time",
+            "2026-01-30",
+        )
+    assert exc.value.code == 2
+    run_skill(
+        aggregate,
+        "-i",
+        str(weekly),
+        "-o",
+        str(out),
+        "--period",
+        "14 day",
+        "--end-time",
+        "2026-01-29",
+    )
+    assert xr.open_zarr(out).sizes["time"] == 2
+
+
+def test_reaggregate_counts_partial_week_at_its_coverage(tmp_path, aggregate):
+    """Full week + a 3/7 week in one 14-day bin is 10/14 covered, not complete."""
+    weekly = _weekly(tmp_path, aggregate, 10)
+    out = tmp_path / "out.zarr"
+    run_skill(aggregate, "-i", str(weekly), "-o", str(out), "--period", "14 day")
+    cov = xr.open_zarr(out)[AGGREGATION_COVERAGE_COORD].values
+    assert cov.tolist() == pytest.approx([10 / 14])
+
+
+def test_step_bin_on_last_edge_is_kept(tmp_path, aggregate):
+    """Daily leads 0..14 d: lead 14 d starts week 3 and must not be dropped."""
+    ds = make_forecast(name="tp", n_step=15, fill=1.0)
+    ds = ds.assign_coords(
+        step=("step", np.arange(15).astype("timedelta64[D]").astype("timedelta64[ns]"))
+    )
+    ds["tp"].attrs.update(units="mm day-1", data_interval="1 day")
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(out), "--period", "weekly")
+    weekly = xr.open_zarr(out)
+    assert weekly.sizes["step"] == 3
+    assert weekly[AGGREGATION_COVERAGE_COORD].values.tolist() == pytest.approx([1, 1, 1 / 7])
+
+
+@pytest.mark.parametrize("calendar, feb_days", [("noleap", 28), ("360_day", 30)])
+def test_monthly_on_model_calendar_uses_its_month_length(tmp_path, aggregate, calendar, feb_days):
+    import cftime
+
+    times = xr.date_range(
+        "2026-02-01", periods=feb_days, freq="D", calendar=calendar, use_cftime=True
+    )
+    ds = make_gridded(n_time=feb_days).assign_coords(time=times)
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(out), "--period", "monthly")
+    monthly = xr.open_zarr(out, decode_times=xr.coders.CFDatetimeCoder(use_cftime=True))
+    assert isinstance(monthly["time"].values[0], cftime.datetime)
+    assert monthly[AGGREGATION_COVERAGE_COORD].values.tolist() == pytest.approx([1.0])
+
+
+def test_end_time_reports_samples_left_out(tmp_path, aggregate, capsys):
+    """Copying an inclusive fetch end date drops that day; say so."""
+    src = write_zarr(make_gridded(n_time=14, start="2026-01-01"), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        aggregate, "-i", str(src), "-o", str(out), "--period", "weekly", "--end-time", "2026-01-14"
+    )
+    assert "1 sample(s) at or after --end-time" in capsys.readouterr().err

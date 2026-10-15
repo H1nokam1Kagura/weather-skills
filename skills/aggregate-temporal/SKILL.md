@@ -50,7 +50,8 @@ Exactly one of `--period` or `--window` is required.
 - `--output`, `-o` — output Zarr.
 - `--period` — calendar/step window: `daily` (1d), `weekly` (7d), `dekadal`
   (a fixed 10 days back to back — **not** calendar dekads 1–10 / 11–20 /
-  21–end of month), `monthly` (calendar months, 1st to 1st; refused with
+  21–end of month), `monthly` (calendar months, 1st to 1st, in the input's
+  own calendar — `noleap` and `360_day` months included; refused with
   `--end-time` and on `step`), or a pint duration in whole days (`21 day`,
   `3 week`). Mutex with `--window`. Use a duration when you need a window the
   named periods do not cover (e.g. 21-day totals from half-hourly IMERG).
@@ -70,9 +71,22 @@ Exactly one of `--period` or `--window` is required.
 - `--end-time` — with `--period` on a `time` axis: exclusive right edge of
   the final bin (bins walk backward). Labeled at the **left** edge, same
   as forecast `step` buckets — a week with `--end-time 2026-08-31` is
-  `[2026-08-24, 2026-08-31)` labeled `2026-08-24`. Copy the `YYYY-MM-DD`
-  from fetch / resolve-time. No effect on `step` or `--window`.
+  `[2026-08-24, 2026-08-31)` labeled `2026-08-24`. Fetch and resolve-time
+  end dates are **inclusive**, so pass the day after: data fetched through
+  2026-09-30 takes `--end-time 2026-10-01`. Samples at or after `--end-time`
+  are left out and counted on stderr. No effect on `step` or `--window`.
 - `--start-time` — with `--period` and `--end-time`: optional earliest coverage floor. Requires `--end-time`.
+
+### Re-aggregating aggregated data
+
+Input that is already aggregated (e.g. weekly) is binned by whole samples:
+each bin must hold a whole number of input samples. `--period` must be a
+multiple of the input spacing (weekly → `14 day` or `28 day`), and with
+`--end-time` the edge must sit on the input's own week grid. Weekly →
+`monthly`, `dekadal`, `10 day` or `daily` exits 2: a week straddles the bin
+edge. Aggregate from the daily data instead. A partial input bin counts at
+its own `aggregation_coverage`, so a 3/7 week inside a 14-day bin makes that
+bin 10/14, not complete.
 
 ### Missing data is never filled
 
