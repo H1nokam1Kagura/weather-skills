@@ -48,11 +48,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/select_dim.py --input <in.zarr> --output <out
 - `--output`, `-o` — output Zarr, replaced if it exists. Use a new path;
   pointing it at the input destroys the input.
 - `--dim` — the dimension to select along (exactly one per run).
-- `--index` — integer position to select. Repeat once per position. Strict
-  integers only (ASCII digits; no floats, signs other than a leading minus,
-  or separators); negative positions count from the end (`-1` is the last
+- `--index` — integer position to select; repeat once per position. Plain
+  integers only; negative positions count from the end (`-1` is the last
   entry). Mutually exclusive with `--value`.
-- `--value` — coordinate value to select. Repeat once per value. Mutually
+- `--value` — coordinate value to select; repeat once per value. Mutually
   exclusive with `--index`.
 
 ### Selector semantics
@@ -67,16 +66,17 @@ position, the dim, and its size.
 | Coord dtype | Literal form | Example |
 | --- | --- | --- |
 | `datetime64` | naive ISO datetime string (no timezone suffix, no `now`/`today`) | `2026-06-01`, `2026-06-01T06:00` |
+| cftime (model calendars: `noleap`, `360_day`, ...) | `YYYY-MM-DD[THH[:MM[:SS]]]`, read in the coord's calendar | `2026-02-30` on `360_day` |
 | `timedelta64` | pandas-style timedelta string | `7D`, `168h` |
 | numeric | int or float literal (no underscores, `nan`, or `inf`) | `0`, `1.5` |
 | string | verbatim, including NumPy `StringDType` (Zarr v3 station ids) | `TA00001` |
 
-Matching is exact (no nearest-neighbor lookup). A value absent from the coord
-errors with a sample of the available values; a value matching more than one
-entry (duplicate coord labels) errors as ambiguous; a literal unparseable for
-the coord's dtype errors naming the dtype and the expected form; two values
-addressing the same element error. A dim that has no coordinate variable
-rejects `--value` with an error directing to `--index`.
+Matching is exact, with no nearest-neighbour lookup. The one exception is float
+coords, which match within 1e-9, so `--value 0.3` finds a label stored as
+`0.30000000000000004`. A value that isn't on the coord errors with the first
+few available values. A value that matches duplicate labels errors and points
+to `--index`, as does `--value` on a dim with no coordinate variable. A literal
+that can't be parsed for the coord's type errors with the expected form.
 
 ### Output
 
@@ -94,11 +94,11 @@ order; `--index 2 --index 0` reverses those two entries). Selecting by
 `--value` produces the same data as selecting the corresponding positions by
 `--index`.
 
-All other dims, coords, data variables, values, and `weather_skills_*` attrs pass
-through unchanged. On any argument, input, or selection validation error —
-missing or unreadable input, an output path that exists as a plain file,
-unknown dim, bad selector — the skill exits with code 2 and a clear `Error:`
-message; no output is produced.
+All other dims, coords, data variables, values, and `weather_skills_*` attrs
+pass through unchanged. Any argument, input, or selection error exits with
+code 2, prints an `Error:` message, and writes no output. That covers a
+missing input, an unknown `--dim`, an out-of-range `--index`, a bad or absent
+`--value`, and an output path that is an existing plain file.
 
 ### Provenance
 
