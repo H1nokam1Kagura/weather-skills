@@ -1452,7 +1452,9 @@ def test_projection_inputs_go_to_the_harness_channel_not_a_created_path(tmp_path
 def test_run_case_is_opt_in_and_refuses_undeclared_capabilities_before_side_effects(
     tmp_path, frozen
 ):
-    case = copy.deepcopy(frozen["cases"][0])
+    # A case the committed producer file does NOT admit (the first frozen case is admitted since
+    # the wave-5 signatures), so the refusal under test is the undeclared-capability one.
+    case = copy.deepcopy(next(c for c in frozen["cases"] if c["id"] not in SIGNED_ADMITTED))
     with pytest.raises(AdapterRefusal, match="disabled"):
         WeatherAdapter().run_case(case, {})
     profile = {"case_root": tmp_path / "never-created"}
