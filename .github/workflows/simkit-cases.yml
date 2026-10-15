@@ -171,10 +171,17 @@ jobs:
           print("matrix=" + json.dumps({"include": a["matrix"]}))
           print("count=" + str(len(a["matrix"])))
           EOF
-          python - "$OUT/ADMISSION.json" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          python -B - "$OUT/ADMISSION.json" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           import json, sys
+          sys.path.insert(0, "container_harness")
+          import cases_report
           a = json.load(open(sys.argv[1]))
           c = a["counts"]
+          g = cases_report.admission_gate(a)
+          if c["selected"] == 0:
+              print(f"## {g['message']}\n")
+          if g["status"] == "FAIL":
+              print("**This run will FAIL: the selector is meant to execute cases.**\n")
           print(f"### Admission (frozen runner)\n\nselector `{a['selector']}`: {c['total']} cases, "
                 f"admitted {c['admitted']}, NOT_IMPLEMENTED {c['not_implemented']}, "
                 f"selected {c['selected']}\n\ndispositions: `{json.dumps(c['dispositions'])}`\n")
@@ -208,6 +215,12 @@ jobs:
       - name: Unknown case ids in the selector fail the run (after the admission upload)
         run: |
           python -c "import json, sys; a = json.load(open('$OUT/ADMISSION.json')); u = a['unknown_selected_ids']; print('unknown ids:', u); sys.exit(1 if u else 0)"
+
+      - name: A selector meant to execute cases that selects none fails the run (after the admission upload)
+        # 'admission' / 'relay-smoke' / push 'smoke' select nothing by design and pass here; the
+        # report job's execution gate also fails a run whose EXECUTED count is below selected.
+        run: |
+          python -B -c "import json, sys; sys.path.insert(0, 'container_harness'); import cases_report as r; g = r.admission_gate(json.load(open('$OUT/ADMISSION.json'))); print('execution gate (admission):', json.dumps(g)); sys.exit(1 if g['status'] == 'FAIL' else 0)"
 
   case:
     needs: admission
@@ -350,3 +363,6 @@ jobs:
           name: simkit-results
           path: results
           retention-days: 30
+
+      - name: Execution gate (after the results upload; fails when selected cases did not all EXECUTE)
+        run: python -B container_harness/cases_report.py gate results/RESULTS.json

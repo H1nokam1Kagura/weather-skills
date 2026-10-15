@@ -97,7 +97,29 @@ def test_rewrite_scope_is_the_amendments_192_uses(frozen):
     assert total == 192
 
 
-def synthetic_case():
+NA_ASSERTION = {
+    # An observed-false antecedent with vacuous=not_applicable: the frozen scorer returns
+    # NOT_APPLICABLE for the assertion (and its judgment dimension), never PASS.
+    "id": "J-NA",
+    "dimension": "judgment",
+    "predicate": {
+        "operator": "implies",
+        "vacuous": "not_applicable",
+        "observation": "controller_trace.terminal.outcome == NEEDS_INFO",
+        "operand": [f"{GATE}.verdict == PASS"],
+    },
+}
+
+
+def synthetic_case(with_na=False):
+    case = _synthetic_case()
+    if with_na:
+        case["dimension_applicability"]["judgment"] = "APPLICABLE"
+        case["assertions"].append(copy.deepcopy(NA_ASSERTION))
+    return case
+
+
+def _synthetic_case():
     return {
         "id": SYN,
         "kind": "control",
@@ -131,17 +153,18 @@ def synthetic_case():
     }
 
 
-def run_report(tmp_path, monkeypatch, frozen, statuses):
+def run_report(tmp_path, monkeypatch, frozen, statuses, with_na=False):
     root, _ = frozen
 
     class WithSynthetic(wcf.Rescorer):
         def __init__(self, root):
             super().__init__(root)
-            self.by_id[SYN] = synthetic_case()
+            self.by_id[SYN] = synthetic_case(with_na)
 
     monkeypatch.setattr(wcf, "Rescorer", WithSynthetic)
     ev = evidence(*statuses)
-    scored = WithSynthetic(root).score(synthetic_case(), ev)  # the frozen scorer, frozen case
+    # the frozen scorer, frozen case
+    scored = WithSynthetic(root).score(synthetic_case(with_na), ev)
     d = artifact(
         tmp_path,
         SYN,
@@ -189,6 +212,55 @@ def test_report_carries_a_labelled_counterfactual_and_keeps_the_frozen_headline(
     assert "utility=PASS" in line.split(" | ")[5] and "U-WARN FAIL->PASS" in line
     assert f"## Counterfactual: {wcf.LABEL}" in md
     assert f"| {SYN} | U-WARN | FAIL | PASS |" in md
+
+
+@pytest.mark.parametrize(
+    "statuses, no_non_pass, clean",
+    [
+        # WARN: frozen utility FAIL; the counterfactual flips it, but J-NA is NOT_APPLICABLE,
+        # so only the all-PASS-or-NOT_APPLICABLE line counts the counterfactual case clean.
+        (["PASS", "WARN"], (0, 0), (0, 1)),
+        # All checks PASS: every dimension PASS / NOT_APPLICABLE and terminal PASS both ways,
+        # yet the J-NA assertion keeps the case out of the no-non-PASS-assertion count.
+        (["PASS"], (0, 0), (1, 1)),
+    ],
+)
+def test_not_applicable_is_counted_clean_on_its_own_labelled_line(
+    tmp_path, monkeypatch, frozen, statuses, no_non_pass, clean
+):
+    scored, res = run_report(tmp_path, monkeypatch, frozen, statuses, with_na=True)
+    e = by_id(res)[SYN]
+    assert e["assertions"]["J-NA"] == "NOT_APPLICABLE" and e["terminal"] == "PASS"
+    assert e["dimensions"]["judgment"] == "NOT_APPLICABLE"
+    assert e[wcf.JSON_KEY]["status"] == "COMPUTED"
+    top = res[wcf.JSON_KEY]
+    assert top["cases_with_no_non_pass_assertion"] == {
+        "as_frozen": no_non_pass[0],
+        wcf.LABEL: no_non_pass[1],
+        "of_computed": 1,
+    }
+    key = "cases_all_dimensions_pass_or_not_applicable_and_terminal_pass"
+    assert cases_report.CLEAN_KEY == key
+    assert top[key] == {"as_frozen": clean[0], wcf.LABEL: clean[1], "of_computed": 1}
+    md = cases_report.markdown(res).splitlines()
+    old = (
+        f"- Cases with no non-PASS assertion: as frozen {no_non_pass[0]} of 1; "
+        f"{wcf.LABEL} {no_non_pass[1]} of 1"
+    )
+    new = (
+        "- Cases whose dimensions are all PASS or NOT_APPLICABLE and terminal PASS: "
+        f"as frozen {clean[0]} of 1; {wcf.LABEL} {clean[1]} of 1"
+    )
+    assert old in md and new in md and md.index(new) == md.index(old) + 1
+
+
+def test_clean_case_needs_terminal_pass_and_a_dimension():
+    na = {"judgment": "NOT_APPLICABLE", "utility": "PASS"}
+    assert cases_report.clean_case(na, "PASS")
+    assert not cases_report.clean_case(na, "FAIL")
+    assert not cases_report.clean_case(na, "NOT_OBSERVED")
+    assert not cases_report.clean_case({**na, "recovery": "NOT_OBSERVED"}, "PASS")
+    assert not cases_report.clean_case({}, "PASS") and not cases_report.clean_case(None, "PASS")
 
 
 @pytest.mark.parametrize("bad", ["FAIL", "BLOCK", "UNVERIFIABLE"])

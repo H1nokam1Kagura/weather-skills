@@ -2,6 +2,8 @@
 
 usage: python container_harness/cases_report.py ADMISSION.json CASES_DIR --out RESULTS.json
                                                  --markdown RESULTS.md [--run-url URL]
+       python container_harness/cases_report.py gate RESULTS.json   (exit 1 on a FAILed
+                                                 execution gate; see execution_gate)
 
 CASES_DIR holds one directory per executed matrix case (the downloaded per-case artifacts,
 each with launch.json and, when the in-container post-processing ran, score.json).
@@ -43,6 +45,63 @@ HEADER = (
     "nothing is PASS without observed evidence; MISSING stays MISSING."
 )
 DIMENSIONS = ("judgment", "containment", "recovery", "utility")
+# Dimension results counted as clean by the all-PASS-or-NOT_APPLICABLE line (NOT_APPLICABLE is
+# a non-PASS assertion verdict, but not a failed dimension).
+CLEAN_DIMENSION_RESULTS = ("PASS", "NOT_APPLICABLE")
+CLEAN_KEY = "cases_all_dimensions_pass_or_not_applicable_and_terminal_pass"
+
+# Selectors that select no case BY DESIGN ('smoke' is the push run: at most two cases, and only
+# if admitted). Every other selector ('substituted', 'live', explicit ids) is meant to execute
+# cases, so selecting none, or executing fewer than selected, fails the run (execution_gate).
+NO_EXECUTION_SELECTORS = ("admission", "relay-smoke", "smoke")
+NOTHING_WILL_EXECUTE = (
+    "NOTHING WILL EXECUTE: selector '{selector}' selects 0 cases; "
+    "use 'substituted' for runnable offline cases"
+)
+
+
+def execution_gate(selector, selected, executed=None):
+    """Whether this run did what its selector asked: never 'nothing ran, reported success'.
+
+    status OK | NOTHING_SELECTED_BY_DESIGN (an admission-only selector) | FAIL (a selector meant
+    to execute cases selected none, or fewer cases EXECUTED than were selected) |
+    SHORTFALL_NOT_ENFORCED (fewer executed than selected under a no-execution selector).
+    executed=None (admission time, before any case ran) checks the selection only."""
+    expects = selector not in NO_EXECUTION_SELECTORS
+    if selected == 0:
+        status = "FAIL" if expects else "NOTHING_SELECTED_BY_DESIGN"
+        message = NOTHING_WILL_EXECUTE.format(selector=selector)
+    elif executed is not None and executed < selected:
+        status = "FAIL" if expects else "SHORTFALL_NOT_ENFORCED"
+        message = f"only {executed} of {selected} selected cases EXECUTED"
+    else:
+        status = "OK"
+        message = f"{selected} cases selected" + (
+            "" if executed is None else f", {executed} EXECUTED"
+        )
+    return {
+        "selector": selector,
+        "expects_execution": expects,
+        "selected": selected,
+        "executed": executed,
+        "status": status,
+        "message": message,
+    }
+
+
+def admission_gate(admission):
+    """execution_gate at admission time, from ADMISSION.json (before any case runs)."""
+    return execution_gate(admission.get("selector"), admission["counts"]["selected"])
+
+
+def clean_case(dimensions, terminal):
+    """Every dimension PASS or NOT_APPLICABLE, and terminal PASS (no dimension = not clean)."""
+    dims = dimensions or {}
+    return (
+        bool(dims)
+        and all(v in CLEAN_DIMENSION_RESULTS for v in dims.values())
+        and terminal == "PASS"
+    )
 
 
 def load(path):
@@ -234,6 +293,17 @@ def build(admission, cases_dir, run_url=None):
             wcf.LABEL: sum(1 for e in computed if not e[wcf.JSON_KEY]["non_pass"]),
             "of_computed": len(computed),
         },
+        CLEAN_KEY: {
+            "as_frozen": sum(
+                1 for e in computed if clean_case(e.get("dimensions"), e.get("terminal"))
+            ),
+            wcf.LABEL: sum(
+                1
+                for e in computed
+                if clean_case(e[wcf.JSON_KEY].get("dimensions"), e[wcf.JSON_KEY].get("terminal"))
+            ),
+            "of_computed": len(computed),
+        },
         "assertions_changed": {
             e["case_id"]: e[wcf.JSON_KEY]["assertions_changed"]
             for e in computed
@@ -253,6 +323,9 @@ def build(admission, cases_dir, run_url=None):
         "adapter": admission.get("adapter"),
         "implemented_capabilities": admission.get("implemented_capabilities"),
         "selector": admission.get("selector"),
+        "execution_gate": execution_gate(
+            admission.get("selector"), sum(1 for r in rows if r.get("selected")), executed
+        ),
         "counts": {
             "total": len(per_case),
             "pairs": len(pairs),
@@ -269,6 +342,22 @@ def build(admission, cases_dir, run_url=None):
     }
 
 
+def gate_lines(gate):
+    """Prominent RESULTS.md lines for the execution gate (nothing when it is OK)."""
+    if not gate or gate["status"] == "OK":
+        return []
+    if gate["status"] == "FAIL":
+        return [f"> **RUN FAILS (execution gate): {gate['message']}**", ""]
+    return [f"> **{gate['status']}: {gate['message']}**", ""]
+
+
+def main_gate_exit(results_path):
+    """Exit status for the workflow's last report step: 1 when the execution gate FAILs."""
+    gate = (load(results_path) or {}).get("execution_gate") or {"status": "FAIL"}
+    print("execution gate:", json.dumps(gate))
+    return 1 if gate["status"] == "FAIL" else 0
+
+
 def markdown(res):
     c = res["counts"]
     lines = [
@@ -276,6 +365,7 @@ def markdown(res):
         "",
         f"> {res['header']}",
         "",
+        *gate_lines(res.get("execution_gate")),
         f"- Run: {res['run_url'] or 'n/a'}",
         f"- GS1: **{res['gs1']}**",
         f"- Adapter: `{res['adapter']}`; selector `{res['selector']}`",
@@ -340,6 +430,7 @@ def markdown(res):
     cfr = res.get(wcf.JSON_KEY)
     if cfr:
         clean = cfr["cases_with_no_non_pass_assertion"]
+        tidy = cfr[CLEAN_KEY]
         lines += [
             f"## Counterfactual: {wcf.LABEL} "
             "(not applied; the frozen result above is the headline)",
@@ -357,6 +448,9 @@ def markdown(res):
             ),
             f"- Cases with no non-PASS assertion: as frozen {clean['as_frozen']} of "
             f"{clean['of_computed']}; {wcf.LABEL} {clean[wcf.LABEL]} of {clean['of_computed']}",
+            "- Cases whose dimensions are all PASS or NOT_APPLICABLE and terminal PASS: "
+            f"as frozen {tidy['as_frozen']} of {tidy['of_computed']}; "
+            f"{wcf.LABEL} {tidy[wcf.LABEL]} of {tidy['of_computed']}",
             "",
             f"| case | assertion | as frozen | {wcf.LABEL} |",
             "|---|---|---|---|",
@@ -377,6 +471,8 @@ def markdown(res):
 
 
 def main(argv):
+    if len(argv) == 3 and argv[1] == "gate":
+        return main_gate_exit(argv[2])
     ap = argparse.ArgumentParser()
     ap.add_argument("admission")
     ap.add_argument("cases_dir")
