@@ -204,6 +204,8 @@ def fetch(
         )
 
     source_globals = dict(ds.attrs)
+    # CMIP6's own cell edges, e.g. [Dec 1, Jan 1) for a mid-month Amon label.
+    native_bounds = ds.get(ds["time"].attrs.get("bounds", "time_bnds"))
     ds = ds[[variable]]
     ds = ds.rename({"lat": "latitude", "lon": "longitude"})
     ds = _drop_bounds(ds)
@@ -267,7 +269,14 @@ def fetch(
     )
     ds = to_standard_units(ds)
     ds = precip_amounts_to_rates(ds)
-    return stamp_data_interval(ds)
+    ds = stamp_data_interval(ds)
+    # Irregular axes (monthly tables) get CF bounds. Inferred ones treat each
+    # mid-month label as a cell end ([Nov 16, Dec 16] for December), which
+    # blends adjacent months when aggregated; use the source's edges instead.
+    name = ds["time"].attrs.get("bounds")
+    if name and native_bounds is not None:
+        ds[name] = (ds[name].dims, native_bounds.sel(time=ds["time"]).values)
+    return ds
 
 
 if __name__ == "__main__":

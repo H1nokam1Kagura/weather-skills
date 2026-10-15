@@ -127,6 +127,12 @@ def _as_ns(val):
     if isinstance(val, (pd.Timestamp, pd.Timedelta)):
         val = val.to_numpy()
     arr = np.asarray(val)
+    if arr.dtype.kind == "O" and hasattr(arr.flat[0], "calendar"):
+        import cftime
+
+        # Model calendars (noleap, 360_day): ns since a fixed epoch in that calendar.
+        seconds = cftime.date2num(arr, "seconds since 1970-01-01", calendar=arr.flat[0].calendar)
+        return np.round(np.asarray(seconds, dtype=float) * 1e9).astype(np.int64)
     if arr.dtype.kind == "m":
         return arr.astype("timedelta64[ns]").astype(np.int64)
     if arr.dtype.kind == "M":
@@ -344,9 +350,11 @@ def _aggregate_time_resample(ds, dim, spec, method):
         bins = []
         for label in resampler.groups:
             if spec["key"] == "monthly":
-                import pandas as pd
-
-                left, right = label, pd.Timestamp(label) + pd.offsets.MonthBegin(1)
+                # replace() works for pandas and cftime labels alike.
+                year, month = (
+                    (label.year + 1, 1) if label.month == 12 else (label.year, label.month + 1)
+                )
+                left, right = label, label.replace(year=year, month=month)
             elif hasattr(label, "calendar"):
                 left = label
                 right = label + _dt.timedelta(days=spec["anchor_days"])

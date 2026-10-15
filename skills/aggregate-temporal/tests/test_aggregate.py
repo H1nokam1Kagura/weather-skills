@@ -720,3 +720,23 @@ def test_end_time_reports_samples_left_out(tmp_path, aggregate, capsys):
         aggregate, "-i", str(src), "-o", str(out), "--period", "weekly", "--end-time", "2026-01-14"
     )
     assert "1 sample(s) at or after --end-time" in capsys.readouterr().err
+
+
+def test_monthly_on_model_calendar_with_bounds(tmp_path, aggregate):
+    """CMIP6 Amon: mid-month noleap labels with [1st, next 1st) bounds."""
+    import cftime
+
+    labels = [cftime.DatetimeNoLeap(2030, m, 15, 12) for m in (1, 2, 3)]
+    edges = [cftime.DatetimeNoLeap(2030, m, 1) for m in (1, 2, 3, 4)]
+    ds = make_gridded(n_time=3).assign_coords(time=labels)
+    for i, value in enumerate((1.0, 2.0, 3.0)):
+        ds["precip"].values[i] = value
+    ds["time"].attrs["bounds"] = "time_bounds"
+    ds["time_bounds"] = (("time", "nv"), np.array([edges[:-1], edges[1:]]).T)
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(aggregate, "-i", str(src), "-o", str(out), "--period", "monthly")
+    monthly = xr.open_zarr(out, decode_times=xr.coders.CFDatetimeCoder(use_cftime=True))
+    # Each month is its own value, not a blend with its neighbour.
+    np.testing.assert_allclose(monthly["precip"].values[:, 0, 0], [1.0, 2.0, 3.0])
+    assert monthly[AGGREGATION_COVERAGE_COORD].values.tolist() == pytest.approx([1, 1, 1])

@@ -92,7 +92,10 @@ the overlap gate does not apply.
 
 ### Output metadata
 
-- Amount `units` / precip `standard_name` when applicable.
+- `units` always `mm`. A mass-flux rate (`kg m-2 s-1`, as in raw CMIP6 `pr`)
+  converts through liquid-water density (1 kg m-2 = 1 mm); a rate that cannot
+  become a depth exits non-zero.
+- Precip amount `standard_name`.
 - Precip `long_name` → `Total precipitation` (replaces product/rate names; the
   quantity is now a period total). Rate-like `GRIB_name` is rewritten the same
   way, and the product's rate `comment` / `short_name` are dropped.
