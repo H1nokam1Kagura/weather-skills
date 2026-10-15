@@ -318,6 +318,18 @@ def fetch(
     expanded = _expand_climatology(clim, start_time, end_time).load()
     expanded = expanded.drop_attrs(deep=False)
 
+    # The mirrors keep no value for an init whose valid date runs past Dec 31,
+    # so a lead of N days leaves Jan 1..Jan N empty. Never filled: say so.
+    empty = expanded[mean_name].isnull().all(["latitude", "longitude"])
+    if empty.any():
+        dates = pd.DatetimeIndex(expanded["time"].values[empty.values]).strftime("%Y-%m-%d")
+        print(
+            f"clim-fetch: WARNING: {len(dates)} of {expanded.sizes['time']} dates have "
+            f"no climatology value anywhere in the grid (left NaN, not filled): "
+            f"{', '.join(dates)}",
+            file=sys.stderr,
+        )
+
     expanded.attrs.update(
         Conventions="CF-1.13",
         weather_skills_source=f"sheerwater-mirror:{dataset}",

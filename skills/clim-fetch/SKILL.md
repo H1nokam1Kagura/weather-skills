@@ -18,8 +18,11 @@ Reads a static day-of-year climatology Zarr mirrored to a public GCS bucket
 (`gs://sheerwater-public-datalake/climatologies/<dataset>_<variable>_<window>d.zarr`
 — daily is `window=1`, one naming convention for every window). The source
 Zarr has dims `init_time`, `prediction_timedelta`, `lat`, `lon` —
-1904 init dates (a leap year, so once a lead is selected it always covers
-day-of-year 1..366 with no gaps). This skill:
+1904 init dates (a leap year, so every day-of-year 1..366 has a row). The
+multi-lead mirrors (`ecmwf_ifs`, `gefs`) hold no value for an init whose
+valid date runs past Dec 31, so at `--prediction-timedelta N` the dates
+Jan 1..Jan N come out NaN (never filled; stderr lists every date with no
+value anywhere in the grid). This skill:
 
 1. Selects one lead via `--prediction-timedelta` (days, default `0`) and
    realizes `time = init_time + prediction_timedelta`.
@@ -56,14 +59,14 @@ datasets" below.
 is correct for the precipitation sources below. OISST SST is a different
 variable — pass `--variable sst`.
 
-| `--dataset` | Source |
-| --- | --- |
-| `imerg_final` | IMERG final daily precipitation climatology (`--variable precip`) |
-| `era5` | ERA5 daily climatology (`--variable precip`) |
-| `chirps` | CHIRPS daily precipitation climatology (`--variable precip`) |
-| `ecmwf_ifs` | ECMWF IFS reforecast daily climatology — `precip`, `sst`, `uwind10m`, `vwind10m` |
-| `oisst` | NOAA OISST v2.1 daily sea-surface temperature climatology. Requires `--variable sst`. For live SST observations use `oisst-fetch`, not this skill. |
-| `gefs` | GEFS reforecast daily climatology — `precip`, `tmp2m` (2m temperature) |
+| `--dataset` | Source | Grid | Leads (days) |
+| --- | --- | --- | --- |
+| `imerg_final` | IMERG final daily precipitation climatology (`--variable precip`) | 0.1° | 0 |
+| `era5` | ERA5 daily climatology (`--variable precip`) | 0.25° | 0 |
+| `chirps` | CHIRPS daily precipitation climatology (`--variable precip`); same cell centers as `chirps-fetch` | 0.05° | 0 |
+| `ecmwf_ifs` | ECMWF IFS reforecast daily climatology — `precip`, `sst`, `uwind10m`, `vwind10m` | 1.5° | 0–45 |
+| `oisst` | NOAA OISST v2.1 daily sea-surface temperature climatology. Requires `--variable sst`. For live SST observations use `oisst-fetch`, not this skill. | 0.25° | 0 |
+| `gefs` | GEFS reforecast daily climatology — `precip`, `tmp2m` (2m temperature) | 1° | 0–34 |
 
 More datasets are added by mirroring a new Zarr under the same bucket
 convention — no CLI change needed once added. A `--dataset`/`--variable`
@@ -104,7 +107,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py \
 - `--bbox` — optional `N/W/S/E` bounding box; use `resolve-region` to turn a
   country or named region into this value first. Applied before the
   day-of-year expansion, on the still-lazy remote Zarr, so only the chunks
-  overlapping the bbox are pulled from GCS.
+  overlapping the bbox are pulled from GCS. Each chunk is 300×300 cells
+  × a whole year, so even a small bbox reads whole chunks (a Kenya CHIRPS
+  fetch peaks at ~1.4 GB RSS). Always pass `--bbox` for `chirps` and
+  `imerg_final`: without it the whole global year is read (tens of GB).
 
 ### Aggregating to a coarser window
 
@@ -118,13 +124,13 @@ separate aggregation step itself which is prone to errors:
    up locally with a `--window`-day window, labeled per `--align` (e.g.
    `--window 7 --align left` on day-of-year 100 averages days 100–106):
    - `<variable>_avg` rolls like an ordinary rate.
-   - `<variable>_std` is computed correctly, assuming independent days:
-     `Std(window mean) = sqrt(mean(std_i²)) / sqrt(window)` — squaring,
-     rolling through the same mean machinery used for `_avg`, dividing by
-     `window`, then taking the square root. This independence assumption
-     means the resulting std is an approximation, not exact — a warning to
-     that effect prints to stderr whenever this local-rolling fallback is
-     used (i.e. whenever a pre-aggregated `--window` cache isn't mirrored).
+   - `<variable>_std` is not the mean of the daily stds. It assumes
+     independent days: `Std(window mean) = sqrt(mean(std_i²)) / sqrt(window)`.
+     With the positive day-to-day correlation real rainfall has, this is a
+     lower bound — the true std lies between it and `mean(std_i)`. A
+     warning prints to stderr whenever this local roll-up is used (no
+     pre-aggregated `--window` cache is currently mirrored, so that is
+     every `--window` > 1).
 3. The climatology is circularly padded by `window` days on each end
    before rolling (day 366 wraps to day 1), so days near Jan 1 / Dec 31 get a
    full window instead of coming out `NaN` at the edges.
