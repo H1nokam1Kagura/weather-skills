@@ -10,6 +10,7 @@ import base64
 import io
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -68,7 +69,186 @@ def test_relay_smoke_is_dispatch_only_and_admission_skips_it():
     assert "github.event.inputs.selector != 'relay-smoke'" in text
 
 
+# ------------------------------------------------------------------ workflow (parsed YAML)
+
+
+def workflow():
+    import yaml  # simkit-cases.yml installs pyyaml for these tests: a missing one fails, never skips
+
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def named(job, prefix):
+    (hit,) = [
+        (i, s) for i, s in enumerate(job["steps"]) if (s.get("name") or "").startswith(prefix)
+    ]
+    return hit
+
+
+def test_workflow_declares_the_live_inputs():
+    wf = workflow()
+    inputs = (wf.get("on") or wf[True])["workflow_dispatch"]["inputs"]
+    for name in ("live_max_cases", "rerun_of_run_id"):
+        assert inputs[name]["required"] is False and inputs[name]["default"] == ""
+    assert "live" in inputs["live_max_cases"]["description"].lower()
+    assert inputs["max_parallel"]["default"] == "8"
+
+
+def test_harness_tests_install_pyyaml_for_the_wiring_tests():
+    _, step = named(workflow()["jobs"]["admission"], "Harness unit tests")
+    assert "pyyaml==" in step["run"]
+
+
+def test_live_spend_gate_runs_in_admission_after_the_upload():
+    adm = workflow()["jobs"]["admission"]
+    assert adm["env"]["LIVE_MAX_CASES"] == "${{ github.event.inputs.live_max_cases }}"
+    i_up, _ = named(adm, "Upload admission")
+    i_gate, gate = named(adm, "Live spend gate")
+    assert i_gate > i_up and "if" not in gate  # always enforced, never skipped
+    assert "container_harness/relay_usage.py live-gate" in gate["run"]
+    assert '--live-max-cases "$LIVE_MAX_CASES"' in gate["run"]
+    assert "|| true" not in gate["run"]
+    # the recorded copy (uploaded) is written in the matrix step, before the upload
+    i_matrix, matrix = named(adm, "Case matrix")
+    assert i_matrix < i_up and "LIVE-GATE.json" in matrix["run"]
+    assert "relay_usage.max_parallel(" in matrix["run"] and "live_count=" in matrix["run"]
+    assert adm["outputs"]["max_parallel"] == "${{ steps.matrix.outputs.max_parallel }}"
+    assert adm["outputs"]["live_count"] == "${{ steps.matrix.outputs.live_count }}"
+    # a failed admission job skips every case job (no Kong call)
+    assert workflow()["jobs"]["case"]["needs"] == "admission"
+
+
+def test_case_max_parallel_comes_from_admission():
+    case = workflow()["jobs"]["case"]
+    assert case["strategy"]["max-parallel"] == (
+        "${{ fromJSON(needs.admission.outputs.max_parallel || '8') }}"
+    )
+    import relay_usage
+
+    assert relay_usage.LIVE_MAX_PARALLEL == 3 and relay_usage.max_parallel("", 0) == 8
+
+
+def test_live_case_relay_caps_come_from_the_matrix_row():
+    case = workflow()["jobs"]["case"]
+    i_caps, caps = named(case, "Relay caps from the admission matrix row")
+    i_start, start = named(case, "Start host relay")
+    assert i_caps < i_start
+    assert caps["id"] == "caps" and caps["if"] == "matrix.role_mode == 'live'"
+    assert caps["env"] == {"MATRIX_ROW": "${{ toJSON(matrix) }}"}
+    assert "relay_usage.py caps" in caps["run"] and '>> "$GITHUB_OUTPUT"' in caps["run"]
+    env = start["env"]
+    assert env["RELAY_ROLES"] == "${{ steps.caps.outputs.roles }}"
+    assert env["RELAY_MAX_REQUESTS"] == "${{ steps.caps.outputs.max_requests }}"
+    assert env["RELAY_MAX_TOTAL_TOKENS"] == "${{ steps.caps.outputs.max_total_tokens }}"
+    assert env["RELAY_BUDGET"] == "${{ steps.caps.outputs.budget_usd }}"
+    assert env["KONG_ANTHROPIC_KEY"] == "${{ secrets.KONG_ANTHROPIC_KEY }}"
+    _, teardown = named(case, "Tear down relay")
+    assert '"$RUNNER_TEMP/relay-caps.json" "$CASE_OUT/relay/"' in teardown["run"]
+
+
+def test_live_case_keeps_the_container_scans_its_export_then_always_removes_it():
+    case = workflow()["jobs"]["case"]
+    i_run, run = named(case, "Run case in the traced container")
+    assert '--relay-dir "$RELAY_DIR" --keep-container' in run["run"]
+    assert "if" not in run  # offline cases run the same step without the flag
+    i_down, _ = named(case, "Tear down relay")
+    i_scan, scan = named(case, "Key-absence scan")
+    i_rm, rm = named(case, "Remove the kept case container")
+    i_up, _ = named(case, "Upload case result")
+    assert i_run < i_down < i_scan < i_rm < i_up
+    live_always = "always() && matrix.role_mode == 'live'"
+    assert scan["if"] == live_always and rm["if"] == live_always
+    for flag in ('--container "$c"', '--scan-dir "$CASE_OUT"', '--scan-dir "$RELAY_DIR"'):
+        assert flag in scan["run"]
+    assert 'cat "$CASE_OUT/container.txt"' in scan["run"] and 'exit "$rc"' in scan["run"]
+    assert 'docker rm -f "$c"' in rm["run"] and "env" not in rm
+
+
+def test_kong_secret_steps_by_parsed_yaml():
+    holders = []
+    for job_name, job in workflow()["jobs"].items():
+        assert "secrets." not in json.dumps(job.get("env") or {})
+        for step in job["steps"]:
+            if "secrets." in json.dumps(step):
+                assert set(step.get("env") or {}) >= {"KONG_ANTHROPIC_KEY"}
+                assert "secrets." not in step.get("run", "")
+                holders.append((job_name, step["name"]))
+    assert sorted(holders) == sorted(
+        [
+            (
+                "relay-smoke",
+                "Start host relay (the ONLY step besides the key scan that sees the Kong key)",
+            ),
+            (
+                "relay-smoke",
+                "Key-absence proof (host-side scan of the exported container + artifacts; counts only)",
+            ),
+            ("case", "Start host relay (live-role case; the only step that sees the Kong key)"),
+            (
+                "case",
+                "Key-absence scan of the exported container + case artifacts + relay dir (live-role case; counts only)",
+            ),
+        ]
+    )
+
+
+def test_report_reads_the_original_run_for_a_rerun():
+    rep = workflow()["jobs"]["report"]
+    assert rep["permissions"] == {"contents": "read", "actions": "read"}
+    assert rep["env"]["RERUN_OF_RUN_ID"] == "${{ github.event.inputs.rerun_of_run_id }}"
+    i_prior, prior = named(rep, "Original run's results")
+    i_agg, agg = named(rep, "Aggregate RESULTS.json")
+    assert i_prior < i_agg and "continue-on-error" not in prior
+    assert prior["if"] == "github.event.inputs.rerun_of_run_id != ''"
+    assert prior["with"]["name"] == "simkit-results"
+    assert prior["with"]["run-id"] == "${{ github.event.inputs.rerun_of_run_id }}"
+    assert "--prior-results report-in/prior/RESULTS.json" in agg["run"]
+    assert "github.token" in prior["with"]["github-token"]
+
+
 # ------------------------------------------------------------------ launcher
+
+
+class FakeDocker:
+    """Records docker calls made by launch.run; no docker needed."""
+
+    def __init__(self):
+        self.calls = []
+
+    def sh(self, cmd, **kw):
+        self.calls.append(cmd)
+        stdout = '{"ExitCode": 0, "OOMKilled": false}' if "inspect" in cmd else ""
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    def run(self, cmd, **kw):
+        self.calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+
+def launch_run(tmp_path, monkeypatch, *extra):
+    fake = FakeDocker()
+    monkeypatch.setattr(launch, "sh", fake.sh)
+    monkeypatch.setattr(launch.subprocess, "run", fake.run)
+    monkeypatch.setattr(launch, "conditions_from_inspect", lambda name, net=None: ({}, {"a": True}))
+    out = tmp_path / "out"
+    argv = ["x", "run", "case", "--case-id", "C1", "--image", "img", "--out", str(out), *extra]
+    assert launch.main(argv) == 0
+    rec = json.loads((out / "launch.json").read_text(encoding="utf-8"))
+    return fake, out, rec
+
+
+def test_run_removes_the_container_by_default(tmp_path, monkeypatch):
+    fake, out, rec = launch_run(tmp_path, monkeypatch)
+    assert any(c[:3] == ["docker", "rm", "-f"] for c in fake.calls)
+    assert not (out / "container.txt").exists() and "container_kept" not in rec
+
+
+def test_run_keep_container_leaves_it_named_for_the_key_scan(tmp_path, monkeypatch):
+    fake, out, rec = launch_run(tmp_path, monkeypatch, "--keep-container")
+    assert not any(c[:2] == ["docker", "rm"] for c in fake.calls)
+    name = (out / "container.txt").read_text(encoding="utf-8").strip()
+    assert name == rec["container"] and rec["container_kept"] is True
+    assert ["docker", "cp", f"{name}:/harness-out", str(out / "harness-out")] in fake.calls
 
 
 def relay_dir(tmp_path, internal=True, bind="172.30.99.1", port=18765):
