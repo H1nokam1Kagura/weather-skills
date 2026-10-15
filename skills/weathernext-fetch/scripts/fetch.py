@@ -361,7 +361,20 @@ def fetch(date, bbox, variable, member, cycle, probe_latest, **kwargs):
     stamp_precip_amounts(ds)
     ds = to_standard_units(ds)
     ds = precip_amounts_to_rates(ds, interval=_PRECIP_INTERVAL, deaccumulate=False)
-    ds = _shift_step_origin_to_zero(ds)
+    # tp is a 6 h period total labelled at its end: relabel it to the period
+    # start. Every other field is instantaneous at init + step and keeps its
+    # lead. With both, the merged axis runs from 0: tp is NaN at the last lead
+    # and the instantaneous fields at 0 (gaps, not filled).
+    if "tp" in ds.data_vars:
+        import xarray as xr
+
+        had_valid = "valid_time" in ds.coords
+        ds = ds.drop_vars("valid_time", errors="ignore")
+        tp = _shift_step_origin_to_zero(ds[["tp"]])
+        rest = ds.drop_vars("tp")
+        ds = xr.merge([rest, tp], join="outer", compat="override") if rest.data_vars else tp
+        if had_valid:
+            ds = ds.assign_coords(valid_time=ds["time"] + ds["step"])
     return stamp_data_interval(ds)
 
 

@@ -369,10 +369,16 @@ def fetch(dataset, date, bbox, variable, cycle, probe_latest, **kwargs):
         converted, _ = convert_dataarray(ds["d2m"], "degree_Celsius")
         ds["d2m"] = converted
     ds = precip_amounts_to_rates(ds, interval=_PRECIP_INTERVAL, deaccumulate=False)
-    # Precip is a 6h period total labelled at its end: relabel to the period
-    # start. Temperatures are instantaneous at init + step, so keep their leads.
+    # tp is a 6 h period total labelled at its end: relabel it to the period
+    # start. Temperatures are instantaneous at init + step and keep their
+    # leads. With both, the merged axis runs from 0: tp is NaN at the last lead
+    # and the temperatures at 0 (gaps, not filled).
     if "tp" in ds.data_vars:
-        ds = _shift_step_origin_to_zero(ds)
+        import xarray as xr
+
+        tp = _shift_step_origin_to_zero(ds[["tp"]])
+        rest = ds.drop_vars("tp")
+        ds = xr.merge([rest, tp], join="outer", compat="override") if rest.data_vars else tp
     return stamp_data_interval(ds)
 
 

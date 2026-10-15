@@ -130,7 +130,10 @@ A consolidated weather-skills standard dataset Zarr with dims
 `step`) carries each lead's wall-clock datetime. Source precip
 (`total_precipitation_6hr`) is a 6-hour **period total** in metres — fetch
 writes it as `tp`, a per-step **rate** (`mm day-1`), **left-labeled** so
-`step = 0` is the first 6h `[init, init+6h)`. Clip any small negative precip
+`step = 0` is the first 6h `[init, init+6h)`. Every other field is an
+instant at `init + step` and keeps its native leads (6 h .. 360 h). Fetched
+together, the axis runs 0 h .. 360 h: `tp` is NaN at 360 h and the
+instantaneous fields at 0 h (gaps, not filled). Clip any small negative precip
 at zero. Do **not** run `deaccumulate` (it is not cumulative-since-init).
 For daily/weekly `mm`, `aggregate-temporal` then `convert-to-totals`.
 Air/surface temperatures (`2m_temperature`, pressure-level `temperature`)
