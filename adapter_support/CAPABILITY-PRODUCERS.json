@@ -123,7 +123,8 @@
         "test_receipts_carry_flags_resume_counters_and_the_initial_clock",
         "test_container_projection_resolves_source_expected_after",
         "test_rereview_cap_stop_projects_the_bumped_manifest_not_the_adopted_build",
-        "test_unobservable_current_manifest_stays_missing_never_the_adopted_build"
+        "test_unobservable_current_manifest_stays_missing_never_the_adopted_build",
+        "tests/test_fixture_rereview_adapter.py::test_e15_p1_inj_third_change_stops_at_the_rereview_cap"
       ],
       "mapping_choices_for_review": [
         "HARNESS_HASH:source_expected_after is a harness expectation, derived in two steps. (1) No mutate_fixture entry: source_pre (pre_review_projection.expected_source_after). (2) Any mutate_fixture entry: run_case (weather_adapter.py:520-526) runs fixture_rereview_projection.fixture_report and harness_inputs_from for the case, whether or not it requires CAP-FIXTURE-OP (E03-P3-CTL/INJ schedule only FX-OPERATOR-RECORD / FX-LEDGER-APPEND and do not): source_pre when no scheduled operation targets the source cache (FIXTURE_TARGETS 'source'); otherwise the after_hash of the last applied source operation; MISSING only when a scheduled source operation was not applied. HARNESS_HASH:source_pre is the harness tree_hash before the run (prepare_fixture), overridden by the FX-SRC-META-ATTR after_hash when that before_run operation was applied (frozen postcondition 'recorded as HARNESS_HASH:source_pre before CAPTURED')",

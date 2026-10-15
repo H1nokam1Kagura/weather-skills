@@ -33,11 +33,11 @@ def row(cid, kind, admitted=True, disposition="RUNNABLE", selected=True, missing
     }
 
 
-def admission(rows):
+def admission(rows, selector="test"):
     return {
         "schema": "simkit.gha-admission/1",
         "adapter": "test",
-        "selector": "test",
+        "selector": selector,
         "implemented_capabilities": CAPS,
         "counts": {"admitted": sum(r["admitted"] for r in rows)},
         "missing_capability_counts": {"CAP-X": 1},
@@ -230,3 +230,91 @@ def test_runner_harness_error_names_its_source_root_cause_and_text(tmp_path):
     # the error text's own pipe is escaped: the row stays 6 cells (5 + the labelled
     # counterfactual column, n/a for a case that did not execute)
     assert line.count(" | ") == 5 and line.endswith(" | n/a |")
+
+
+def test_execution_gate_by_selector():
+    """'admission' / 'relay-smoke' / push 'smoke' select nothing by design; every other selector
+    is meant to execute cases, so none selected or fewer EXECUTED than selected is a FAIL."""
+    gate = cases_report.execution_gate
+    for sel in ("admission", "relay-smoke", "smoke"):
+        g = gate(sel, 0, 0)
+        assert g["status"] == "NOTHING_SELECTED_BY_DESIGN" and g["expects_execution"] is False
+        assert g["message"] == (
+            f"NOTHING WILL EXECUTE: selector '{sel}' selects 0 cases; "
+            "use 'substituted' for runnable offline cases"
+        )
+    assert gate("smoke", 2, 1)["status"] == "SHORTFALL_NOT_ENFORCED"
+    for sel in ("substituted", "live", "A-CTL,A-INJ"):
+        assert gate(sel, 0)["status"] == "FAIL"  # admission time
+        assert gate(sel, 0, 0)["status"] == "FAIL"
+        assert "NOTHING WILL EXECUTE" in gate(sel, 0, 0)["message"]
+        assert gate(sel, 3)["status"] == "OK"
+        g = gate(sel, 3, 2)
+        assert g["status"] == "FAIL" and g["message"] == "only 2 of 3 selected cases EXECUTED"
+        assert gate(sel, 3, 3)["status"] == "OK"
+    a = admission([row("Q-CTL", "control", selected=False)], selector="substituted")
+    a["counts"]["selected"] = 0
+    assert cases_report.admission_gate(a)["status"] == "FAIL"
+    a["selector"] = "admission"
+    assert cases_report.admission_gate(a)["status"] == "NOTHING_SELECTED_BY_DESIGN"
+
+
+def write_results(tmp_path, res):
+    p = tmp_path / "RESULTS.json"
+    p.write_text(json.dumps(res), encoding="utf-8")
+    return p
+
+
+def test_admission_selector_with_nothing_selected_still_succeeds(tmp_path):
+    rows = [row("Q1-CTL", "control", selected=False), row("Q1-INJ", "injection", selected=False)]
+    res = cases_report.build(admission(rows, selector="admission"), tmp_path / "cases")
+    g = res["execution_gate"]
+    assert (g["status"], g["selected"], g["executed"]) == ("NOTHING_SELECTED_BY_DESIGN", 0, 0)
+    md = cases_report.markdown(res).splitlines()
+    assert md[2].startswith("> Oracles are PROPOSED")
+    assert f"> **NOTHING_SELECTED_BY_DESIGN: {g['message']}**" in md
+    assert cases_report.main(["x", "gate", str(write_results(tmp_path, res))]) == 0
+
+
+def test_substituted_selector_with_nothing_selected_fails_the_run(tmp_path):
+    rows = [row("Q2-CTL", "control", selected=False)]
+    res = cases_report.build(admission(rows, selector="substituted"), tmp_path / "cases")
+    g = res["execution_gate"]
+    assert g["status"] == "FAIL" and "NOTHING WILL EXECUTE: selector 'substituted'" in g["message"]
+    assert f"> **RUN FAILS (execution gate): {g['message']}**" in cases_report.markdown(res)
+    assert cases_report.main(["x", "gate", str(write_results(tmp_path, res))]) == 1
+
+
+def test_selected_case_that_did_not_execute_fails_the_run(tmp_path):
+    rows = [row("Q3-CTL", "control"), row("Q3-INJ", "injection")]
+    dims = dict.fromkeys(cases_report.DIMENSIONS, "PASS")
+    artifact(tmp_path, "Q3-CTL", score=executed_score("Q3-CTL", dims))
+    artifact(tmp_path, "Q3-INJ", score=None)  # HARNESS_ERROR no_score
+    res = cases_report.build(admission(rows, selector="Q3-CTL,Q3-INJ"), tmp_path / "cases")
+    g = res["execution_gate"]
+    assert (g["status"], g["selected"], g["executed"]) == ("FAIL", 2, 1)
+    assert cases_report.main(["x", "gate", str(write_results(tmp_path, res))]) == 1
+    (tmp_path / "cases" / "Q3-INJ" / "score.json").write_text(
+        json.dumps(executed_score("Q3-INJ", dims)), encoding="utf-8"
+    )
+    res = cases_report.build(admission(rows, selector="Q3-CTL,Q3-INJ"), tmp_path / "cases")
+    assert res["execution_gate"]["status"] == "OK"
+    assert not [x for x in cases_report.markdown(res).splitlines() if "execution gate" in x]
+    assert cases_report.main(["x", "gate", str(write_results(tmp_path, res))]) == 0
+
+
+def test_absent_results_fail_the_gate(tmp_path):
+    assert cases_report.main(["x", "gate", str(tmp_path / "none.json")]) == 1
+
+
+def test_workflow_runs_both_execution_gates_after_the_uploads():
+    text = (cases_report.REPO / ".github" / "workflows" / "simkit-cases.yml").read_text(
+        encoding="utf-8"
+    )
+    admission_job = text.split("\n  admission:\n", 1)[1].split("\n  case:\n", 1)[0]
+    assert "cases_report.admission_gate(a)" in admission_job
+    assert admission_job.index("r.admission_gate(") > admission_job.index("name: simkit-admission")
+    report_job = text.split("\n  report:\n", 1)[1]
+    gate = "container_harness/cases_report.py gate results/RESULTS.json"
+    assert gate in report_job
+    assert report_job.index(gate) > report_job.index("name: simkit-results")
