@@ -37,9 +37,10 @@ era5-p_pr_26/YYYYMMDD/era5-p_pr_26-YYYYMMDD.zarr/   # week 4, days 26–32
 
 Store folders are named by the **first day of the valid week**. `--date` is
 the forecast **init** (same convention as `ecmwf-fetch` / `kenya-forecast-fetch`):
-week 3 lives at `init + 18d`, week 4 at `init + 25d`. If that init folder is
-missing, `--date` is also tried as the folder name so a date copied from
-`gsutil ls` still works. Default `--date` is the latest folder that has a Zarr.
+week 3 lives at `init + 18d`, week 4 at `init + 25d`. An init with no folder
+is an error — `--date` is never read as a folder name (for folder `YYYYMMDD`
+pass that date minus 18 / 25 days). Default `--date` is the latest folder that
+has a Zarr.
 
 ## When to use
 
@@ -86,7 +87,9 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest [dataset-id]
 
 Output dims: `(quintile, step, latitude, longitude)` with scalar `time` (init).
 `quintile` is `0.2, 0.4, 0.6, 0.8, 1.0` (AI-WQ upper bounds). Grid is global
-1.5°, longitude wrapped to `[-180, 180)`. `pr` has `units="1"`. Native period
+1.5° (latitude 90 → -90, same points as ECMWF 1.5°), longitude wrapped to
+`[-180, 180)`. `pr` has `units="1"` and no `standard_name` (CF has none for
+it); the store has no NaNs (uninformative cells hold 0.2). Native period
 is one week (`data_interval` `7 day`). Plot a single quintile with
 `select --dim quintile --value 0.2` (or `0.4` / `0.6` / `0.8` / `1.0`) then
 `plot`.
@@ -96,12 +99,12 @@ is one week (`data_interval` `7 day`). Plot a single quintile with
 - `--dataset` — product id from the table (default `era5-p_pr_19`).
 - `--date` — optional init date `YYYY-MM-DD`. Default: latest folder with a
   Zarr. Calendar day: `resolve-time latest`. Latest published init:
-  `--probe-latest`. Also accepts the store folder date (valid-week start).
+  `--probe-latest`. A missing init exits with an error.
 - `--probe-latest [dataset-id]` — print the latest init `YYYY-MM-DD` on stdout
   and exit. No `-o`.
 - `--bbox` — optional spatial subset `N/W/S/E`. Country boxes: `resolve-region`.
 - `--variable`, `-v` — restrict to named data variables. Only `pr` (aliases
-  `forecast`, `precip`, `tp`). Omit to fetch `pr`.
+  `forecast`, `precip`, `tp`, `probability`). Omit to fetch `pr`.
 - `--output`, `-o` — output Zarr path (overwritten if it exists).
 
 ### Output

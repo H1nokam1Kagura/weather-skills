@@ -147,23 +147,19 @@ def _folder_for_init(dataset: str, init) -> str:
 def _resolve_folder(date, dataset: str) -> tuple[str, object]:
     """Return ``(folder YYYYMMDD, init date)``.
 
-    ``--date`` is the forecast init (matching other fetchers). If that folder
-    is missing, the same string is tried as the store folder name (valid-week
-    start) so a date copied from ``gsutil ls`` still works.
+    ``--date`` is the forecast init (matching other fetchers). It is never
+    read as a folder name: folders are near-daily, so that would silently
+    return an older init than the one requested.
     """
     if date is not None:
-        as_init_folder = _folder_for_init(dataset, date)
-        if _store_exists(_store_key(dataset, as_init_folder)):
-            return as_init_folder, date
-        as_folder = _compact(date)
-        if _store_exists(_store_key(dataset, as_folder)):
-            return as_folder, _init_for_folder(dataset, as_folder)
+        folder = _folder_for_init(dataset, date)
+        if _store_exists(_store_key(dataset, folder)):
+            return folder, date
         raise DataError(
-            f"no {dataset!r} Zarr for --date {date.isoformat()} in "
-            f"gs://{_BUCKET}/{_PREFIX}/{dataset}/ (looked for folder "
-            f"{as_init_folder} as init+{_lead_offset(dataset)}d and {as_folder} "
-            "as a valid-week folder). Omit --date to take the latest available, "
-            "or pass --probe-latest."
+            f"no {dataset!r} Zarr for init --date {date.isoformat()} in "
+            f"gs://{_BUCKET}/{_PREFIX}/{dataset}/ (looked for folder {folder}; "
+            f"folders are named init+{_lead_offset(dataset)}d, the first valid "
+            "day). Pass --probe-latest for the latest init, or omit --date."
         )
 
     folders = _list_folder_dates(dataset)
@@ -206,7 +202,8 @@ def _as_forecast(ds, *, init, dataset: str):
             f"(have: {', '.join(sorted(ds.data_vars))})."
         )
 
-    lead = np.timedelta64(_lead_offset(dataset), "D")
+    # ns up front: core's write path recasts other resolutions and drops step attrs.
+    lead = np.timedelta64(_lead_offset(dataset), "D").astype("timedelta64[ns]")
     init_ns = np.datetime64(init.isoformat(), "ns")
     ds = ds.expand_dims(step=[lead])
     ds = ds.assign_coords(
@@ -221,7 +218,6 @@ def _as_forecast(ds, *, init, dataset: str):
     ds["pr"].attrs.update(
         units="1",
         long_name="precipitation quintile probability",
-        standard_name="probability",
     )
     if "quintile" in ds.coords:
         ds["quintile"].attrs.setdefault("long_name", "quintile upper bound")
