@@ -87,3 +87,77 @@ def test_concat_rejects_incompatible_units(tmp_path, concat):
         run_skill(concat, "-i", str(d1), "-i", str(d2), "-o", str(out), "--dim", "number")
     assert exc.value.code == 2
     assert not out.exists()
+
+
+def _run(concat, tmp_path, *paths, extra=()):
+    out = tmp_path / "out.zarr"
+    args = [a for p in paths for a in ("-i", str(p))]
+    run_skill(concat, *args, "-o", str(out), *extra)
+    return out
+
+
+def test_concat_refuses_overlapping_time(tmp_path, concat):
+    d1 = write_zarr(make_gridded(n_time=3, start="2026-01-01"), tmp_path / "d1.zarr")
+    d2 = write_zarr(make_gridded(n_time=3, start="2026-01-03"), tmp_path / "d2.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run(concat, tmp_path, d1, d2, extra=("--dim", "time"))
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_concat_sorts_out_of_order_inputs(tmp_path, concat):
+    d1 = write_zarr(make_gridded(n_time=2, start="2026-01-03"), tmp_path / "d1.zarr")
+    d2 = write_zarr(make_gridded(n_time=2, start="2026-01-01"), tmp_path / "d2.zarr")
+    out = _run(concat, tmp_path, d1, d2, extra=("--dim", "time"))
+    times = xr.open_zarr(out)["time"].values
+    assert (np.diff(times) > np.timedelta64(0)).all()
+
+
+def test_concat_refuses_different_grid(tmp_path, concat):
+    d1 = write_zarr(make_gridded(start="2026-01-01"), tmp_path / "d1.zarr")
+    d2 = write_zarr(make_gridded(start="2026-01-03", lats=(1.0, 2.0, 4.0)), tmp_path / "d2.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run(concat, tmp_path, d1, d2, extra=("--dim", "time"))
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_concat_refuses_different_windows_on_new_dim(tmp_path, concat):
+    d1 = write_zarr(make_gridded(start="2026-01-01"), tmp_path / "d1.zarr")
+    d2 = write_zarr(make_gridded(start="2026-02-01"), tmp_path / "d2.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run(concat, tmp_path, d1, d2, extra=("--dim", "number"))
+    assert exc.value.code == 2
+    assert not (tmp_path / "out.zarr").exists()
+
+
+def test_concat_refuses_coords_on_existing_dim(tmp_path, concat):
+    d1 = write_zarr(make_gridded(start="2026-01-01"), tmp_path / "d1.zarr")
+    d2 = write_zarr(make_gridded(start="2026-01-03"), tmp_path / "d2.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run(concat, tmp_path, d1, d2, extra=("--dim", "time", "--coords", "0,1"))
+    assert exc.value.code == 2
+
+
+def test_concat_refuses_mixed_data_interval(tmp_path, concat):
+    daily = make_gridded()
+    daily["precip"].attrs["data_interval"] = "1 day"
+    weekly = make_gridded()
+    weekly["precip"].attrs["data_interval"] = "7 day"
+    d1 = write_zarr(daily, tmp_path / "d1.zarr")
+    d2 = write_zarr(weekly, tmp_path / "d2.zarr")
+    with pytest.raises(SystemExit) as exc:
+        _run(concat, tmp_path, d1, d2, extra=("--dim", "model"))
+    assert exc.value.code == 2
+
+
+def test_concat_coords_parse_dates(tmp_path, concat):
+    day = make_gridded(n_time=1).isel(time=0, drop=True)
+    d1 = write_zarr(day, tmp_path / "d1.zarr")
+    d2 = write_zarr(day, tmp_path / "d2.zarr")
+    out = _run(
+        concat, tmp_path, d1, d2, extra=("--dim", "time", "--coords", "2026-09-01,2026-09-02")
+    )
+    times = xr.open_zarr(out)["time"].values
+    assert times.dtype.kind == "M"
+    assert times[1] == np.datetime64("2026-09-02")

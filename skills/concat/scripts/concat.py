@@ -6,6 +6,7 @@
 # ///
 """Concatenate Zarr stores along a named dim."""
 
+import numpy as np
 from weather_skills_core import Dataset, UsageError, weather_skill
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
@@ -21,7 +22,10 @@ def _coerce(values):
             try:
                 out.append(float(v))
             except ValueError:
-                out.append(v)
+                try:
+                    out.append(np.datetime64(v, "ns"))
+                except ValueError:
+                    out.append(v)
     return out
 
 
@@ -44,7 +48,25 @@ def concat(ds, dim, coords, **kwargs):
         raise UsageError(f"concat requires at least two --input paths (repeat -i), got {n}")
     dss = list(ds)
 
-    if dim not in dss[0].dims or not all(dim in item.dims for item in dss):
+    has_dim = [dim in item.dims for item in dss]
+    if any(has_dim) and not all(has_dim):
+        raise UsageError(
+            f"{dim!r} is a dim on some inputs but not others; concat needs it on all or none"
+        )
+    if all(has_dim) and coords:
+        raise UsageError(
+            f"--coords labels a new dim; {dim!r} already exists on the inputs, so its own labels are kept"
+        )
+
+    # Mixing e.g. daily and weekly values on one axis would keep only the
+    # first input's label, so refuse instead.
+    for key in ("data_interval", "aggregation_period"):
+        for name in dss[0].data_vars:
+            seen = {str(item[name].attrs.get(key)) for item in dss if name in item.data_vars}
+            if len(seen) > 1:
+                raise UsageError(f"{name!r} has different {key} across inputs: {sorted(seen)}")
+
+    if not all(has_dim):
         if coords:
             vals = _coerce([c.strip() for c in coords.split(",")])
             if len(vals) != len(dss):
@@ -52,10 +74,30 @@ def concat(ds, dim, coords, **kwargs):
             dss = [d.expand_dims({dim: [v]}) for d, v in zip(dss, vals, strict=True)]
         else:
             dss = [d.expand_dims(dim) for d in dss]
+
+    # join="exact": every other coordinate must match. The outer join pads a
+    # mismatch with NaN instead, which looks like missing data.
     try:
-        return xr.concat(dss, dim=dim)
+        out = xr.concat(dss, dim=dim, join="exact")
     except pint.DimensionalityError as exc:
         raise UsageError(f"inputs carry incompatible units: {exc}") from None
+    except xr.AlignmentError as exc:
+        raise UsageError(
+            f"inputs differ along a dim other than {dim!r} ({exc}). Put them on one grid and window first: "
+            "coarsen --reference-grid for lat/lon, select or clip-region to trim."
+        ) from None
+
+    if dim in out.indexes:
+        index = out.indexes[dim]
+        if index.has_duplicates:
+            dups = index[index.duplicated()].unique()
+            raise UsageError(
+                f"inputs overlap along {dim!r}: {[str(v) for v in dups[:5]]} appear more than once; "
+                "keep only the new entries of one input with select (repeat --index)"
+            )
+        if not (index.is_monotonic_increasing or index.is_monotonic_decreasing):
+            out = out.sortby(dim)
+    return out
 
 
 if __name__ == "__main__":

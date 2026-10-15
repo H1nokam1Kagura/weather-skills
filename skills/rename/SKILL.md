@@ -74,6 +74,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/rename.py -i /tmp/ifs.zarr -o /tmp/ifs_rename
     --variable precipitation_surface --to-name precipitation
 ```
 
-Both renamed stores now carry the same variable name, so they merge cleanly:
-concatenate the obs and forecast along `time` with the `concat` skill
-(`-i /tmp/imerg_renamed.zarr -i /tmp/ifs_renamed.zarr --dim time -o /tmp/combined.zarr`).
+Both renamed stores now carry the same variable name. To stack them with the
+`concat` skill along a new `source` dim, first put them on one grid and one
+time axis (`step-to-time` on the forecast, `coarsen --reference-grid`, `select`
+to a shared window) — concat refuses inputs whose other coordinates differ.
