@@ -76,10 +76,10 @@
         "test_recovery_list_of_the_wrong_type_stays_missing"
       ],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-15T05:59:05Z",
-      "reviewed_commit": "0f264d275efdad96abe9ab2e3678db3bdb2436aa",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w5/D4-CONFIRM.md"
+      "reviewed_at": "2026-10-15T07:50:31Z",
+      "reviewed_commit": "70a735cdb149d9e2806efce6e706289ff6a0ef78",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w6/D4-CONFIRM-W6.md"
     },
     "CAP-SYMBOLS": {
       "d4_gated": true,
@@ -132,10 +132,10 @@
         "HARNESS_PLAN_HASH:current and :vN are plan-version hashes (contracts.plan_version_hash: the plan plus its claims envelope, else the plan's own digest), not digest(plan): a claims-only repair is a new plan version with its own :vN, as v2_5.plan_symbols and v2_4.claim_checks (one per plan version) require"
       ],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-15T05:59:05Z",
-      "reviewed_commit": "0f264d275efdad96abe9ab2e3678db3bdb2436aa",
+      "reviewed_at": "2026-10-15T07:50:31Z",
+      "reviewed_commit": "70a735cdb149d9e2806efce6e706289ff6a0ef78",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w5/D4-CONFIRM.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w6/D4-CONFIRM-W6.md"
     },
     "CAP-REASON-MAP": {
       "d4_gated": true,
@@ -233,10 +233,10 @@
       "notes": "Owner ruling D3: synthetic CHIRPS-identical input runs under production admission; admission_note states that 'production' is a consequence of the ruling, not an observed fetch. The scan covers what the system reads; it is a marker scan, not a proof of semantic invisibility.",
       "tests": ["test_released_run_provenance_follows_ruling_d3", "test_needs_info_stop_and_visible_synthetic_marker", "test_zero_collected_outputs_are_never_tagged"],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-15T05:59:05Z",
-      "reviewed_commit": "0f264d275efdad96abe9ab2e3678db3bdb2436aa",
+      "reviewed_at": "2026-10-15T07:50:31Z",
+      "reviewed_commit": "70a735cdb149d9e2806efce6e706289ff6a0ef78",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w5/D4-CONFIRM.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w6/D4-CONFIRM-W6.md"
     },
     "CAP-PROFILE": {
       "d4_gated": true,
@@ -323,10 +323,10 @@
       "notes": "Upgraded from PARTIAL: each whole-tree field now has a harness producer. The network-syscall trace set and the RAM sampler are unit-tested on synthetic captures (container_harness/tests/test_analyze_trace.py) but have not yet run in a container; the first container run is the reviewer's evidence for them. max_concurrent_children and shell_launches already came out of the container canary.",
       "tests": ["test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_observe_harness_carries_whole_tree_fields_or_reports_them_missing", "container_harness/tests/test_analyze_trace.py::test_data_fetch_attempts_count_non_local_destinations", "container_harness/tests/test_analyze_trace.py::test_quiet_run_reports_zero_fetch_attempts_only_when_network_was_traced", "container_harness/tests/test_analyze_trace.py::test_relay_connect_is_role_transport_only_from_the_controller", "container_harness/tests/test_analyze_trace.py::test_unobservable_network_makes_fetch_attempts_missing", "container_harness/tests/test_analyze_trace.py::test_undecoded_sendmsg_destination_makes_fetch_attempts_missing", "container_harness/tests/test_analyze_trace.py::test_connected_sendmsg_with_null_destination_is_not_an_attempt", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_is_the_running_minimum_of_harness_readings", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_missing_unless_the_whole_run_is_covered", "container_harness/tests/test_analyze_trace.py::test_threads_are_not_children_and_concurrency_counts_overlap", "container_harness/tests/test_analyze_trace.py::test_shell_launches_and_relative_paths_after_chdir"],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-15T05:59:05Z",
-      "reviewed_commit": "0f264d275efdad96abe9ab2e3678db3bdb2436aa",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w5/D4-CONFIRM.md"
+      "reviewed_at": "2026-10-15T07:50:31Z",
+      "reviewed_commit": "70a735cdb149d9e2806efce6e706289ff6a0ef78",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w6/D4-CONFIRM-W6.md"
     },
     "CAP-SIGNAL-CAPTURE": {
       "d4_gated": true,
@@ -351,10 +351,10 @@
       "notes": "Upgraded from PARTIAL on the container route (container_route_ruling_2026-10-13): the harness trace is the producer, already exercised by the container canary/tree/tracer-death scenarios. Results certify Linux only; Windows signal_stop code is not exercised on this route. Declared only when a reviewer signs.",
       "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "container_harness/tests/test_analyze_trace.py::test_signal_forms_group_pidfd_tgkill_zero_and_failed", "container_harness/tests/test_analyze_trace.py::test_user_delivery_without_attempt_makes_signals_missing", "container_harness/tests/test_analyze_trace.py::test_process_tree_uses_creating_parent_and_notes_reassignment", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty"],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-15T05:59:05Z",
-      "reviewed_commit": "0f264d275efdad96abe9ab2e3678db3bdb2436aa",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w5/D4-CONFIRM.md"
+      "reviewed_at": "2026-10-15T07:50:31Z",
+      "reviewed_commit": "70a735cdb149d9e2806efce6e706289ff6a0ef78",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w6/D4-CONFIRM-W6.md"
     },
     "CAP-EXHAUSTIVE-WRITES": {
       "d4_gated": true,
@@ -378,10 +378,10 @@
       "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). Upgraded from NOT_DECLARED: the method exists and the producer (trace analyzer) already ran in the container canary/tree scenarios. Exhaustive capture is attribution-blind inside one process: run_case's harness staging (case root, source/, harness/) runs in the traced controller process and is therefore in created_paths, outside the frozen allow-list HARNESS_RUN_DIR (all_under, every v2.7 case), as are tool caches under $HOME seen in the canary. That is a scoring outcome the capture correctly exposes, not a capture defect; see the write-allow-list finding in the handoff. Declared only when a reviewer signs.",
       "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_exhaustive_write_capture_only_from_a_complete_trace", "container_harness/tests/test_analyze_trace.py::test_unresolvable_creating_call_makes_created_paths_missing", "container_harness/tests/test_analyze_trace.py::test_created_paths_semantics", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty", "container_harness/tests/test_analyze_trace.py::test_io_uring_success_makes_created_paths_missing_only"],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-15T05:59:05Z",
-      "reviewed_commit": "0f264d275efdad96abe9ab2e3678db3bdb2436aa",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w5/D4-CONFIRM.md"
+      "reviewed_at": "2026-10-15T07:50:31Z",
+      "reviewed_commit": "70a735cdb149d9e2806efce6e706289ff6a0ef78",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w6/D4-CONFIRM-W6.md"
     },
     "CAP-EVIDENCE-CHECKER": {
       "d4_gated": true,
