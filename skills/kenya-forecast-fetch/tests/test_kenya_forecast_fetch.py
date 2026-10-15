@@ -411,3 +411,50 @@ def test_fetch_precip_downscaled_daily_opens_tif_and_writes_daily_rates(
         assert "aggregation_period" not in ds["tp"].attrs
         assert np.datetime64(ds["time"].values, "D") == np.datetime64("2026-09-16")
         assert "number" not in ds.dims
+
+
+def test_fetch_daily_vars_keeps_tcw_and_every_step(tmp_path, fetch_mod, monkeypatch):
+    """``tcw`` (total column water, kg m-2) is not precip: no deaccumulation, no step loss."""
+    out = tmp_path / "daily_vars_tcw.zarr"
+    remote = make_forecast(name="t2m", n_step=3, fill=290.0)
+    remote = remote.assign_coords(
+        step=("step", np.array([np.timedelta64(d, "D") for d in (1, 2, 3)]))
+    )
+    remote["t2m"].attrs.update(units="K", standard_name="air_temperature")
+    remote["tcw"] = remote["t2m"].copy(data=np.full(remote["t2m"].shape, 20.0))
+    remote["tcw"].values[1] = 22.0
+    remote["tcw"].attrs = {"units": "kg m**-2", "long_name": "Total column water"}
+
+    monkeypatch.setattr(fetch_mod, "_store_exists", lambda key: True)
+    monkeypatch.setattr(fetch_mod, "_open_remote", lambda key: remote.copy(deep=True))
+
+    run_skill(fetch_mod.fetch, "--dataset", "daily_vars", "--date", "2026-08-24", "-o", str(out))
+
+    with xr.open_zarr(out, consolidated=True) as ds:
+        days = np.asarray(ds["step"].values).astype("timedelta64[D]").astype(int)
+        assert list(days) == [0, 1, 2]
+        np.testing.assert_allclose(ds["tcw"].values[:, 0, 0], [20.0, 22.0, 20.0])
+        assert ds["tcw"].attrs["units"] in ("kg m**-2", "kg m-2")
+        np.testing.assert_allclose(ds["t2m"].values[:, 0, 0], [290.0 - 273.15] * 3)
+
+
+def test_fetch_precip_downscaled_drops_hindcast_init_coord(tmp_path, fetch_mod, monkeypatch):
+    """Newer weekly files carry ``init`` = the hindcast init (a year earlier); drop it."""
+    out = tmp_path / "downscaled_init.zarr"
+    remote = _downscaled_weekly().assign_coords(init=np.datetime64("2025-08-30", "ns"))
+    monkeypatch.setattr(fetch_mod, "_store_exists", lambda key: True)
+    monkeypatch.setattr(fetch_mod, "_open_remote", lambda key: remote)
+
+    run_skill(
+        fetch_mod.fetch,
+        "--dataset",
+        "precip_downscaled",
+        "--date",
+        "2026-08-30",
+        "-o",
+        str(out),
+    )
+
+    with xr.open_zarr(out, consolidated=True) as ds:
+        assert "init" not in ds.variables
+        assert np.datetime64(ds["time"].values, "D") == np.datetime64("2026-08-30")

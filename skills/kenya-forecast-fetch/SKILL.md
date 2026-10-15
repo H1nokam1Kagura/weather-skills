@@ -1,6 +1,6 @@
 ---
 name: kenya-forecast-fetch
-description: Fetch a forecast grid from the public Kenya forecasts archive (gs://kenya-forecasting-data/<date>/data/). Native ECMWF S2S is the low-resolution Zarr (`--dataset precip`, ~1.5°); the CHIRPS-resolution weekly downscale is `--dataset precip_downscaled` (~0.05°, data_weekly_Kenya_downscaled.nc, all 101 ensemble members on `number`); the daily downscale is `--dataset precip_downscaled_daily` (~0.05°, daily_downscaled_kenya.tif, ensemble mean). Also GEFS, medium-range precip, temps, and winds. Use for clipping, aggregation, comparison, or plotting via plot / plot-timeseries / plot-mediogram.
+description: Fetch a forecast grid from the public Kenya forecasts archive (gs://kenya-forecasting-data/<date>/data/). Native ECMWF S2S is the low-resolution Zarr (`--dataset precip`, ~1.5°); the CHIRPS-resolution weekly downscale is `--dataset precip_downscaled` (~0.05°, data_weekly_Kenya_downscaled.nc, 101 ensemble members on `number` for inits from 2026-09-07); the daily downscale is `--dataset precip_downscaled_daily` (~0.05°, daily_downscaled_kenya.tif, ensemble mean). Also GEFS, medium-range precip, temps, and winds. Use for clipping, aggregation, comparison, or plotting via plot / plot-timeseries / plot-mediogram.
 license: MIT
 compatibility: Requires Python 3.12 and uv. Opens public consolidated Zarr (native S2S / GEFS / medium-range), the weekly downscaled NetCDF, or the daily downscaled GeoTIFF over HTTPS from Google Cloud Storage bucket kenya-forecasting-data; no credentials required. Older init folders may only have GRIB/NetCDF under data/ and no Zarr.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
@@ -27,8 +27,8 @@ Layout:
 
 ```
 YYYY-MM-DD/data/ECMWF_s2s_precip_YYYY-MM-DD.zarr/     # native S2S ~1.5°
-YYYY-MM-DD/data/data_weekly_Kenya_downscaled.nc       # CHIRPS-resolution weekly ~0.05°, 101 members (may be half-cell offset)
-YYYY-MM-DD/data/daily_downscaled_kenya.tif            # same grid, daily leads, ensemble mean
+YYYY-MM-DD/data/data_weekly_Kenya_downscaled.nc       # CHIRPS-resolution weekly ~0.05°, 33–42E 5S–6N, 101 members
+YYYY-MM-DD/data/daily_downscaled_kenya.tif            # same 0.05° lattice, wider 27–43E 7.5S–7.5N, daily, ensemble mean
 YYYY-MM-DD/data/medium_range_precip.zarr/
 YYYY-MM-DD/data/gefs/gefs_kenya.zarr/
 …
@@ -58,12 +58,13 @@ than downloading the archive's pre-rendered PNGs.
 | `--dataset` | Members | Cadence | Grid |
 |---|---|---|---|
 | `precip` | 101 (`number` 0–100) | daily | ~1.5° |
-| `precip_downscaled` | 101 (`number` 0–100) | weekly | ~0.05° |
+| `precip_downscaled` | 101 (`number` 0–100); none before 2026-09-07 | weekly | ~0.05° |
 | `precip_downscaled_daily` | none — ensemble mean | daily | ~0.05° |
 
 The weekly downscale is **not** a single forecast: every member is
-downscaled, so you can take weekly probabilities at ~0.05°. Only the daily
-GeoTIFF is the ensemble mean. Its `GRIB_totalNumber = 101` attribute is
+downscaled, so you can take weekly probabilities at ~0.05°. Inits before
+2026-09-07 hold one field with no `number`. The daily GeoTIFF is always the
+ensemble mean. Its `GRIB_totalNumber = 101` attribute is
 inherited metadata, not a member axis.
 
 Pick the product by the event's time window:
@@ -103,8 +104,8 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest [dataset-id]
 |---|---|---|
 | `precip` (default) | `ECMWF_s2s_precip_<date>.zarr` | `tp` — native S2S, ~1.5°, daily ensemble |
 | `precip_downscaled` | `data_weekly_Kenya_downscaled.nc` | `tp` — CHIRPS-resolution weekly, ~0.05°, 101 members (`number` 0–100) |
-| `precip_downscaled_daily` | `daily_downscaled_kenya.tif` | `tp` — same ~0.05° grid, daily leads, ensemble mean, no `number` |
-| `daily_vars` | `ECMWF_s2s_daily_vars_<date>.zarr` | `t2m`, `d2m`, `cape`, `tcw` |
+| `precip_downscaled_daily` | `daily_downscaled_kenya.tif` | `tp` — same ~0.05° lattice on a wider box, daily leads, ensemble mean, no `number` |
+| `daily_vars` | `ECMWF_s2s_daily_vars_<date>.zarr` | `t2m`, `d2m`, `cape`, `tcw` (daily means) |
 | `Tminmax` | `ECMWF_s2s_Tminmax_<date>.zarr` | `mn2t6`, `mx2t6` |
 | `10wind` | `ECMWF_s2s_10wind_<date>.zarr` | `u10`, `v10` |
 | `500wind` | `ECMWF_s2s_500wind_<date>.zarr` | `w` (and related) |
@@ -119,7 +120,10 @@ as a per-step **rate** (`mm day-1`) and known air temperature as
 `precip_downscaled_daily`, `gefs`, `daily_vars`, `medium_range_precip`) are
 **left-labeled**: `step = 0` is the first native period (`[init, init+1d)`
 for daily precip; `[init, init+7d)` for weekly downscaled / medium-range).
-Instantaneous winds / Tminmax keep archive `step` (lead 0 = 00Z analysis).
+Instantaneous winds keep archive `step` (lead 0 = 00Z analysis). Tminmax keeps
+archive `step` too: 6-hour min / max ending at each step, sampled every 12 h
+from step 6 h. `tcw` (total column water, `kg m-2`) is not precipitation: it
+keeps its values and every step, and is never converted to a rate or total.
 Daily products (`precip`, `gefs`, `daily_vars`, `precip_downscaled_daily`):
 `aggregate-temporal --period weekly` then `convert-to-totals`.
 Already-weekly products (`precip_downscaled`, `medium_range_precip`) stamp
@@ -130,6 +134,11 @@ Already-weekly products (`precip_downscaled`, `medium_range_precip`) stamp
 CHIRPS, the cell centers may not match (half-cell lon offset is common);
 realign with `coarsen --reference-grid` or `downscale --reference-grid`.
 
+Lead counts vary by init: recent weekly files have 4 weeks (the daily GeoTIFF
+28 days); older ones had 6 weeks (42 days). The NetCDF / GeoTIFF products are
+downloaded whole before `--bbox` subsets them. Peak RSS is ~0.7 GB for the
+full 101-member weekly file and ~0.25 GB with a small `--bbox`.
+
 ### Arguments
 
 - `--dataset` — product id from the table (default `precip`, the native
@@ -139,7 +148,7 @@ realign with `coarsen --reference-grid` or `downscale --reference-grid`.
 - `--date` — optional init date `YYYY-MM-DD`. Default: latest folder with that
   Zarr. Calendar day: `resolve-time latest`. Latest published init: `--probe-latest`.
 - `--probe-latest [dataset-id]` — print the latest init `YYYY-MM-DD` on stdout and exit. No `-o`.
-- `--bbox` — optional spatial subset `N/W/S/E`.
+- `--bbox` — optional spatial subset `N/W/S/E` (keeps cell centres inside the box).
 - `--variable`, `-v` — restrict to named data variables (repeatable).
 - `--output`, `-o` — output Zarr path.
 
