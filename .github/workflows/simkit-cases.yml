@@ -139,7 +139,9 @@ jobs:
       - name: Harness unit tests (analyzer + report; not in ci.yml testpaths)
         run: |
           python -m pip install --quiet pytest==9.1.1
-          python -B -m pytest -q -p no:cacheprovider container_harness/tests
+          # test_case_driver_fixture_ops needs the controller stack; ci.yml runs it there.
+          python -B -m pytest -q -p no:cacheprovider container_harness/tests \
+            --ignore=container_harness/tests/test_case_driver_fixture_ops.py
 
       - name: Verify frozen v2.7 package (committed fixture vs FINAL-PINS) and input pins
         run: |
