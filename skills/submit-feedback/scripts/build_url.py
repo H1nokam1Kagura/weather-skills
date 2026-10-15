@@ -20,13 +20,12 @@ _SKILL_VERSION = "0.0.2"
 # caller cannot direct it elsewhere by guessing a slug.
 OWNER = "rhiza-research"
 REPOS = (
-    "forecasting-skills",
     "weather-skills",
     "chc-skills",
     "weather-skills-plotting",
     "weather-skills-core",
 )
-DEFAULT_REPO = "forecasting-skills"
+DEFAULT_REPO = "weather-skills"
 
 # The clean ceiling GitHub accepts for a prefilled new-issue URL. Above it GitHub
 # starts erroring (500s) well before the hard 414, so this is the usable limit.
@@ -77,13 +76,24 @@ def submit_feedback(title, body, body_file, repo, **kwargs):
     if body is None:
         body_path = Path(body_file)
         if not body_path.is_file():
-            raise UsageError(f"--body-file {body_path} not found.")
+            raise UsageError(f"--body-file {body_path} is not an existing file.")
         try:
             body = body_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raise UsageError(f"--body-file {body_path} is not valid UTF-8 text.") from None
         except OSError as exc:
             raise UsageError(f"cannot read --body-file {body_path}: {exc}") from None
+
+    if not body.strip():
+        raise UsageError("the issue body must not be empty.")
+
+    # Arguments carrying invalid UTF-8 arrive as lone surrogates that cannot be
+    # percent-encoded; report that instead of a traceback.
+    try:
+        title.encode("utf-8")
+        body.encode("utf-8")
+    except UnicodeEncodeError:
+        raise UsageError("--title and the body must be valid UTF-8 text.") from None
 
     fixed = len(build_url(title, "", repo))
     if fixed >= MAX_URL:
