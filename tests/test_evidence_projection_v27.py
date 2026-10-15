@@ -774,12 +774,14 @@ class NativeStub(SimpleNamespace):
         return [e for e in self.events if e["kind"] == kind]
 
 
-def test_identical_replanned_plan_clocks_each_validation_at_its_own_dispatch_event(frozen):
+def test_identical_replanned_plan_keeps_the_contracts_first_validation_clock(frozen):
     """E03-P3-CTL (run 38691896454): the replan returns the IDENTICAL plan, so one plan hash is
-    validated twice (sources planner 1 and planner 2). The frozen key is one per plan hash and
-    score.py pv_clock reads it for both validations: it must be the latest validation's own
-    dispatch sequence (35), never the first's (19), or validation 2 reads as preceding the
-    planner occurrence 2 (seq 34) that supplied it."""
+    validated twice (sources planner 1 and planner 2). The frozen key is one per plan hash and is
+    DEFINED as the first validation of that plan (EVIDENCE_CONTRACT.md:645), so it keeps seq 19
+    even though validation 2 ran at 35. score.py pv_clock reads that one clock for both
+    validations, so the frozen plan_sources check reports validation 2 as preceding the planner
+    occurrence 2 (seq 34) that supplied it: an oracle issue carried as frozen (OI-03), never
+    re-mapped in the adapter (D4 review w6, B-RCPT-1)."""
     plan = expected_plan(MAP_GOAL)
     plan_hash = plan_version_hash(plan, None)
     records = [
@@ -801,7 +803,7 @@ def test_identical_replanned_plan_clocks_each_validation_at_its_own_dispatch_eve
     validations = projection.plan_validations(role_output)
     key = f"controller_trace.plan_validations[plan_hash={plan_hash}]"
     assert [v["source"]["occurrence"] for v in validations] == [1, 2]
-    assert projection.seq == {key: 35} and projection.missing == []
+    assert projection.seq == {key: 19} and projection.missing == []
     evidence = {
         "controller_trace": {"plan_validations": validations},
         "role_output": {"planner": [{"plan": v["plan"]} for v in validations]},
@@ -812,12 +814,14 @@ def test_identical_replanned_plan_clocks_each_validation_at_its_own_dispatch_eve
         "event_seq": dict(projection.seq),
     }
     spec = frozen_provenance(frozen, "DEV-E2E-V2_7-E03-P3-CTL", "plan_sources")
-    assert fails(score.provenance_findings(spec, evidence)) == []
-    # The check discriminates: the first validation's clock is the run-4 finding.
-    evidence["event_seq"][key] = 19
+    # As frozen, the contract's first-validation clock yields the run-4 finding (OI-03).
     assert fails(score.provenance_findings(spec, evidence)) == [
         "plan_validations[1] precedes the planner occurrence 2 that supplied its plan"
     ]
+    # The finding is the key's non-uniqueness, not the controller: with the second validation's
+    # own clock the same check is clean (the next-case-set fix, never applied to v2.7).
+    evidence["event_seq"][key] = 35
+    assert fails(score.provenance_findings(spec, evidence)) == []
 
 
 def runtime_build(repo):

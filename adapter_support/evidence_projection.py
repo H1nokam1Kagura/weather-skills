@@ -557,15 +557,15 @@ class Projection:
                     "CAP-RECEIPTS",
                     "no role output carries a plan with this plan_hash",
                 )
-            # One frozen key per plan hash (EC:event_seq plan_validations[plan_hash=...], read by
-            # score.py pv_clock for every validation of that hash). A replan that returns the
-            # identical plan, or a re-review of one plan, validates the same hash again: the key
-            # is the LATEST validation's own dispatch event (events arrive in sequence order),
-            # the validation an approval of that plan consumed (EC:611
-            # plan_validations[plan_hash=$active_approval.plan_hash]); never the first one's.
-            # v2.7 has no per-record key for plan_validations, so none is invented (OI-03).
+            # One frozen key per plan hash, DEFINED as the first validation of that plan
+            # (EVIDENCE_CONTRACT.md:645 structures, requirements.json:746). A replan that returns
+            # the identical plan, or a re-review of one plan, validates the same hash again; the
+            # key keeps the first one's clock, as the contract says, even where the frozen
+            # plan_sources check then misorders a later validation (run-4 E03-P3-CTL). That the
+            # key is not unique is an oracle issue carried to the next case set (OI-03); a
+            # latest-wins re-mapping was rejected in D4 review w6 (B-RCPT-1).
             key = f"controller_trace.plan_validations[plan_hash={record['plan_hash']}]"
-            self.seq[key] = event["sequence"]
+            self.seq.setdefault(key, event["sequence"])
             out.append(value)
         return out
 
