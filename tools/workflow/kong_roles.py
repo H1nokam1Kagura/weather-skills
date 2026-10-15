@@ -76,7 +76,9 @@ import json
 import math
 import os
 import sys
+import time
 import uuid
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from .agents import OUTPUT_NORMALIZATION, PROMPTS, parse_role_object, role_prompt
@@ -212,6 +214,24 @@ class KongOutcomeUnknown(RuntimeError):
 
 def _finite(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def retry_after_seconds(value, now=None):
+    """A Retry-After header value as non-negative seconds (float), or None. The header is
+    either delta-seconds or an HTTP date (RFC 9110 10.2.3); anything else is not observed."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        seconds = float(value.strip())
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value.strip())
+        except (TypeError, ValueError):
+            return None
+        if when is None or when.tzinfo is None:
+            return None
+        seconds = when.timestamp() - (time.time() if now is None else now)
+    return max(0.0, seconds) if math.isfinite(seconds) else None
 
 
 def price_usage(model, usage, prices):
@@ -428,7 +448,7 @@ class KongRoles:
             "request_id": error.get("request_id"),
             "error_type": envelope.get("error_type"),
             "hint": error.get("hint"),
-            "retry_after": envelope.get("retry_after"),
+            "retry_after": retry_after_seconds(envelope.get("retry_after")),
             "model_requested": model,
         }
         if not envelope["sent"]:

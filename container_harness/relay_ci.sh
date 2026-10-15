@@ -9,7 +9,9 @@
 #                                ONLY the relay port on the bridge gateway (no other host port,
 #                                no forwarding, no IPv6); writes DIR/net.json + DIR/net-*.txt
 #   relay_ci.sh relay-start DIR  starts relay/kong_relay_host.py --client runner bound to the
-#                                bridge gateway only; needs KONG_ANTHROPIC_KEY in THIS step's env
+#                                bridge gateway only, spend caps from RELAY_MAX_REQUESTS /
+#                                RELAY_MAX_TOTAL_TOKENS / RELAY_BUDGET (see below); needs
+#                                KONG_ANTHROPIC_KEY in THIS step's env
 #                                (it reaches the relay process tree and nothing else); the relay
 #                                generates the per-run token (DIR/relay.token, 0600, masked)
 #   relay_ci.sh teardown DIR     stops the relay, removes rules + network, deletes the token file
@@ -91,10 +93,23 @@ EOF
     fi
     role_args=()
     for role in ${RELAY_ROLES:-verifier}; do role_args+=(--allow-role "$role"); done
+    # Spend-guard caps (LIVE-WAVE-BRIEF "Spend guard"): the relay refuses BEFORE forwarding any
+    # call that could exceed one (reason_code relay_spend_cap). The workflow sets them per job;
+    # the fallbacks are the brief's per-case ceilings.
+    #   RELAY_MAX_REQUESTS      calls that may reach the gateway               (default 24)
+    #   RELAY_MAX_TOTAL_TOKENS  observed + worst-case-charged tokens           (default 1000000)
+    #   RELAY_BUDGET            USD, Anthropic list-price estimate             (default 5)
+    #   RELAY_MAX_TOKENS        per-call max_tokens; planner/repairer get 4096 unless
+    #                           RELAY_ROLE_MAX_TOKENS overrides ("planner=4096 repairer=4096")
+    role_tokens=()
+    for item in ${RELAY_ROLE_MAX_TOKENS:-}; do role_tokens+=(--role-max-tokens "$item"); done
     nohup python -B "$REPO/relay/kong_relay_host.py" --client runner --ack-not-sensitive \
       "${role_args[@]}" --bind "$GW" --port "$PORT" \
-      --max-requests "${RELAY_MAX_REQUESTS:-1}" --run-seconds "${RELAY_RUN_SECONDS:-1500}" \
-      --call-seconds 180 --max-tokens "${RELAY_MAX_TOKENS:-256}" --budget 1 \
+      --max-requests "${RELAY_MAX_REQUESTS:-24}" \
+      --max-total-tokens "${RELAY_MAX_TOTAL_TOKENS:-1000000}" \
+      --budget "${RELAY_BUDGET:-5}" \
+      --run-seconds "${RELAY_RUN_SECONDS:-1500}" --call-seconds 180 \
+      --max-tokens "${RELAY_MAX_TOKENS:-256}" ${role_tokens[@]+"${role_tokens[@]}"} \
       --model claude-sonnet-4-6 \
       --audit-log "$DIR/relay-audit.jsonl" --token-file "$DIR/secret/relay.token" \
       --ready-file "$DIR/relay-ready.json" > "$DIR/relay.stdout" 2> "$DIR/relay.stderr" &

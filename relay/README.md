@@ -18,6 +18,7 @@ RelayRoles.ask(role, payload)  --HTTP-->   relay/kong_relay_host.py  (kit interp
 | Container client (`ask(role, payload)`, Roles-compatible) | `tools/workflow/relay_roles.py` |
 | Host relay server | `relay/kong_relay_host.py` |
 | Offline tests (fake relay, real relay over faked worker, kit mock gateway) | `tools/workflow/tests/test_relay_roles.py` |
+| Spend guard, pricing, sessions, env hygiene, transport-retry parity | `tools/workflow/tests/test_relay_spend_guard.py` |
 
 ## Security properties
 
@@ -34,22 +35,90 @@ RelayRoles.ask(role, payload)  --HTTP-->   relay/kong_relay_host.py  (kit interp
   `X-Simkit-Run: <run id>` (constant-time compare). Rejections are audited without the
   presented values.
 - **Allow-list.** `--allow-role` (repeatable, each must be a KongRoles prompt role).
-- **Size cap.** Request body default 64 KiB, hard max 90,000 bytes, under the gateway's
-  known-good ~97.6 KB body (the system prompt is added on the host). Oversized bodies are
-  refused from `Content-Length` and never read.
+- **Size cap.** Request body default 88,000 bytes on both sides (client `DEFAULT_MAX_BODY`,
+  relay `--max-body`), under the relay's hard max of 90,000 (`HARD_MAX_BODY` in
+  `kong_relay_host.py`), which sits under the Kong kit's `KNOWN_GOOD_BODY_BYTES` 97,600 (the
+  largest body observed to pass; larger ones have failed with a bodiless 500 at the edge).
+  Oversized bodies are refused from `Content-Length` and never read. The host adds the system
+  prompt and the payload is re-serialised as message text, so the gateway body is larger than
+  the relay body: the kit worker re-checks it against 97,600 and refuses before sending
+  (`sent_to_gateway: false`, nothing billed) when it does not fit.
+- **Spend guard** (below). Caps are enforced before forwarding.
 - **One in flight per run.** A concurrent request gets 409, never queued.
 - **No retries.** One relay request is at most one `KongRoles.ask`; the worker runs with
   `KONG_SDK_MAX_RETRIES=0`, overriding any kit `.env` value (python-dotenv does not override
-  process env). The client never retries either.
+  process env). The client retries only the frozen pre-write transport fault
+  (CAP-TRANSPORT-RETRY): a connection reset/abort before any byte was written
+  (`RelayTransport.serial` unchanged), once, and only when the controller's
+  `transport_retry_recorder` recorded it. `_transport_call` mirrors `recovery.transport_call`
+  (parity-tested).
+- **Token never inherited.** `RelayRoles.from_env` removes every `SIMKIT_RELAY_*` name from
+  `os.environ`, so tool children (`catalog.child_environment` copies the environment) never
+  see the run token.
 - **Audit.** Append-only JSONL, one line per event (`relay_start`, `ask`, `auth_rejected`,
-  `relay_stop`) with status, via, request id, model, usage, hashes, sizes and outcome only.
-  Never the payload, answer text, run token or any key.
+  `spend_cap_reached`, `relay_stop`) with status, via, request id, model, usage, hashes,
+  sizes, spend totals, outcome and fault labels only. Never the payload, answer text, run
+  token or any key.
+
+## Spend guard and pricing
+
+Prices: `kong_roles.PINNED_PRICES`, claude-sonnet-4-6 at $3 input / $15 output per million
+tokens (Anthropic list price, LIVE-WAVE-BRIEF). Every priced receipt says
+`cost_basis: "Anthropic list-price estimate; Kong billing not observed"`. Kong exposes no
+per-call cost, so every dollar figure here is an estimate.
+
+| Cap | Relay flag | Env (`relay_ci.sh`) | Host default |
+|---|---|---|---|
+| Calls that may reach the gateway | `--max-requests` | `RELAY_MAX_REQUESTS` | 24 |
+| Observed + worst-case-charged tokens | `--max-total-tokens` | `RELAY_MAX_TOTAL_TOKENS` | 1,000,000 |
+| USD, list-price estimate | `--budget` | `RELAY_BUDGET` | 5 |
+| Per-call output ceiling | `--max-tokens` / `--role-max-tokens ROLE=N` | `RELAY_MAX_TOKENS` / `RELAY_ROLE_MAX_TOKENS` | 2048; planner and repairer 4096 |
+| Temperature | `--temperature` (`none` omits it) | | 0 |
+
+The host reads the same env names as argument defaults; flags win.
+
+- **Before forwarding.** Each call's worst case is bounded: input tokens at most one per UTF-8
+  byte of the longest system prompt the role can get plus the payload text, plus 64 framing
+  tokens; output at the role's `max_tokens`; priced at the requested model's rate. A call
+  that could exceed any cap is refused (`HTTP 402`, `outcome: REFUSED`,
+  `sent_to_gateway: false`, `reason_code: relay_spend_cap`), and the client raises
+  `Refused(gate="budget")`.
+- **After each call.** Observed usage is charged; an UNKNOWN outcome (no observed usage) is
+  charged at its worst case; a call whose observed model has no price is charged the whole
+  remaining budget (fail closed). A pre-send refusal is not charged or counted.
+- **First cap hit.** The guard goes `EXHAUSTED` and stays so: one `spend_cap_reached` event
+  (with the cap and the totals), every later call refused the same way, and the relay stops
+  after writing the response. `relay_stop` records requests, input/output tokens, estimated
+  USD and the cap state. The relay also stops itself once `--max-requests` asks were answered
+  (as before), so a request after that finds no relay and is refused before sending.
+- **Sessions.** The relay's KongRoles uses `session_source="response_id"`: the receipt's
+  `session_id` is the provider's response id, observed after the call, and the client refuses
+  a receipt whose `session_id` differs from its `response_id`.
+- **Temperature.** The pinned SDK (anthropic-python 1.13.0) has no typed `temperature`
+  argument; the worker sends it through the SDK's `extra_body`, and `settings_sent` echoes
+  `{"extra_body": {"temperature": 0}}`. Temperature 0 lowers variance; it does not make a
+  model deterministic.
+
+## Fault labels (rerun ruling)
+
+OWNER-RULINGS `live_spend_authorization_2026-10-15.rerun_on_gateway_fault`. Every
+non-success `ask` audit line and every client UNKNOWN record carries `fault_class` and
+`fault_kind` (`relay_roles.classify_fault`). UNKNOWN lines also carry `gateway_status`,
+`error_type` and `retry_after` (seconds, a number, only when the gateway sent `Retry-After`).
+
+| `fault_class` | `fault_kind` |
+|---|---|
+| `TRANSIENT_GATEWAY_FAULT` | `http_429`, `http_5xx`, `timeout`, `connection_reset`, `no_gateway_response` (no HTTP status observed) |
+| `DETERMINISTIC` | `http_4xx` (other than 429), `relay_spend_cap`, `body_cap`, `kong_pre_send` (e.g. gateway body over 97,600), `invalid_answer`, `harness_error`, the other relay refusal codes |
+
+These are labels; the report decides rerun eligibility.
 
 ## Outcomes
 
 | Relay envelope | HTTP | Client raises | Budget reservation |
 |---|---|---|---|
 | `SUCCESS` + value + receipt (KongRoles receipt + `relay_id`) | 200 | returns value | cost if priced, else kept |
+| `REFUSED`, `sent_to_gateway: false`, `reason_code: relay_spend_cap` | 402 | `Refused(gate="budget")` | released |
 | `REFUSED`, `sent_to_gateway: false` (auth, role, size, busy, Kong pre-send) | 401/403/409/411/413/415/422 | `Refused` | released |
 | `REFUSED`, `sent_to_gateway: true` (answer came back invalid) | 422 | `Refused` | `billed_usd` if known, else kept |
 | `UNKNOWN` (KongRoles `KongOutcomeUnknown`, relay internal error) | 502/500 | `RelayOutcomeUnknown` | kept |
