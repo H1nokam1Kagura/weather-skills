@@ -27,8 +27,11 @@ Mapping choices, each disclosed in ``notes`` when it is applied (D4 records):
   onset artifact after the kill and before anything else ran (mid-process stop only).
 """
 
+import re
+
 from adapter_support.evidence_projection import EvidenceMappingError, _is_count
 
+OUTBOX_RECORD = re.compile(r"notifications/notification-[0-9]{3}\.json")
 ROUTE_SCHEMA = "weather-adapter.resume-route/1"
 ONSET_PARTIAL_SYMBOL = "HARNESS_HASH:onset_partial_at_interrupt"
 OUTPUT_BYTES_SOURCE = "harness_observed_before_kill"
@@ -271,6 +274,84 @@ def project_symbols(projection, out):
             "CAP-MIDPROCESS",
             "onset was present at the interrupt but its hash was not observable",
         )
+
+
+# ------------------------------------------------------------------ notification outbox
+
+
+def outbox_record(name):
+    """The one nested run-local evidence name the controller records: its operator
+    notification outbox, ``notifications/notification-NNN.json`` (recovery.NOTIFICATION_DIR,
+    notify-and-wait). Exactly that form; anything else nested stays refused."""
+    return OUTBOX_RECORD.fullmatch(name) is not None
+
+
+# ------------------------------------------------------------------ compiler slots after a resume
+
+
+def compiler_role(projection, index, ordinal):
+    """(contract role, occurrence) of the compiler receipt at ``index`` (its ``ordinal``-th).
+
+    Up to three compiler receipts: compiler_N is the N-th, occurrence 1 (unchanged). More than
+    three happens only across a resume: an interruption at a compiler's after_role boundary
+    lands after its receipt is durable and before the controller retains its compile
+    (runner: compiles.append follows ask), so the resumed controller re-asks that compile slot
+    (``while len(compiles) < 3``). Mapping (disclosed): the last compiler receipt of a resume
+    phase followed by a later phase that asks compilers again was not retained; every receipt
+    takes slot = retained receipts before it + 1, and a re-asked slot is that compiler_N's
+    next occurrence (EC:invocation_receipts occurrence is 1-based per role; role_output
+    compiler_N[k] zero-based). Checked against the controller's own records: the retained
+    count equals context.compiles and each unretained receipt has an interruption."""
+    receipts = projection.n.receipts
+    compilers = [i for i, r in enumerate(receipts) if r.get("role") == "compiler"]
+    if len(compilers) <= 3:
+        return f"compiler_{ordinal}", 1
+    phases = []
+    for i in compilers:
+        dispatch = receipts[i].get("controller_dispatch")
+        phase = dispatch.get("resume_phase") if isinstance(dispatch, dict) else None
+        if not _is_count(phase):
+            raise EvidenceMappingError("more than three compiler invocations without resume phases")
+        phases.append(phase)
+    if phases != sorted(phases):
+        raise EvidenceMappingError("compiler receipts are out of resume-phase order")
+    slots, retained, unretained = {}, 0, 0
+    for k, i in enumerate(compilers):
+        later = [p for p in phases[k + 1 :] if p > phases[k]]
+        last_of_phase = k + 1 == len(phases) or phases[k + 1] != phases[k]
+        slot = retained + 1
+        occurrence = 1 + sum(1 for s, _ in slots.values() if s == slot)
+        slots[i] = (slot, occurrence)
+        if last_of_phase and later:
+            unretained += 1
+        else:
+            retained += 1
+    compiles = projection.n.context.get("compiles")
+    interruptions, _ = projection.recovery_list("interruptions")
+    if (
+        not isinstance(compiles, list)
+        or retained != len(compiles)
+        or retained > 3
+        or unretained > len(interruptions or [])
+    ):
+        raise EvidenceMappingError(
+            "more than three compiler invocations that are not re-asked compile slots"
+        )
+    if index == compilers[0]:
+        projection.notes.append(
+            {
+                "compiler_slots_after_resume": {
+                    "basis": "an unretained compile slot is re-asked after the resume and "
+                    "projected as that compiler_N's next occurrence",
+                    "receipts": [
+                        {"receipt_index": i, "role": f"compiler_{s}", "occurrence": o}
+                        for i, (s, o) in slots.items()
+                    ],
+                }
+            }
+        )
+    slot, occurrence = slots[index]
+    return f"compiler_{slot}", occurrence
 
 
 # ------------------------------------------------------------------ capability accessors

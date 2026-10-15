@@ -276,7 +276,8 @@ class NativeRun:
 
     def _verify_evidence_hashes(self):
         for name, expected in self.checkpoint["evidence"].items():
-            if "/" in name or "\\" in name:
+            # One nested form is run-local: the controller's notification outbox (rsp).
+            if ("/" in name or "\\" in name) and not rsp.outbox_record(name):
                 raise EvidenceMappingError("native evidence path must be run-local")
             try:
                 observed = catalog.tree_hash(self.root / name)
@@ -422,9 +423,8 @@ class Projection:
             if native_role == "compiler":
                 # Contract: compiler_N is the N-th compiler invocation, each occurrence 1
                 # (EC:event_seq_keys 'invocation_receipts[role=compiler_3][occurrence=1]').
-                if ordinal > 3:
-                    raise EvidenceMappingError("more than three compiler invocations")
-                role, occurrence = f"compiler_{ordinal}", 1
+                # A compile re-asked after a resume is that slot's next occurrence (rsp).
+                role, occurrence = rsp.compiler_role(self, index, ordinal)
             else:
                 role, occurrence = native_role, ordinal
             record = {
