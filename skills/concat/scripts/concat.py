@@ -8,6 +8,7 @@
 
 import numpy as np
 from weather_skills_core import Dataset, UsageError, weather_skill
+from weather_skills_core.standard_dataset import names_for
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -58,6 +59,20 @@ def concat(ds, dim, coords, **kwargs):
             f"--coords labels a new dim; {dim!r} already exists on the inputs, so its own labels are kept"
         )
 
+    # xr.concat pads a variable missing from some inputs with NaN, which looks
+    # like missing data; refuse instead.
+    names = [set(item.data_vars) for item in dss]
+    if any(n != names[0] for n in names):
+        missing = {
+            f"input {i + 1}": sorted(set.union(*names) - n)
+            for i, n in enumerate(names)
+            if n != set.union(*names)
+        }
+        raise UsageError(
+            f"inputs carry different variables (missing: {missing}); every input needs the "
+            "same variables (rename to match, or refetch with the same -v)"
+        )
+
     # Mixing e.g. daily and weekly values on one axis would keep only the
     # first input's label, so refuse instead.
     for key in ("data_interval", "aggregation_period"):
@@ -97,6 +112,15 @@ def concat(ds, dim, coords, **kwargs):
             )
         if not (index.is_monotonic_increasing or index.is_monotonic_decreasing):
             out = out.sortby(dim)
+        # Boxes stitched along lat/lon with a gap between them leave an
+        # irregular axis that clipping, regridding, and plotting assume away.
+        if dim in names_for("lat") + names_for("lon") and out.sizes[dim] > 2:
+            steps = np.abs(np.diff(out[dim].values.astype(float)))
+            if not np.allclose(steps, steps[0], rtol=1e-3):
+                raise UsageError(
+                    f"stitched {dim!r} is not evenly spaced (steps {sorted({float(round(v, 6)) for v in steps})}); "
+                    "the inputs leave a gap or sit on different grids"
+                )
     return out
 
 

@@ -161,3 +161,40 @@ def test_concat_coords_parse_dates(tmp_path, concat):
     times = xr.open_zarr(out)["time"].values
     assert times.dtype.kind == "M"
     assert times[1] == np.datetime64("2026-09-02")
+
+
+def test_concat_refuses_variable_missing_from_an_input(tmp_path, concat, capsys):
+    extra = make_gridded()
+    extra["tmax"] = extra["precip"] * 0 + 30.0
+    extra["tmax"].attrs["units"] = "degree_Celsius"
+    d1 = write_zarr(make_gridded(), tmp_path / "d1.zarr")
+    d2 = write_zarr(extra, tmp_path / "d2.zarr")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            concat, "-i", str(d1), "-i", str(d2), "-o", str(tmp_path / "o.zarr"), "--dim", "model"
+        )
+    assert exc.value.code == 2
+    assert "different variables" in capsys.readouterr().err
+
+
+def test_concat_stitches_adjacent_boxes_and_refuses_a_gap(tmp_path, concat, capsys):
+    west = write_zarr(make_gridded(lons=(10.0, 11.0)), tmp_path / "w.zarr")
+    east = write_zarr(make_gridded(lons=(12.0, 13.0)), tmp_path / "e.zarr")
+    far = write_zarr(make_gridded(lons=(15.0, 16.0)), tmp_path / "f.zarr")
+    out = tmp_path / "ok.zarr"
+    run_skill(concat, "-i", str(west), "-i", str(east), "-o", str(out), "--dim", "longitude")
+    assert list(xr.open_zarr(out).longitude.values) == [10.0, 11.0, 12.0, 13.0]
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            concat,
+            "-i",
+            str(west),
+            "-i",
+            str(far),
+            "-o",
+            str(tmp_path / "gap.zarr"),
+            "--dim",
+            "longitude",
+        )
+    assert exc.value.code == 2
+    assert "not evenly spaced" in capsys.readouterr().err

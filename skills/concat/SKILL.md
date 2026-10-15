@@ -23,6 +23,8 @@ one grid first (`coarsen --reference-grid`) and trim windows (`select`,
 - Stitching consecutive time windows (e.g. two fetches) along `time`.
 - Joining two ensemble halves (cf and pf) along `number`.
 - Stacking the same window from several models along a new `model` dim.
+- Stitching adjacent boxes along `longitude` or `latitude` that share the
+  other axis exactly and leave no gap.
 
 Not for merging overlapping regions: two country bboxes overlap and sit on
 different latitude rows, so they are refused. Fetch one bbox covering both.
@@ -51,6 +53,10 @@ units (e.g. `K` against `mm day-1`) exit non-zero with no output.
 - Labels repeated along an existing dim — overlapping windows such as
   Sep 1–7 and Sep 5–10. Drop the overlap from one input with `select`.
 - `--dim` present on some inputs but not others.
+- Inputs carrying different variables (one has `tmax`, another doesn't);
+  xarray would fill the missing one with NaN.
+- A stitched `latitude` / `longitude` that is not evenly spaced: boxes with a
+  gap between them, or on different grids.
 - A variable's `data_interval` or `aggregation_period` differing across
   inputs (e.g. daily and weekly).
 
