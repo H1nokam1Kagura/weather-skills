@@ -983,7 +983,7 @@
       ],
       "missing_fields": [
         {"field": "notes.operator_ledger_records when no operator channel was opened or the ledger file is unreadable at projection", "owner": "harness configuration; MISSING with the reason, never []"},
-        {"field": "symbols.HARNESS_RUN_ID in the projection", "owner": "CAP-SYMBOLS (closed symbol table; no frozen assertion of these cases reads it). The CAP-SYMBOLS record names CAP-RESUME / CAP-FIXTURE-OP as owners of the payload symbol, but E03-P3-CTL uses it and requires neither: run_case now supplies it to the schedule"}
+        {"field": "symbols.HARNESS_RUN_ID in the projection", "owner": "CAP-SYMBOLS (closed symbol table; no frozen assertion of these cases reads it). The payload symbol is supplied to the schedule by run_case (operator_run_id_symbol) and resolved by InjectionHooks.resolve, as the CAP-SYMBOLS record states; E03-P3-CTL uses it and requires neither CAP-RESUME nor CAP-FIXTURE-OP"}
       ],
       "mapping_choices_for_review": [
         "HARNESS_RUN_ID (no frozen definition) = the harness-assigned operator run id ('harness-run-<uuid4>') that run_case hands the controller as operator_run_id; the controller checks every ledger record's run_id against it",
