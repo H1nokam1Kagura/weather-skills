@@ -21,10 +21,13 @@ _SKILL_VERSION = "0.0.2"
     version=_SKILL_VERSION,
 )
 @weather_skill.argument("-i", "--input", type=Dataset(["spatial", "point_obs"]), required=True)
-@weather_skill.argument("--bbox")
+@weather_skill.argument(
+    "--bbox",
+    help="N/W/S/E; keeps cells whose centre is inside (mutex with --region and --geojson).",
+)
 @weather_skill.argument(
     "--region",
-    help="ISO3, country, or named region (mutex with --bbox and --geojson).",
+    help="ISO3, country, named region, or country-admin1 (mutex with --bbox and --geojson).",
 )
 @weather_skill.argument(
     "--geojson",
