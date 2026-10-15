@@ -48,9 +48,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/clip.py -i <in.zarr> -o <out.zarr> --geojson 
 - Only variables on the grid (or station axis) are masked; time bounds and
   other variables pass through unchanged. Masked integer variables become
   float (NaN needs a float).
-- Country polygons are 1:110m. That is coarse along coasts and borders
-  for a fine grid (CHIRPS 0.05°); pass a detailed boundary with
-  `--geojson` when the edge cells matter.
+- Country and sub-national outlines come from geoBoundaries and line up
+  with each other. Multi-country regions (`East Africa`) use coarse 1:110m
+  outlines, as does a country when geoBoundaries can't be reached (stderr
+  warns); pass a detailed `--geojson` when those edge cells matter.
 
 ### Longitude convention
 

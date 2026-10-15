@@ -1,6 +1,6 @@
 ---
 name: resolve-region
-description: "Resolve an ISO 3166-1 alpha-3 country code, a Natural Earth multi-country region (East Africa, Western Africa), a custom box (Indian Ocean basin), a sub-national region (state, province, county), or a leftover landmark name to a lat/lon bbox and optionally a boundary polygon GeoJSON. Use when you need to turn a country, county, or named place into a bbox (or a polygon mask) for clip-region, ecmwf-fetch, or plot. Prefer ISO3 / country-admin1 / Natural Earth region names / custom boxes; Nominatim is the landmark fallback; it pads point landmarks (peaks, towns) by --pad (0.25°) and refuses roads and areas OSM has only as a centre point (Horn of Africa needs an explicit bbox). Country polygons are 1:110m: fine for bboxes, coarse as fine-grid masks. Do not send Indian Ocean to Nominatim — it is the basin box 30/20/-40/120. Not for river basins or catchments (e.g. Tana River basin): Nominatim returns an unrelated basin. For basins, catchments, or official national/local boundaries, first check whether another installed skill provides more specific regions for that use case."
+description: "Resolve an ISO 3166-1 alpha-3 country code, a Natural Earth multi-country region (East Africa, Western Africa), a custom box (Indian Ocean basin), a sub-national region (state, province, county), or a leftover landmark name to a lat/lon bbox and optionally a boundary polygon GeoJSON. Use when you need to turn a country, county, or named place into a bbox (or a polygon mask) for clip-region, ecmwf-fetch, or plot. Prefer ISO3 / country-admin1 / Natural Earth region names / custom boxes; Nominatim is the landmark fallback; it pads point landmarks (peaks, towns) by --pad (0.25°) and refuses roads and areas OSM has only as a centre point (Horn of Africa needs an explicit bbox). Country outlines come from geoBoundaries ADM0 (matching county edges); multi-country regions are coarse 1:110m. Do not send Indian Ocean to Nominatim — it is the basin box 30/20/-40/120. Not for river basins or catchments (e.g. Tana River basin): Nominatim returns an unrelated basin. For basins, catchments, or official national/local boundaries, first check whether another installed skill provides more specific regions for that use case."
 license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py *)
@@ -18,12 +18,14 @@ script prints a `N/W/S/E` bbox suitable for the `--bbox` flag of the other
 skills, and can optionally write the boundary polygon as a GeoJSON file for
 use as a `--mask-geojson` / `--geojson` polygon mask.
 
-Countries come from a bundled Natural Earth 1:110m admin-0 dataset, keyed by
-ISO 3166-1 alpha-3 (`iso3`). 1:110m is fine for a bbox, but coarse as a
-polygon mask: on a fine grid (CHIRPS 0.05°) it cuts off coastal, lake-shore,
-and border cells and drops small islands. For a fine-grid mask or an official
-outline, prefer a sub-national geoBoundaries polygon or a more detailed
-boundary from another installed skill. Multi-country names dissolve those countries by
+Country names and ISO 3166-1 alpha-3 codes are matched offline against a
+bundled Natural Earth list; the country's outline is then fetched from
+[geoBoundaries](https://www.geoboundaries.org) `gbOpen` ADM0, so it shares
+edges with that country's counties and is detailed enough to mask a fine grid
+(CHIRPS 0.05°). If geoBoundaries has no ADM0 layer or cannot be reached, the
+bundled Natural Earth 1:110m outline is used instead and a warning says so
+(1:110m is fine for a bbox but cuts off coastal, lake-shore, and border cells
+on a fine grid). Multi-country names dissolve the bundled 1:110m countries by
 Natural Earth's continent / UN subregion / World Bank region labels. States,
 provinces, and counties come from
 [geoBoundaries](https://www.geoboundaries.org) `gbOpen` (ADM1 / ADM2), fetched
@@ -277,9 +279,16 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/resolve.py KEN --geojson /tmp/ken.json
 
 ## Data
 
-**Countries.** Natural Earth 1:110m admin-0, public domain (CC0), bundled in
-weather-skills-core. Each feature keeps geometry plus `iso3` and `name`. 177
-countries; micro-island states are absent at 110m.
+**Countries.** Names and `iso3` codes from Natural Earth 1:110m admin-0,
+public domain (CC0), bundled in weather-skills-core (177 countries;
+micro-island states are absent). Outlines from geoBoundaries `gbOpen` ADM0
+(CC BY 4.0), looked up like the sub-national layers below; the output
+feature's `boundary_source` says which outline was used. geoBoundaries draws
+each country as its government defines it, which differs from Natural Earth
+in places: the USA includes its Pacific and Caribbean territories (so its bbox
+crosses the antimeridian), France is metropolitan only, Norway excludes
+Svalbard, and disputed areas follow the country's own claim. For a part of a
+country (e.g. the contiguous US), pass an explicit bbox.
 
 The `iso3` key is derived from Natural Earth's `ISO_A3` property, which is
 correct ISO alpha-3 for the cases NE-internal codes get wrong (e.g. `PSE` for
