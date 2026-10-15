@@ -235,11 +235,21 @@ def test_e05_p1_definition_edit_blocks_and_touch_releases_on_the_repo_copy(runs,
     }
     assert inj.evidence["controller_trace"]["final_state"] == "REVIEW_APPROVED"
     assert not producing(inj)
+    # The edited copy is refused by build_manifest at projection time too: the current
+    # manifest symbol is a CAP-SYMBOLS gap with that refusal, never the adopted build_hash.
+    manifest_path = "symbols.HARNESS_MANIFEST_HASH:current"
+    assert "HARNESS_MANIFEST_HASH:current" not in inj.evidence["symbols"]
+    (gap,) = [m for m in inj.report["missing"] if m["path"] == manifest_path]
+    assert gap["capability"] == "CAP-SYMBOLS"
+    assert gap["reason"].startswith("build manifest unobservable at run end: ")
+    assert "definition changed; cached-onset/v1 must be reviewed" in gap["reason"]
     # CTL: mtime only, content hash unchanged, the binding stays valid and the run releases.
     (touch,) = fixture_record(ctl)["entries"]
     assert touch["status"] == "APPLIED" and touch["before_hash"] == touch["after_hash"]
     assert touch["mtime_delta_seconds"] >= 3600
     assert ctl.evidence["controller_trace"]["final_state"] == "RELEASED"
+    assert ctl.evidence["symbols"]["HARNESS_MANIFEST_HASH:current"]
+    assert not [m for m in ctl.report["missing"] if m["path"] == manifest_path]
     assert scored(ctl)["terminal"] == scored(inj)["terminal"] == "PASS"
 
 
