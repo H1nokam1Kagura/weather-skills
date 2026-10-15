@@ -204,11 +204,11 @@ def test_script_unpinned_step_runs_from_dev(tmp_path, provenance, capsys):
 
 
 def test_script_runs_other_repo_skill_from_checkout(tmp_path, provenance, capsys):
-    repo = "https://github.com/rhiza-research/weather-skills-plotting"
+    repo = "https://github.com/example-org/other-skills"
     history = [
         _fetch("chirps-fetch", commit="aaaa"),
         {
-            "skill": "plot",
+            "skill": "make-map",
             "version": "0.0.2",
             "commit": "bbbb",
             "repo": repo,
@@ -221,7 +221,7 @@ def test_script_runs_other_repo_skill_from_checkout(tmp_path, provenance, capsys
     captured = _script(provenance, out, capsys)
 
     assert "_checkout() {" in captured
-    assert f'uv run --script "$(_checkout {repo} bbbb)"/skills/plot/scripts/*.py' in captured
+    assert f'uv run --script "$(_checkout {repo} bbbb)"/skills/make-map/scripts/*.py' in captured
     assert f"{repo}@bbbb forecasting-skills" not in captured
 
 
