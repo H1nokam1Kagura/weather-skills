@@ -2,6 +2,7 @@
 
 usage: python container_harness/cases_report.py ADMISSION.json CASES_DIR --out RESULTS.json
                                                  --markdown RESULTS.md [--run-url URL]
+                                                 [--prior-results ORIGINAL/RESULTS.json]
        python container_harness/cases_report.py gate RESULTS.json   (exit 1 on a FAILed
                                                  execution gate; see execution_gate)
 
@@ -26,6 +27,20 @@ Every EXECUTED case also carries a separate, labelled counterfactual "with AMD-V
 (warn_counterfactual.py; JSON key warn_counterfactual.JSON_KEY, its own RESULTS.md column). It is
 never applied to the headline: dimensions/terminal/assertions and frozen_summary stay exactly as
 the frozen scorer computed them in score.json.
+
+Live-role cases (relay_usage.py) also carry their relay usage (requests, tokens, list-price
+estimate, cap state, faults), a relay outcome label (LIVE_TRANSPORT_FAULT | RELAY_GUARD_ABORT |
+null) and an ``attempts`` list; the top-level ``live`` section totals the run and lists the
+``rerun_eligible`` cases under OWNER-RULINGS live_spend_authorization_2026-10-15
+.rerun_on_gateway_fault. With ``--prior-results`` (the original run's RESULTS.json) a rerun is
+reported ALONGSIDE the original: the case's attempts list holds the original attempt first,
+then this run's; the original is never replaced. Offline runs get an empty ``live`` section
+and nothing else changes.
+
+    attempts: [{"attempt": 1, "run_url", "status", "relay_outcome_label", "relay_usage":
+                {requests, input_tokens, output_tokens, est_usd, cap_state}, "fault_kinds",
+                "dimensions"?, "terminal"?, "harness_error_source"?}, {"attempt": 2, ...,
+                "rerun_of_run_url", "authorized_by_prior_rerun_eligible"}]
 """
 
 import argparse
@@ -37,6 +52,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 
+import relay_usage  # noqa: E402
 import warn_counterfactual as wcf  # noqa: E402
 
 HEADER = (
@@ -202,10 +218,128 @@ def harness_error_detail(entry):
     return " - ".join(p for p in parts if p)
 
 
-def build(admission, cases_dir, run_url=None):
+def live_attempted(row):
+    """A live-role case this run dispatched (so a relay audit is expected)."""
+    return (
+        row.get("role_mode") == "live"
+        and row.get("admitted")
+        and row.get("disposition") == "RUNNABLE"
+        and bool(row.get("selected"))
+    )
+
+
+def attempt_record(entry, usage, run_url):
+    rec = {
+        "attempt": 1,
+        "run_url": run_url,
+        "status": entry["status"],
+        "relay_outcome_label": usage["label"],
+        "relay_usage": {
+            k: usage.get(k)
+            for k in ("requests", "input_tokens", "output_tokens", "est_usd", "cap_state")
+        },
+        "fault_kinds": sorted({f["kind"] for f in usage.get("faults") or []}),
+    }
+    for key in ("dimensions", "terminal", "harness_error_source"):
+        if entry.get(key) is not None:
+            rec[key] = entry[key]
+    return rec
+
+
+def add_live(entry, art, run_url, prior):
+    """Relay usage, label and attempts for one live-role case entry; returns its usage."""
+    if art is None:  # no case artifact: no audit observed (never inferred as zero usage)
+        usage = relay_usage.usage_from_events(None)
+    else:
+        usage = relay_usage.usage_from_relay_dir(art / "relay")
+    entry["relay_usage"] = usage
+    entry["relay_outcome_label"] = usage["label"]
+    this = attempt_record(entry, usage, run_url)
+    previous = (prior["cases"].get(entry["case_id"]) or {}).get("attempts") or []
+    if previous:
+        this.update(
+            attempt=len(previous) + 1,
+            rerun_of_run_url=prior["run_url"],
+            authorized_by_prior_rerun_eligible=entry["case_id"] in prior["eligible"],
+        )
+    entry["attempt"] = this["attempt"]
+    entry["attempts"] = [*previous, this]
+    return usage
+
+
+def live_section(per_case, prior):
+    """Run totals, the two labels and the rerun-eligible list (empty for an offline run)."""
+    live = [e for e in per_case if "relay_usage" in e]
+    totals = {"cases": len(live), "cases_with_audit": 0}
+    for key in ("requests", "input_tokens", "output_tokens", "usage_unobserved_requests"):
+        totals[key] = sum(e["relay_usage"].get(key) or 0 for e in live)
+    ests = [e["relay_usage"].get("est_usd") for e in live]
+    totals["cases_with_audit"] = sum(1 for e in live if e["relay_usage"]["audit_present"])
+    known = [x for x in ests if x is not None]
+    totals["est_usd"] = round(sum(known), 6)
+    totals["est_usd_complete"] = len(known) == len(live)
+    totals["est_usd_basis"] = relay_usage.EST_USD_BASIS
+    eligible, not_eligible, unauthorized, too_early = [], {}, [], []
+    for e in live:
+        usage = e["relay_usage"]
+        ok, reason = relay_usage.rerun_decision(
+            e["status"],
+            usage["label"],
+            clean_case(e.get("dimensions"), e.get("terminal")),
+            e["attempt"],
+        )
+        if ok:
+            eligible.append(relay_usage.rerun_record(e["case_id"], e["attempt"], usage))
+        elif usage["label"] or usage["faults"] or e["attempt"] > 1:
+            not_eligible[e["case_id"]] = reason
+        if e["attempt"] > 1:
+            last = e["attempts"][-1]
+            if not last.get("authorized_by_prior_rerun_eligible"):
+                unauthorized.append(e["case_id"])
+            earliest = (prior["eligible"].get(e["case_id"]) or {}).get("earliest_rerun_utc")
+            start = relay_usage.parse_ts(usage.get("relay_start_ts"))
+            if earliest and start and start < relay_usage.parse_ts(earliest):
+                too_early.append(e["case_id"])
+    return {
+        "ruling": relay_usage.RULING_ID,
+        "ruling_summary": relay_usage.RULING_SUMMARY,
+        "label_note": (
+            f"{relay_usage.LIVE_TRANSPORT_FAULT}: a transient gateway fault, never counted as a "
+            f"failure of the system under test; {relay_usage.RELAY_GUARD_ABORT}: the relay spend "
+            "guard stopped the case (deterministic, never rerun)"
+        ),
+        "totals": totals,
+        "run_token_cap": relay_usage.RUN_TOKEN_CAP,
+        "labels": {
+            label: [e["case_id"] for e in live if e["relay_outcome_label"] == label]
+            for label in relay_usage.LABELS
+        },
+        "attempts_by_case": {e["case_id"]: e["attempts"] for e in live},
+        "rerun_eligible": eligible,
+        "rerun_not_eligible": not_eligible,
+        "prior_run_url": prior["run_url"],
+        "reruns_not_authorized_by_prior": unauthorized,
+        "reruns_before_earliest_time": too_early,
+    }
+
+
+def prior_index(prior_results):
+    """The original run's RESULTS.json (for a rerun) as {run_url, cases, eligible}."""
+    prior_results = prior_results or {}
+    return {
+        "run_url": prior_results.get("run_url"),
+        "cases": {e["case_id"]: e for e in prior_results.get("cases") or []},
+        "eligible": {
+            r["case_id"]: r for r in (prior_results.get("live") or {}).get("rerun_eligible") or []
+        },
+    }
+
+
+def build(admission, cases_dir, run_url=None, prior_results=None):
     root, guarded, score_mod = frozen()
     arts = case_artifacts(cases_dir) if cases_dir and Path(cases_dir).is_dir() else {}
     rows = admission["cases"]
+    prior = prior_index(prior_results)
     per_case = []
     scored_all = []
     cf_scored_all = []
@@ -256,6 +390,8 @@ def build(admission, cases_dir, run_url=None):
                 cf_scored = cf or scored
         cf_scored_all.append(cf_scored)
         entry.pop("scored", None)
+        if live_attempted(row):
+            add_live(entry, arts.get(row["case_id"]), run_url, prior)
     counts = {}
     for e in per_case:
         counts[e["status"]] = counts.get(e["status"], 0) + 1
@@ -337,6 +473,7 @@ def build(admission, cases_dir, run_url=None):
         "missing_capability_reasons": admission.get("missing_capability_reasons"),
         "frozen_summary": score_mod.summarize(scored_all),
         wcf.JSON_KEY: counterfactual,
+        "live": live_section(per_case, prior),
         "pairs": sorted(pairs.values(), key=lambda p: p["pair_id"]),
         "cases": per_case,
     }
@@ -413,6 +550,10 @@ def markdown(res):
             detail = harness_error_detail(e)
         else:
             detail = e.get("demoted", "")
+        if e.get("relay_outcome_label"):
+            detail += f"; relay {e['relay_outcome_label']}"
+        if e.get("attempt", 1) > 1:
+            detail += f"; attempt {e['attempt']} (rerun; earlier attempts under Live relay usage)"
         cf = _cell(wcf.summary_cell(e.get(wcf.JSON_KEY)), limit=600)
         lines.append(
             f"| {e['case_id']} | {e['execution_mode']} | {e['role_mode']} | {e['status']} "
@@ -467,7 +608,81 @@ def markdown(res):
             "```",
             "",
         ]
+    lines += live_lines(res.get("live"))
     return "\n".join(lines)
+
+
+def _usd(value):
+    return "n/a" if value is None else f"{value:.4f}"
+
+
+def live_lines(live):
+    """RESULTS.md section for live-role cases; nothing at all for an offline run."""
+    if not live or not live["totals"]["cases"]:
+        return []
+    t = live["totals"]
+    lines = [
+        "## Live relay usage (relay audit; list-price estimate, Kong billing not observed)",
+        "",
+        f"> {live['label_note']}",
+        "",
+        f"- Run totals: {t['cases']} live cases ({t['cases_with_audit']} with a relay audit), "
+        f"{t['requests']} requests, {t['input_tokens']} input / {t['output_tokens']} output "
+        f"tokens, est. USD {_usd(t['est_usd'])}"
+        + ("" if t["est_usd_complete"] else " (incomplete: some cases unpriced or unaudited)")
+        + (
+            f"; {t['usage_unobserved_requests']} requests without observed usage"
+            if t["usage_unobserved_requests"]
+            else ""
+        ),
+        f"- {relay_usage.LIVE_TRANSPORT_FAULT}: "
+        f"{', '.join(live['labels'][relay_usage.LIVE_TRANSPORT_FAULT]) or 'none'}",
+        f"- {relay_usage.RELAY_GUARD_ABORT}: "
+        f"{', '.join(live['labels'][relay_usage.RELAY_GUARD_ABORT]) or 'none'}",
+        "",
+        "| case | attempt | status | requests | input tokens | output tokens | est. USD "
+        "| cap state | relay label | faults |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for cid, attempts in live["attempts_by_case"].items():
+        for a in attempts:
+            u = a["relay_usage"]
+            lines.append(
+                f"| {cid} | {a['attempt']} | {a['status']} | {u['requests']} "
+                f"| {u['input_tokens']} | {u['output_tokens']} | {_usd(u['est_usd'])} "
+                f"| {u['cap_state']} | {a['relay_outcome_label'] or ''} "
+                f"| {_cell(', '.join(a['fault_kinds']))} |"
+            )
+    lines += [
+        "",
+        f"### Rerun-eligible ({live['ruling']})",
+        "",
+        f"> {live['ruling_summary']}",
+        "",
+    ]
+    if live["rerun_eligible"]:
+        lines += [
+            "| case | attempt | fault kinds | wait (s) | earliest rerun (UTC) |",
+            "|---|---|---|---|---|",
+            *[
+                f"| {r['case_id']} | {r['attempt']} | {', '.join(r['fault_kinds'])} "
+                f"| {r['min_wait_seconds']:g} | {r['earliest_rerun_utc'] or 'n/a'} |"
+                for r in live["rerun_eligible"]
+            ],
+        ]
+    else:
+        lines.append("No case is rerun-eligible.")
+    if live["rerun_not_eligible"]:
+        lines += ["", "Not eligible:", ""]
+        lines += [f"- {cid}: {why}" for cid, why in live["rerun_not_eligible"].items()]
+    for key, text in (
+        ("reruns_not_authorized_by_prior", "Reruns NOT listed rerun-eligible by the prior run"),
+        ("reruns_before_earliest_time", "Reruns started before the earliest allowed time"),
+    ):
+        if live[key]:
+            lines += ["", f"> **{text}: {', '.join(live[key])}**"]
+    lines.append("")
+    return lines
 
 
 def main(argv):
@@ -479,8 +694,18 @@ def main(argv):
     ap.add_argument("--out", required=True)
     ap.add_argument("--markdown", required=True)
     ap.add_argument("--run-url")
+    ap.add_argument(
+        "--prior-results",
+        help="the original run's RESULTS.json when this run re-dispatches rerun-eligible cases; "
+        "its attempts are reported alongside this run's, never replaced",
+    )
     a = ap.parse_args(argv[1:])
-    res = build(load(a.admission), a.cases_dir, a.run_url)
+    prior = None
+    if a.prior_results:
+        prior = load(a.prior_results)
+        if prior is None:
+            raise SystemExit(f"--prior-results {a.prior_results} is absent or not JSON")
+    res = build(load(a.admission), a.cases_dir, a.run_url, prior)
     Path(a.out).write_text(json.dumps(res, indent=1, default=str) + "\n", encoding="utf-8")
     Path(a.markdown).write_text(markdown(res), encoding="utf-8")
     print(json.dumps(res["counts"], indent=1))

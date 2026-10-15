@@ -34,7 +34,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 LIVE_TRANSPORT_FAULT = "LIVE_TRANSPORT_FAULT"
@@ -435,11 +435,13 @@ def usage_from_relay_dir(relay_dir):
 # ------------------------------------------------------------------------------- rerun
 
 
-def _parse_ts(value):
+def parse_ts(value):
+    """An audit timestamp as an aware datetime (naive is read as UTC); None if unparseable."""
     try:
-        return datetime.fromisoformat(str(value))
+        parsed = datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def rerun_decision(status, label, clean, attempt):
@@ -462,7 +464,7 @@ def rerun_record(case_id, attempt, usage):
     faults = usage.get("faults") or []
     waits = [f["retry_after"] for f in faults if f.get("retry_after") is not None]
     wait = max([MIN_RERUN_WAIT_SECONDS, *waits])
-    times = [t for t in (_parse_ts(f.get("ts")) for f in faults) if t is not None]
+    times = [t for t in (parse_ts(f.get("ts")) for f in faults) if t is not None]
     last = max(times) if times else None
     return {
         "case_id": case_id,
