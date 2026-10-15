@@ -374,6 +374,19 @@ def test_run_dir_denial_routes_to_the_pre_launch_api(tmp_path, monkeypatch):
     assert getattr(controller, "write_boundary", None) is None  # commit-time path untouched
 
 
+def test_run_dir_denial_arms_the_real_controller_boundary(tmp_path):
+    """Integration (wave 7 A+B): the hook's module-level call reaches sub-wave A's
+    Boundary.inject_run_dir_denial for real (no monkeypatch); only the pre-launch run-dir
+    denial is armed, never the commit-time one."""
+    hooks, controller, payload, record, event = run_dir_denial(tmp_path)
+    assert (
+        hooks._apply("deny_write", payload, "after_transition", event, controller, record) is False
+    )
+    boundary = write_boundary.boundary_for(controller)
+    assert set(boundary.run_dir_armed) == {"onset"}
+    assert not boundary.armed  # the commit-time denial (E12-P1-INJ path) stays unarmed
+
+
 def test_run_dir_denial_is_refused_without_the_controller_api(tmp_path, monkeypatch):
     monkeypatch.delattr(write_boundary, "inject_run_dir_denial", raising=False)
     hooks, controller, payload, record, event = run_dir_denial(tmp_path)

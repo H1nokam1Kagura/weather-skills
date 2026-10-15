@@ -243,3 +243,12 @@ def meter_reading(controller, metric, value):
     controller.dispatch_event("budget_reading", reading=record)
     controller.checkpoint()
     return record
+
+
+def inject_run_dir_denial(
+    controller, *, artifact, errno=errno_codes.EACCES, message="Permission denied"
+):
+    """Module-level entry for the injection hooks (e2e_injections._deny_run_dir): arm the
+    controller's one-shot pre-launch run-directory denial for ``artifact``. Delegates to
+    Boundary.inject_run_dir_denial, which validates (ValueError on a bad artifact/errno/message)."""
+    return boundary_for(controller).inject_run_dir_denial(artifact, errno=errno, message=message)
