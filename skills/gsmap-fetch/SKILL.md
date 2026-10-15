@@ -18,7 +18,8 @@ gauge-corrected hourly rate (`JAXA.EORC_GSMaP_standard.Gauge.v6_hourly`)
 through JAXA's own Earth API (`jaxa-earth`, Cloud-Optimized GeoTIFF + STAC),
 for a bounded region and date range, and writes a standard-dataset Zarr with
 one `precip` variable at native hourly cadence. No credentials or
-registration; the bbox is subset server-side.
+registration; the bbox is subset server-side. JAXA publishes each day about
+three days late.
 
 ## When to use
 
@@ -40,20 +41,27 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py \
 ### Arguments
 
 - `--start-time`, `--end-time` — inclusive calendar date range (whole UTC
-  days).
+  days). A day JAXA has not published is skipped with a stderr note; a range
+  with no published day exits 1.
 - `--bbox` — required `N/W/S/E` bounding box; there is no whole-globe fetch.
-  Use `resolve-region` to turn a country/named region into this value.
+  Latitudes must lie within 60N–60S (GSMaP's coverage), else exit 2.
+  Longitudes may be −180..180 or 0..360 (output is always −180..180); an
+  antimeridian-crossing box (west > east) exits 2 — fetch each side and
+  `concat`. Use `resolve-region` to turn a country/named region into this value.
 - `--output`, `-o` — output Zarr path.
 
 ### Output
 
-Zarr with dims `(time, latitude, longitude)` at 0.1° resolution and data
-variable `precip` (`mm day-1`, converted from the source's `mm/hr`). Stamped
-`data_interval` `1 hour`.
+Zarr with dims `(time, latitude, longitude)` at 0.1° resolution (cell
+centres on x.x5°, latitude descending) and data variable `precip` (`mm day-1`,
+converted from the source's `mm/hr`). JAXA's error codes and nodata (negative
+values) are NaN. Stamped `data_interval` `1 hour`; each `time` labels the start
+of its hour (JAXA's `start_datetime`), e.g. `02:00` covers 02:00–02:59 UTC.
 
 `time` holds one row per hour JAXA actually serves, labeled from the archive's
 own per-image hour; missing hours are absent rows, not NaN-filled. JAXA serves
-no 00 or 01 UTC image on any day, so each UTC day has at most 22 rows. Run
+no 00 or 01 UTC image on any day, so each UTC day has at most 22 rows;
+stderr reports how many of the requested hours were served. Run
 `aggregate-temporal --period daily` for daily mean rates: each day carries
 `aggregation_coverage` ≤ 22/24, so `convert-to-totals` (default
 `--min-coverage 1.0`) drops every day — a complete daily total is not
