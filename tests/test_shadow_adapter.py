@@ -3,8 +3,8 @@
 The two frozen cases that need nothing beyond the signed capabilities but CAP-SHADOW
 (DEV-E2E-V2_7-E09-P1-CTL and -INJ) run through WeatherAdapter.run_case on the real controller
 with their frozen adapter_requirements, agent_roles and injection_schedule verbatim. The
-CAP-SHADOW record is signed only in a test-local copy of CAPABILITY-PRODUCERS.json; the
-committed record stays unsigned (reviewer null), so the frozen cases stay NOT_IMPLEMENTED.
+CAP-SHADOW record is signed in a test-local copy of CAPABILITY-PRODUCERS.json; the committed
+record is signed too (D4 review at 0f264d2), and the gate test strips it to show it refuses.
 Tools are the stand-in scripts of test_evidence_projection_v27.
 """
 
@@ -247,11 +247,15 @@ def test_e09_p1_inj_four_malformed_decisions_are_rejected_and_the_path_is_unchan
 def test_cap_shadow_is_declared_only_by_a_signed_record(frozen, lab, tmp_path):
     record = load_producers()["capabilities"]["CAP-SHADOW"]
     assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
-    assert record["reviewer"] is None and record["reviewed_at"] is None
+    assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
     assert record["missing_fields"] and record["tests"]
-    assert "CAP-SHADOW" not in WeatherAdapter().implemented_capabilities()
+    assert "CAP-SHADOW" in WeatherAdapter().implemented_capabilities()  # signed at 0f264d2
+    unsigned = producers_with(
+        **{"CAP-SHADOW": {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}}
+    )
+    assert "CAP-SHADOW" not in WeatherAdapter(producers=unsigned).implemented_capabilities()
     assert "CAP-SHADOW" in WeatherAdapter(producers=signed()).implemented_capabilities()
-    adapter = WeatherAdapter(enable_run_case=True)  # the committed, unsigned record
+    adapter = WeatherAdapter(enable_run_case=True, producers=unsigned)  # signature stripped
     case = run_input(frozen, "E09-P1-CTL")
     case["id"] += "-LOCAL-UNSIGNED"  # the e09 fixture staged the frozen id's source
     profile = lab.profile(MAP_GOAL, case, stub=None)

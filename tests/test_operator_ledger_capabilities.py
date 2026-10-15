@@ -2,9 +2,10 @@
 
 The four frozen cases whose only undeclared requirements are these capabilities run through
 WeatherAdapter.run_case with their FROZEN adapter_requirements, admitted by a test-local copy
-of the producer file in which only these three records are signed (the committed records stay
-unsigned until an independent D4 review): E01-P1-INJ and E07-P1-INJ (transition request),
-E03-P3-INJ (ledger append) and E03-P3-CTL (ledger append + operator record). Roles are the
+of the producer file in which these three records are signed (the committed records are signed
+since the D4 review at 0f264d2; the gate tests strip them): E01-P1-INJ and E07-P1-INJ
+(transition request), E03-P3-INJ (ledger append) and E03-P3-CTL (ledger append + operator
+record). Roles are the
 substituted doubles the container case driver uses; tools are the stand-in scripts. Frozen
 assertions that read these capabilities are evaluated with the pinned frozen scorer.
 """
@@ -30,9 +31,17 @@ SIGN = {"reviewer": "test-local", "reviewed_at": "2026-10-14T00:00:00Z", "review
 CASES = ("E01-P1-INJ", "E07-P1-INJ", "E03-P3-INJ", "E03-P3-CTL")
 
 
+UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
+
+
 def signed():
-    """The committed producer file with only this task's three records signed (test-local)."""
+    """The committed producer file with this task's three records signed (test-local)."""
     return producers_with(**{cap: SIGN for cap in CAPS})
+
+
+def unsigned():
+    """The committed producer file with only this task's three records' signatures stripped."""
+    return producers_with(**{cap: UNSIGN for cap in CAPS})
 
 
 def execute(lab, case):  # noqa: F811 - lab is the shared module fixture
@@ -82,18 +91,19 @@ def runs(lab, frozen):  # noqa: F811
 
 
 def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
-    committed = WeatherAdapter()
     for cap in CAPS:
-        record = committed.producers["capabilities"][cap]
+        record = WeatherAdapter().producers["capabilities"][cap]
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
-        assert record["reviewer"] is record["reviewed_at"] is record["reviewed_commit"] is None
+        assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
         assert record["tests"] and record["producers"] and record["evidence_fields"]
-        assert cap not in committed.implemented_capabilities()
+        assert cap in WeatherAdapter().implemented_capabilities()
+    stripped = WeatherAdapter(producers=unsigned())
+    assert not set(CAPS) & stripped.implemented_capabilities()
     implemented = WeatherAdapter(producers=signed()).implemented_capabilities()
     assert set(CAPS) <= implemented
     newly = set()
     for case in frozen.values():
-        before = set(case["adapter_requirements"]) - committed.implemented_capabilities()
+        before = set(case["adapter_requirements"]) - stripped.implemented_capabilities()
         if before and not set(case["adapter_requirements"]) - implemented:
             newly.add(case["id"].removeprefix(PREFIX))
     assert newly == set(CASES)
@@ -106,7 +116,7 @@ def test_unsigned_records_keep_the_frozen_cases_refused_before_side_effects(lab,
         profile = lab.profile(MAP_GOAL, case, stub=None)
         profile["case_root"] = tmp_path / f"never-{short}"
         with pytest.raises(AdapterRefusal, match="undeclared capabilities"):
-            WeatherAdapter(enable_run_case=True).run_case(case, profile)
+            WeatherAdapter(enable_run_case=True, producers=unsigned()).run_case(case, profile)
         assert not profile["case_root"].exists()
 
 

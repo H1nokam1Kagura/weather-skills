@@ -1480,28 +1480,35 @@ def test_every_frozen_case_stays_not_implemented_unsigned_under_the_real_runner(
 # set is a change to what is runnable and must be made here deliberately.
 SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E01-P1-CTL",
+    "DEV-E2E-V2_7-E01-P1-INJ",
     "DEV-E2E-V2_7-E02-P1-CTL",
     "DEV-E2E-V2_7-E02-P1-INJ",
+    "DEV-E2E-V2_7-E03-P1-CTL",
+    "DEV-E2E-V2_7-E03-P1-INJ",
+    "DEV-E2E-V2_7-E03-P3-CTL",
+    "DEV-E2E-V2_7-E03-P3-INJ",
     "DEV-E2E-V2_7-E04-P1-CTL",
     "DEV-E2E-V2_7-E04-P1-INJ",
+    "DEV-E2E-V2_7-E05-P1-CTL",
+    "DEV-E2E-V2_7-E05-P1-INJ",
     "DEV-E2E-V2_7-E07-P1-CTL",
+    "DEV-E2E-V2_7-E07-P1-INJ",
+    "DEV-E2E-V2_7-E08-P1-CTL",
     "DEV-E2E-V2_7-E08-P1-INJ",
+    "DEV-E2E-V2_7-E09-P1-CTL",
+    "DEV-E2E-V2_7-E09-P1-INJ",
     "DEV-E2E-V2_7-E13-P1-CTL",
     "DEV-E2E-V2_7-E13-P1-INJ",
     "DEV-E2E-V2_7-E13-P3-CTL",
     "DEV-E2E-V2_7-E13-P3-INJ",
+    "DEV-E2E-V2_7-E15-P1-CTL",
+    "DEV-E2E-V2_7-E15-P1-INJ",
 }
-# Committed d4_gated records awaiting their independent D4 review (wave 5): wholly unsigned
-# (reviewer, reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is
-# signing it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned.
-PENDING_D4_REVIEW = {
-    "CAP-FIXTURE-OP",
-    "CAP-REREVIEW",
-    "CAP-SHADOW",
-    "CAP-TRANSITION-REQUEST",
-    "CAP-LEDGER-APPEND",
-    "CAP-OPERATOR-RECORD-SETUP",
-}
+# Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
+# reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
+# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Empty since
+# the wave-5 records were signed from d4-review-w5/D4-CONFIRM.md at 0f264d2.
+PENDING_D4_REVIEW = set()
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):

@@ -1,8 +1,8 @@
 """CAP-FIXTURE-OP and CAP-REREVIEW on the real controller, through WeatherAdapter.run_case.
 
 The frozen cases run verbatim (id, profile, budget, agent_roles, injection_schedule and
-adapter_requirements): the two records are signed only in a test-local copy of the producer
-file, so the committed records stay unsigned and the frozen cases stay NOT_IMPLEMENTED.
+adapter_requirements): the two records are signed in a test-local copy of the producer file;
+the committed records are signed too (D4 review at 0f264d2) and the gate test strips them.
 CAP-FIXTURE-OP only: E03-P1 (CTL/INJ), E05-P1 (CTL/INJ), E08-P1-CTL. With CAP-REREVIEW:
 E15-P1 (CTL/INJ). Roles are the substituted doubles (CAP-ROLE-SUBSTITUTE); tools are the
 stand-in scripts; the build manifest is the controller's REAL catalog.build_manifest over a
@@ -392,15 +392,21 @@ def test_repo_copy_is_refused_in_prestaged_mode_and_reverified_when_adopted(lab,
 
 
 def test_unsigned_records_keep_the_cases_not_implemented(frozen):
-    committed = WeatherAdapter()
+    # The committed records are signed (D4 review at 0f264d2); stripping the signatures must
+    # make them undeclared again and the cases NOT_IMPLEMENTED.
+    unsign = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
+    stripped = producers_with(**{"CAP-FIXTURE-OP": unsign, "CAP-REREVIEW": unsign})
     for capability in ("CAP-FIXTURE-OP", "CAP-REREVIEW"):
-        record = committed.producers["capabilities"][capability]
+        record = WeatherAdapter().producers["capabilities"][capability]
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
-        assert record["reviewer"] is record["reviewed_at"] is record["reviewed_commit"] is None
-        assert capability not in committed.implemented_capabilities()
+        assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
+        assert capability in WeatherAdapter().implemented_capabilities()
+        assert capability not in WeatherAdapter(producers=stripped).implemented_capabilities()
         assert capability in WeatherAdapter(producers=signed_producers()).implemented_capabilities()
     cases = [frozen[PREFIX + s] for s in FIXTURE_ONLY + WITH_REREVIEW]
-    records = simkit_run(cases, WeatherAdapter(enable_run_case=True), profile={})
+    records = simkit_run(
+        cases, WeatherAdapter(enable_run_case=True, producers=stripped), profile={}
+    )
     assert {r["status"] for r in records} == {"NOT_IMPLEMENTED"}
     for record in records:
         assert set(record["missing_capabilities"]) <= {"CAP-FIXTURE-OP", "CAP-REREVIEW"}
