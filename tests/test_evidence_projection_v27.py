@@ -34,7 +34,12 @@ from adapter_support import evidence_projection as ep  # noqa: E402
 from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter  # noqa: E402
 from tools.workflow import agents, review_evidence, runner  # noqa: E402
 from tools.workflow.catalog import CATALOG  # noqa: E402
-from tools.workflow.contracts import digest, expected_plan  # noqa: E402
+from tools.workflow.contracts import (  # noqa: E402
+    Refused,
+    digest,
+    expected_plan,
+    plan_version_hash,
+)
 from tools.workflow.processes import Processes  # noqa: E402
 from tools.workflow.tests.test_claim_gates_v27 import (  # noqa: E402
     FROZEN_SOURCE_HASH,
@@ -754,6 +759,152 @@ def test_claims_only_repair_projects_two_distinct_plan_versions(claims_repaired,
     )
     for name, found in findings(frozen, "DEV-E2E-V2_7-E13-P1-INJ", ev).items():
         assert fails(found) == [], name
+
+
+def frozen_provenance(frozen, case_id, section):
+    """One section of a frozen V25-EVIDENCE provenance spec (scored alone)."""
+    operand = frozen_predicate(frozen, case_id, "V25-EVIDENCE")["operand"]
+    return {section: operand["provenance"][section]}
+
+
+class NativeStub(SimpleNamespace):
+    """The NativeRun surface one Projection method reads, without a run directory."""
+
+    def kinds(self, kind):
+        return [e for e in self.events if e["kind"] == kind]
+
+
+def test_identical_replanned_plan_clocks_each_validation_at_its_own_dispatch_event(frozen):
+    """E03-P3-CTL (run 38691896454): the replan returns the IDENTICAL plan, so one plan hash is
+    validated twice (sources planner 1 and planner 2). The frozen key is one per plan hash and
+    score.py pv_clock reads it for both validations: it must be the latest validation's own
+    dispatch sequence (35), never the first's (19), or validation 2 reads as preceding the
+    planner occurrence 2 (seq 34) that supplied it."""
+    plan = expected_plan(MAP_GOAL)
+    plan_hash = plan_version_hash(plan, None)
+    records = [
+        {
+            "verdict": "PASS",
+            "parser_accepted": True,
+            "failed_fields": [],
+            "plan_hash": plan_hash,
+            "source": {"role": "planner", "occurrence": occurrence},
+        }
+        for occurrence in (1, 2)
+    ]
+    events = [
+        {"kind": "plan_validation", "sequence": sequence, "validation": record}
+        for sequence, record in zip((19, 35), records, strict=True)
+    ]
+    projection = ep.Projection(NativeStub(context={"plan_validations": records}, events=events), {})
+    role_output = {"planner": [{"controller_plan": copy.deepcopy(plan)} for _ in range(2)]}
+    validations = projection.plan_validations(role_output)
+    key = f"controller_trace.plan_validations[plan_hash={plan_hash}]"
+    assert [v["source"]["occurrence"] for v in validations] == [1, 2]
+    assert projection.seq == {key: 35} and projection.missing == []
+    evidence = {
+        "controller_trace": {"plan_validations": validations},
+        "role_output": {"planner": [{"plan": v["plan"]} for v in validations]},
+        "invocation_receipts": [
+            {"role": "planner", "occurrence": 1, "seq": 18},
+            {"role": "planner", "occurrence": 2, "seq": 34},
+        ],
+        "event_seq": dict(projection.seq),
+    }
+    spec = frozen_provenance(frozen, "DEV-E2E-V2_7-E03-P3-CTL", "plan_sources")
+    assert fails(score.provenance_findings(spec, evidence)) == []
+    # The check discriminates: the first validation's clock is the run-4 finding.
+    evidence["event_seq"][key] = 19
+    assert fails(score.provenance_findings(spec, evidence)) == [
+        "plan_validations[1] precedes the planner occurrence 2 that supplied its plan"
+    ]
+
+
+def runtime_build(repo):
+    """Stand-in build manifest: one file hash plus the runtime block, whose build_id is read
+    from the repository's runtime manifest (as catalog.build_manifest does)."""
+    runtime = json.loads((Path(repo) / "runtime-manifest.json").read_text(encoding="utf-8"))
+    return {
+        "pyproject.toml": "stand-in",
+        "@runtime": {"python": "3.12", "packages": {"x": "1"}, "build_id": runtime["build_id"]},
+    }
+
+
+def test_rereview_cap_stop_projects_the_bumped_manifest_not_the_adopted_build(
+    frozen, tmp_path, monkeypatch
+):
+    """E15-P1-INJ (run 38691896454): three runtime-manifest bumps; the controller adopted
+    bumps 1 and 2 on re-review, recorded the third and then refused at the re-review cap
+    without adopting it, so its checkpoint build_hash is the pre-bump build. The harness symbol
+    is the manifest actually in place: the harness's own digest of the build manifest over the
+    repository the controller ran on, which equals the controller's third record."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(runner, "build_manifest", runtime_build)
+    builds = {}
+    for n in (1, 2, 3, 4):
+        (repo / "runtime-manifest.json").write_text(json.dumps({"build_id": f"build-{n}"}))
+        builds[n] = runtime_build(repo)  # leaves build-4, the third bump, in place
+    changes = [
+        {"index": i, "object": "manifest", "to_hash": digest(builds[n]), "sequence": 30 + 12 * i}
+        for i, n in enumerate((2, 3, 4))
+    ]
+    checkpoint = {"repo": str(repo), "build": builds[3], "build_hash": digest(builds[3])}
+    projection = ep.Projection(NativeStub(checkpoint=checkpoint, events=[]), {})
+    current = projection.harness_manifest_hash()
+    assert current == digest(builds[4]) == changes[-1]["to_hash"] != checkpoint["build_hash"]
+    assert projection.missing == []
+    assert projection.notes == [
+        {"manifest_current_is_not_adopted": {"current": current, "adopted": digest(builds[3])}}
+    ]
+    spec = frozen_provenance(frozen, "DEV-E2E-V2_7-E15-P1-INJ", "captured_identities")
+    evidence = {
+        "controller_trace": {"material_changes": changes},
+        "event_seq": {
+            f"controller_trace.material_changes[index={c['index']}]": c["sequence"] for c in changes
+        },
+        "symbols": {"HARNESS_MANIFEST_HASH:current": current},
+    }
+    assert fails(score.provenance_findings(spec, evidence)) == []
+    # The check discriminates: the adopted build (the old symbol source) is the run-4 finding.
+    evidence["symbols"]["HARNESS_MANIFEST_HASH:current"] = checkpoint["build_hash"]
+    (finding,) = fails(score.provenance_findings(spec, evidence))
+    assert finding.startswith(f"the latest manifest change records {current!r}")
+
+
+def test_unobservable_current_manifest_stays_missing_never_the_adopted_build(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "runtime-manifest.json").write_text(json.dumps({"build_id": "build-1"}))
+    adopted = runtime_build(repo)
+    checkpoint = {"repo": str(repo), "build": adopted, "build_hash": digest(adopted)}
+
+    def project(build_manifest):
+        monkeypatch.setattr(runner, "build_manifest", build_manifest)
+        projection = ep.Projection(NativeStub(checkpoint=checkpoint, events=[]), {})
+        value = projection.harness_manifest_hash()
+        assert [m["path"] for m in projection.missing] in (
+            [],
+            ["symbols.HARNESS_MANIFEST_HASH:current"],
+        )
+        return value, [m["reason"] for m in projection.missing]
+
+    # Unchanged repository under the controller's runtime: the adopted build, observed.
+    assert project(runtime_build) == (digest(adopted), [])
+
+    def refusing(repo):
+        raise Refused("definition changed; cached-onset/v1 must be reviewed")
+
+    value, (reason,) = project(refusing)
+    assert value is None and "definition changed" in reason
+
+    def other_runtime(repo):
+        build = runtime_build(repo)
+        build["@runtime"]["python"] = "3.13"
+        return build
+
+    value, (reason,) = project(other_runtime)
+    assert value is None and "runtime differs" in reason
 
 
 def test_needs_info_stop_and_visible_synthetic_marker(needs_info, frozen):

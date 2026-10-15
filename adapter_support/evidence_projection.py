@@ -557,8 +557,15 @@ class Projection:
                     "CAP-RECEIPTS",
                     "no role output carries a plan with this plan_hash",
                 )
+            # One frozen key per plan hash (EC:event_seq plan_validations[plan_hash=...], read by
+            # score.py pv_clock for every validation of that hash). A replan that returns the
+            # identical plan, or a re-review of one plan, validates the same hash again: the key
+            # is the LATEST validation's own dispatch event (events arrive in sequence order),
+            # the validation an approval of that plan consumed (EC:611
+            # plan_validations[plan_hash=$active_approval.plan_hash]); never the first one's.
+            # v2.7 has no per-record key for plan_validations, so none is invented (OI-03).
             key = f"controller_trace.plan_validations[plan_hash={record['plan_hash']}]"
-            self.seq.setdefault(key, event["sequence"])
+            self.seq[key] = event["sequence"]
             out.append(value)
         return out
 
@@ -1144,6 +1151,52 @@ class Projection:
         return harness
 
     # ---- symbols (CAP-SYMBOLS)
+    def harness_manifest_hash(self):
+        """HARNESS_MANIFEST_HASH:current: the harness's own digest of the controller's build
+        manifest routine (runner.build_manifest, call-time lookup as in HarnessLaunchObserver)
+        over the repository the controller ran on (checkpoint ``repo``), taken when the run has
+        ended, so it is the manifest in place after the last fixture operation.
+
+        Never the checkpoint ``build_hash``: that is the system under test's last ADOPTED build,
+        which a refused re-review (cap reached) correctly leaves at the pre-change build. Never
+        a controller material_changes to_hash either: frozen captured_identities compares those
+        records WITH this symbol, so sourcing it from them would make the check vacuous.
+
+        The digest covers the runtime block (python, installed packages, core origin), so it is
+        only the controller's manifest when computed under the controller's runtime: a runtime
+        that differs from the one in the controller's recorded build (apart from the repo's
+        own build_id), an unreadable repository or a refusing routine leaves it MISSING."""
+        from tools.workflow import runner  # call-time lookup: a patched manifest applies
+
+        cp = self.n.checkpoint
+        path = "symbols.HARNESS_MANIFEST_HASH:current"
+        try:
+            build = runner.build_manifest(Path(cp["repo"]))
+        except Exception as exc:  # declared, never swallowed
+            self.gap(path, "CAP-SYMBOLS", f"build manifest unobservable at run end: {exc!r}")
+            return None
+
+        def runtime(value):
+            block = value.get("@runtime") if isinstance(value, dict) else None
+            if not isinstance(block, dict):
+                return block
+            return {k: v for k, v in block.items() if k != "build_id"}
+
+        if runtime(build) != runtime(cp.get("build")):
+            self.gap(
+                path,
+                "CAP-SYMBOLS",
+                "the projecting runtime differs from the controller's recorded build runtime; "
+                "its manifest digest would not be the controller's",
+            )
+            return None
+        value = digest(build)
+        if value != cp["build_hash"]:
+            self.notes.append(
+                {"manifest_current_is_not_adopted": {"current": value, "adopted": cp["build_hash"]}}
+            )
+        return value
+
     def symbols(self, receipts, controller_pid, snapshots=None):
         cp = self.n.checkpoint
         out = {"HARNESS_RUN_DIR": str(self.n.root.resolve())}
@@ -1151,7 +1204,9 @@ class Projection:
         if digest(_read_json(self.n.root / "request.json")) != cp["request_hash"]:
             raise EvidenceMappingError("request.json differs from the captured request hash")
         out["HARNESS_REQUEST_HASH"] = out["HARNESS_REQUEST_HASH:current"] = cp["request_hash"]
-        out["HARNESS_MANIFEST_HASH:current"] = cp["build_hash"]
+        manifest = self.harness_manifest_hash()
+        if manifest is not None:
+            out["HARNESS_MANIFEST_HASH:current"] = manifest
         out["HARNESS_GOAL_HASH:current"] = digest(request_goal(cp["request"]))
         if cp.get("plan") is not None:
             claims = (self.n.context.get("review_evidence") or {}).get("plan_claims")
