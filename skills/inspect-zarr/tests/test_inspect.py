@@ -105,7 +105,7 @@ def test_nan_counts_and_json_nulls(tmp_path, inspect_zarr, capsys):
     assert precip["n_nan"] == 1
     assert precip["n_finite"] == 23
     assert precip["min"] == 1.0
-    assert precip["sample"][0] is None
+    assert None not in precip["sample"]  # the sample shows finite values only
 
 
 def test_data_sample_truncates(tmp_path, inspect_zarr, capsys):
@@ -118,7 +118,7 @@ def test_data_sample_truncates(tmp_path, inspect_zarr, capsys):
     out = capsys.readouterr().out
     assert "finite 320/320" in out
     assert "…" in out
-    assert "(4 of 320 cells)" in out
+    assert "(4 of 320 finite cells)" in out
 
 
 def test_max_values_zero_still_caps_data_sample(tmp_path, inspect_zarr, capsys):
@@ -154,3 +154,19 @@ def test_timedelta_coords_and_key_attrs_are_readable(tmp_path, inspect_zarr, cap
     assert "long_name: Total precipitation" in out
     assert "aggregation_period: 7 day" in out
     assert "cell_methods: step: mean" in out
+
+
+def test_sample_skips_leading_nan_and_datetime_stats(tmp_path, inspect_zarr, capsys):
+    ds = make_gridded()
+    ds["precip"].values[:, 0, :] = np.nan  # a clipped grid's empty first rows
+    onset = np.full((3, 4), np.datetime64("NaT"), dtype="datetime64[ns]")
+    onset[2, 3] = np.datetime64("2026-03-05")
+    ds["onset"] = (("latitude", "longitude"), onset)
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    run_skill(inspect_zarr, "-i", str(src), "--format", "json")
+    by_name = {v["name"]: v for v in json.loads(capsys.readouterr().out)["data_vars"]}
+    assert by_name["precip"]["sample"][:3] == [1.0, 1.0, 1.0]
+    assert by_name["precip"]["n_nan"] == 8
+    assert by_name["onset"]["n_finite"] == 1
+    assert by_name["onset"]["min"] == "2026-03-05"
+    assert by_name["onset"]["mean"] is None

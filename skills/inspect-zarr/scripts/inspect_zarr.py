@@ -89,39 +89,44 @@ def _preview(vals, n):
     return [*vals[:h], "…", *vals[-t:]], True
 
 
-def _stats(arr):
-    flat = np.asarray(arr).reshape(-1)
-    n = int(flat.size)
-    out = {"n": n, "n_finite": None, "n_nan": None, "min": None, "max": None, "mean": None}
-    if n == 0 or flat.dtype.kind not in "biuf":
-        return out
-    if flat.dtype.kind == "f":
-        finite = np.isfinite(flat)
-        vals = flat[finite]
-        n_finite = int(vals.size)
-        n_nan = n - n_finite
-    else:
-        vals = flat
-        n_finite = n
-        n_nan = 0
-    out["n_finite"] = n_finite
-    out["n_nan"] = n_nan
-    if n_finite == 0:
-        return out
-    out["min"] = _jsonable(_fmt(vals.min()))
-    out["max"] = _jsonable(_fmt(vals.max()))
-    out["mean"] = _jsonable(float(vals.mean()))
-    return out
-
-
 def _data_var(name, da, max_values):
     arr = _numpy(da)
-    stats = _stats(arr)
     want = _DATA_SAMPLE_CAP if max_values == 0 else min(max_values, _DATA_SAMPLE_CAP)
-    flat = arr.reshape(-1)
-    raw = flat[: min(want, int(flat.size))]
-    sample = [_fmt(v) for v in raw]
-    truncated = int(flat.size) > len(raw)
+    n = int(arr.size)
+    kind = arr.dtype.kind
+    stats = {"n": n, "n_finite": None, "n_nan": None, "min": None, "max": None, "mean": None}
+    sample = []
+    if kind in "biufmM" and n:
+        # One pass over blocks along the first axis: no full-size copies of a
+        # large array, and the sample is the first *finite* values (a clipped
+        # grid's leading cells are often all NaN).
+        n_finite, total, lo, hi = 0, 0.0, None, None
+        blocks = arr.reshape(arr.shape[0], -1) if arr.ndim else arr.reshape(1, 1)
+        step = max(1, 10_000_000 // max(1, blocks.shape[1]))
+        for start in range(0, blocks.shape[0], step):
+            block = blocks[start : start + step].reshape(-1)
+            if kind == "f":
+                block = block[np.isfinite(block)]
+            elif kind in "mM":
+                block = block[~np.isnat(block)]
+            if not block.size:
+                continue
+            n_finite += int(block.size)
+            lo = block.min() if lo is None else min(lo, block.min())
+            hi = block.max() if hi is None else max(hi, block.max())
+            if kind not in "mM":
+                total += float(block.sum(dtype="float64"))
+            if len(sample) < want:
+                sample.extend(_fmt(v) for v in block[: want - len(sample)])
+        stats["n_finite"], stats["n_nan"] = n_finite, n - n_finite
+        if n_finite:
+            stats["min"], stats["max"] = _jsonable(_fmt(lo)), _jsonable(_fmt(hi))
+            if kind not in "mM":
+                stats["mean"] = _jsonable(total / n_finite)
+    else:
+        sample = [_fmt(v) for v in arr.reshape(-1)[:want]]
+    truncated = stats["n_finite"] is not None and stats["n_finite"] > len(sample)
+    truncated = truncated or (stats["n_finite"] is None and n > len(sample))
     if truncated:
         sample.append("…")
     return {
@@ -199,12 +204,16 @@ def inspect_zarr(ds, format, max_values, **kwargs):
         for key, val in v["attrs"].items():
             print(f"    {key}: {val}")
         if v["n_finite"] is not None:
+            mean = f"  mean {_show(v['mean'])}" if v["mean"] is not None else ""
             print(
                 f"    finite {v['n_finite']}/{v['n']}  "
-                f"min {_show(v['min'])}  max {_show(v['max'])}  mean {_show(v['mean'])}"
+                f"min {_show(v['min'])}  max {_show(v['max'])}{mean}"
             )
-        shown = ", ".join(_show(x) for x in v["sample"])
-        extra = f"  ({len(v['sample']) - 1} of {v['n']} cells)" if v["sample_truncated"] else ""
+            of = f"{v['n_finite']} finite cells"
+        else:
+            of = f"{v['n']} cells"
+        shown = ", ".join(_show(x) for x in v["sample"]) or "(no finite values)"
+        extra = f"  ({len(v['sample']) - 1} of {of})" if v["sample_truncated"] else ""
         print(f"    sample: {shown}{extra}")
 
 

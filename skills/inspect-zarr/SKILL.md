@@ -15,11 +15,14 @@ Read-only dump of a Zarr store's structure **and** a bounded look at the
 data. Prints dimension sizes, every coordinate (with values), and for each
 data variable: dtype, shape, units, key attrs (`long_name`, `standard_name`,
 `cell_methods`, `aggregation_period`, `data_interval`), min/max/mean, finite
-vs NaN counts, and a truncated sample of cells. Timedelta coords (`step`)
+vs NaN counts, and a sample of the first finite values (a clipped grid's
+leading cells are often NaN, so a raw first-cells sample would look empty).
+Datetime variables (e.g. `indicator` onset dates) get NaT counts and the
+date range. Timedelta coords (`step`)
 print as durations (`7 days`, `0 days 03:00:00`), not nanoseconds. It does not write an output store.
 
-**Data arrays can be huge.** Stats scan the array (that can take time on a
-large store) but stdout stays small: a handful of numbers plus a sample
+**Data arrays can be huge.** Stats scan the array block by block (that can
+take time on a large store, and the input is loaded whole) but stdout stays small: a handful of numbers plus a sample
 capped at 256 cells. Never dump the arrays yourself — do not `print(ds)`,
 open the Zarr in Python to ravel it, or pass `--max-values 0` expecting a
 full data dump. `--max-values 0` still prints every *coordinate* value;
@@ -86,12 +89,13 @@ Data variables:
 ```
 
 A truncated coordinate line ends with `(N values)`. A truncated data sample
-ends with `(K of N cells)`.
+ends with `(K of N finite cells)`; an all-NaN variable shows
+`sample: (no finite values)`.
 
 **json** — the same information as `dims`, `coords` (`values` / `truncated` /
 `size`), and `data_vars` (plus `attrs`, `n`, `n_finite`, `n_nan`, `min`, `max`,
-`mean`, `sample`, `sample_truncated`). Non-finite numbers in JSON are
-`null`. Use `provenance` for `weather_skills_history`.
+`mean`, `sample`, `sample_truncated`). `sample` holds finite values only;
+`mean` is `null` for datetime variables. Use `provenance` for `weather_skills_history`.
 
 ## Example
 
