@@ -36,7 +36,11 @@ Algorithms:
   climatology sample, `F_ref` the cell's CDF over the `--qq-reference`
   sample. A forecast at the model's 90th percentile becomes the observed
   90th percentile, so the forecast signal is kept and the model's bias is
-  removed.
+  removed. A value tied with many model values (precipitation zeros) takes
+  the middle of its tie block, so a dry forecast maps to the observed
+  percentile halfway through the model's dry fraction: if the model is dry
+  60% of the time and the observations 40%, it maps to the observed 30th
+  percentile, which is still dry.
 
 **q-q needs a model climatology.** Pass `--qq-model` with the model's own
 climatology for the same variable, season, and lead (hindcasts /
@@ -82,20 +86,21 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/downscale.py --input <in.zarr> --output <out.
 - `--algorithm` — `linear-interpolation` or `q-q`. Required.
 - `--factor`, `-f` — integer refinement factor (>= 1). New spacing = input spacing / factor (factor 1 = identity). Mutually exclusive with `--target-resolution` and `--reference-grid`.
 - `--target-resolution` — target spacing in degrees; must be finer-or-equal (<=) to the input on each axis (near-equal counts as equal). Mutually exclusive with `--factor` and `--reference-grid`.
-- `--reference-grid` — path to a reference Zarr whose lat/lon grid defines the target. The reference grid must be finer-or-equal to the input (near-equal counts as equal, so a half-cell offset at the same nominal resolution is allowed). Mutually exclusive with `--factor` and `--target-resolution`.
+- `--reference-grid` — path to a reference Zarr whose lat/lon grid defines the target (its own dim names, `lat` or `latitude`, are fine). Only its points within half an input cell of the input's extent are used, so a continental reference doesn't produce a mostly empty grid. The reference grid must be finer-or-equal to the input (near-equal counts as equal, so a half-cell offset at the same nominal resolution is allowed). Mutually exclusive with `--factor` and `--target-resolution`.
 - `--variable`, `-v` — restrict to a single data variable. Default: process all.
 - `--qq-reference` — observed climatology sample: the distribution `q-q`
-  maps onto. Must already be on the post-downscale lat/lon grid (mismatches
-  are an error) and have a sample dim besides lat/lon. Required for
-  `--algorithm q-q`.
+  maps onto. Must contain every post-downscale grid point (it may extend
+  past them, so the same Zarr can serve as `--reference-grid`) and have a
+  sample dim besides lat/lon. Required for `--algorithm q-q`.
 - `--qq-model` — the model's climatology sample (hindcasts / reforecasts),
   on any grid covering the input; it is interpolated onto the output grid
   the same way as the input. Needs a sample dim besides lat/lon.
   Strongly recommended; see above.
 
-Every input variable must exist under the same name in `--qq-reference`
-(and `--qq-model`), or the skill errors before interpolating — `rename` one
-side, or limit the input with `--variable`.
+Every input variable must exist under the same name and in the same units
+in `--qq-reference` (and `--qq-model`), or the skill errors before
+interpolating — `rename` / `unit-convert` one side, or limit the input with
+`--variable`.
 
 ### Output
 

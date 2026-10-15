@@ -13,6 +13,7 @@ import sys
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.standard_dataset import detect_spatial_dims
 from weather_skills_core.standard_utils import ensure_normalized_longitude, grid_spacing
+from weather_skills_core.units import units_equal
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.2"
@@ -45,8 +46,12 @@ def _qmap(values, model, ref):
     sorted_m, sorted_r = np.sort(model[~np.isnan(model)]), np.sort(ref[~np.isnan(ref)])
     if not ok.any() or not sorted_m.size or not sorted_r.size:
         return out
-    ranks = np.searchsorted(sorted_m, values[ok], side="right")
-    quants = np.clip((ranks - 0.5) / sorted_m.size, 0.0, 1.0)
+    # Mid-rank: a value tied with many model values (precip zeros) sits in the
+    # middle of its tie block. Taking the top of the block (side="right") put
+    # a dry forecast at the model's dry fraction and mapped it to observed rain.
+    left = np.searchsorted(sorted_m, values[ok], side="left")
+    right = np.searchsorted(sorted_m, values[ok], side="right")
+    quants = np.clip((left + right) / (2 * sorted_m.size), 0.0, 1.0)
     out[ok] = np.interp(quants, (np.arange(sorted_r.size) + 0.5) / sorted_r.size, sorted_r)
     return out
 
@@ -121,6 +126,13 @@ def downscale(
                     "input with --variable"
                 )
             for v in ds.data_vars:
+                want = ds[v].attrs.get("units") or format(ds[v].pint.units or "", "~cf")
+                have = other[v].attrs.get("units")
+                if not units_equal(have, want):
+                    raise UsageError(
+                        f"{flag} {v!r} is in {have!r} but the input is in {want!r}; "
+                        "unit-convert one side first"
+                    )
                 if not set(other[v].dims) - {lat_dim, lon_dim}:
                     raise UsageError(
                         f"{flag} {v!r} has only {list(other[v].dims)}: q-q needs a "
@@ -146,8 +158,21 @@ def downscale(
 
     if reference_grid is not None:
         ref = xr.open_zarr(reference_grid, consolidated=False)
-        new_lat, new_lon = np.asarray(ref[lat_dim].values), np.asarray(ref[lon_dim].values)
-        ref_lat, ref_lon = _spacing(ref, lat_dim), _spacing(ref, lon_dim)
+        ref_lat_dim, ref_lon_dim = detect_spatial_dims(ref)
+        ref = ensure_normalized_longitude(ref, ref_lon_dim)
+        ref_lat, ref_lon = _spacing(ref, ref_lat_dim), _spacing(ref, ref_lon_dim)
+        # Only reference points within half an input cell of the input's span
+        # (as coarsen does): a continental reference would otherwise write a
+        # mostly empty grid. 1e-6 slack for float32 coords.
+        new_lat, new_lon = (
+            np.asarray(ref[rd].values)[
+                (ref[rd].values >= float(ds[d].min()) - sp / 2 - 1e-6)
+                & (ref[rd].values <= float(ds[d].max()) + sp / 2 + 1e-6)
+            ]
+            for rd, d, sp in ((ref_lat_dim, lat_dim, in_lat), (ref_lon_dim, lon_dim, in_lon))
+        )
+        if not new_lat.size or not new_lon.size:
+            raise UsageError("--reference-grid does not overlap the input's lat/lon span")
         # 1% rel_tol: float noise / half-cell shift is not a resolution change.
         if (in_lat < ref_lat and not math.isclose(in_lat, ref_lat, rel_tol=1e-2)) or (
             in_lon < ref_lon and not math.isclose(in_lon, ref_lon, rel_tol=1e-2)
@@ -182,11 +207,18 @@ def downscale(
 
     if algorithm == "q-q":
         ref = samples["--qq-reference"]
-        for d in (lat_dim, lon_dim):
-            if ref[d].size != out[d].size or not np.allclose(
-                out[d].values, ref[d].values, atol=1e-6, rtol=0
-            ):
-                raise UsageError(f"--qq-reference '{d}' must match post-downscale grid")
+        ref = ensure_normalized_longitude(ref, lon_dim)
+        # The reference must hold every output grid point (it may extend past
+        # them, e.g. the same continental grid passed as --reference-grid).
+        try:
+            ref = ref.sel(
+                {lat_dim: out[lat_dim], lon_dim: out[lon_dim]}, method="nearest", tolerance=1e-6
+            )
+        except KeyError:
+            raise UsageError(
+                "--qq-reference must contain every post-downscale grid point; build it on "
+                "the output grid (or pass it as --reference-grid too)"
+            ) from None
         ref = ref.assign_coords({lat_dim: out[lat_dim], lon_dim: out[lon_dim]})
         model = out
         if qq_model is not None:

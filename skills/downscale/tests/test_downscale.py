@@ -211,3 +211,53 @@ def test_qq_mismatch_errors(tmp_path, downscale, capsys, case):
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert ("rename" in err) if case == "name" else ("sample dim" in err)
+
+
+def test_qq_dry_forecast_stays_dry_with_tied_zeros(tmp_path, downscale):
+    """Model dry 60% of the time, obs 40%: a 0 mm forecast must not map to observed rain."""
+    import numpy as np
+
+    fc = make_gridded(n_time=1, lats=(1.0, 2.0), lons=(10.0, 11.0), fill=0.0)
+    src = write_zarr(fc, tmp_path / "fc.zarr")
+    model, ref = _clim(10, 1.0), _clim(10, 1.0)
+    model["precip"].values[:] = np.array([0, 0, 0, 0, 0, 0, 1, 2, 3, 4.0])[:, None, None]
+    ref["precip"].values[:] = np.array([0, 0, 0, 0, 1, 2, 3, 4, 5, 6.0])[:, None, None]
+    out = tmp_path / "out.zarr"
+    run_skill(
+        downscale, "-i", str(src), "-o", str(out), "--algorithm", "q-q", "-f", "1",
+        "--qq-reference", str(write_zarr(ref, tmp_path / "ref.zarr")),
+        "--qq-model", str(write_zarr(model, tmp_path / "model.zarr")),
+    )  # fmt: skip
+    assert (xr.open_zarr(out)["precip"].values == 0.0).all()
+
+
+def test_qq_reference_in_other_units_errors(tmp_path, downscale, capsys):
+    src = write_zarr(_clim(10, 1.0), tmp_path / "in.zarr")
+    ref_ds = _clim(10, 2.0)
+    ref_ds["precip"].attrs["units"] = "m day-1"
+    with pytest.raises(SystemExit) as exc:
+        run_skill(
+            downscale, "-i", str(src), "-o", str(tmp_path / "out.zarr"), "--algorithm", "q-q",
+            "-f", "1", "--qq-reference", str(write_zarr(ref_ds, tmp_path / "ref.zarr")),
+        )  # fmt: skip
+    assert exc.value.code == 2
+    assert "unit-convert" in capsys.readouterr().err
+
+
+def test_reference_grid_trimmed_and_own_dim_names(tmp_path, downscale):
+    import numpy as np
+
+    src = write_zarr(
+        make_gridded(lats=(0.0, 1.0, 2.0), lons=(10.0, 11.0, 12.0)), tmp_path / "in.zarr"
+    )
+    lat, lon = np.arange(-10, 10.01, 0.5), np.arange(0, 20.01, 0.5)  # far larger than the input
+    ref = xr.Dataset(coords={"lat": ("lat", lat), "lon": ("lon", lon)})
+    ref["mask"] = (("lat", "lon"), np.ones((lat.size, lon.size)))
+    out = tmp_path / "out.zarr"
+    run_skill(
+        downscale, "-i", str(src), "-o", str(out), "--algorithm", "linear-interpolation",
+        "--reference-grid", str(write_zarr(ref, tmp_path / "ref.zarr")),
+    )  # fmt: skip
+    res = xr.open_zarr(out)
+    assert res["latitude"].values.min() >= -0.5 and res["latitude"].values.max() <= 2.5
+    assert res["longitude"].values.min() >= 9.5 and res["longitude"].values.max() <= 12.5
