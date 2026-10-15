@@ -18,7 +18,7 @@ CATALOG = {
     "verify-run": ("verify_run.py", "verify_run"),
 }
 # The runtime manifest an approval binds carries a build identity (FX-RUNTIME-MANIFEST-BUMP,
-# field build_id). Read from this repo-relative file when present; absent stays absent.
+# field build_id). The product ships it at the repo root (owner ruling B, 2026-10-14).
 RUNTIME_MANIFEST = "runtime-manifest.json"
 
 

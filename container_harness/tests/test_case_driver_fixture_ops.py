@@ -39,15 +39,15 @@ def frozen():
 
 
 def stand_in_repo(root, runtime_manifest=True):
-    """The files catalog.build_manifest hashes that a repository copy needs (test stand-in: the
-    real repository carries no runtime manifest)."""
+    """The files catalog.build_manifest hashes that a repository copy needs, copied from the
+    real repository (its shipped runtime manifest included unless ``runtime_manifest`` is off)."""
     root.mkdir(parents=True)
     target = root / frx.DEFINITIONS_FILE
     target.parent.mkdir(parents=True)
     shutil.copyfile(REPO / frx.DEFINITIONS_FILE, target)
     shutil.copyfile(REPO / "pyproject.toml", root / "pyproject.toml")
     if runtime_manifest:
-        (root / catalog.RUNTIME_MANIFEST).write_text(json.dumps({"build_id": "build-1"}))
+        shutil.copyfile(REPO / catalog.RUNTIME_MANIFEST, root / catalog.RUNTIME_MANIFEST)
     return root
 
 

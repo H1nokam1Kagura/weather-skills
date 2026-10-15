@@ -6,8 +6,8 @@ file, so the committed records stay unsigned and the frozen cases stay NOT_IMPLE
 CAP-FIXTURE-OP only: E03-P1 (CTL/INJ), E05-P1 (CTL/INJ), E08-P1-CTL. With CAP-REREVIEW:
 E15-P1 (CTL/INJ). Roles are the substituted doubles (CAP-ROLE-SUBSTITUTE); tools are the
 stand-in scripts; the build manifest is the controller's REAL catalog.build_manifest over a
-stand-in repository carrying the real definition registry and a runtime manifest, so the
-definition edit and the runtime-manifest bumps reach the controller's binding.
+stand-in repository carrying the real definition registry and the real runtime manifest, so
+the definition edit and the runtime-manifest bumps reach the controller's binding.
 
 In-process route: the container-only harness observations (whole-tree counts, RAM sampler,
 created_paths) are MISSING here, so assertions that read them do not pass; they are excluded
@@ -75,16 +75,16 @@ def frozen():
 
 class FixtureLab(Lab):
     """The stand-in repository plus what the fixture operations edit: the real definition
-    registry (catalog.build_manifest checks it), pyproject.toml and a runtime manifest."""
+    registry (catalog.build_manifest checks it), pyproject.toml and the shipped runtime
+    manifest."""
 
     def __init__(self, root):
         super().__init__(root)
         target = self.repo / frx.DEFINITIONS_FILE
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO / frx.DEFINITIONS_FILE, target)
-        shutil.copyfile(REPO / "pyproject.toml", self.repo / "pyproject.toml")
-        # Test-local stand-in: the real repository carries no runtime manifest.
-        (self.repo / catalog.RUNTIME_MANIFEST).write_text(json.dumps({"build_id": "build-1"}))
+        for name in ("pyproject.toml", catalog.RUNTIME_MANIFEST):
+            shutil.copyfile(REPO / name, self.repo / name)
 
 
 @pytest.fixture(scope="module")
@@ -304,9 +304,11 @@ def test_fixture_plan_refuses_incomplete_or_unreachable_operations_before_side_e
     bare.mkdir()
     with pytest.raises(AdapterRefusal, match="no runtime-manifest.json"):
         frx.fixture_plan(frozen[PREFIX + "E15-P1-CTL"], bare)
-    assert not (REPO / catalog.RUNTIME_MANIFEST).exists()
-    with pytest.raises(AdapterRefusal, match="no runtime-manifest.json"):
-        frx.fixture_plan(frozen[PREFIX + "E15-P1-CTL"], REPO)
+    # The real repository ships one (owner ruling B): build-1, below every frozen bump value.
+    assert catalog.runtime_build_id(REPO / catalog.RUNTIME_MANIFEST) == "build-1"
+    for short in ("E15-P1-CTL", "E15-P1-INJ"):
+        entries = frx.fixture_plan(frozen[PREFIX + short], REPO)["entries"]
+        assert {e["fixture_operation"] for e in entries} == {"FX-RUNTIME-MANIFEST-BUMP"}
     plan = frx.fixture_plan(frozen[PREFIX + "E10-P2-INJ"], lab.repo)
     (shift,) = plan["entries"]
     assert shift["fixture_operation"] == "FX-SRC-CELL-INCREMENT"
