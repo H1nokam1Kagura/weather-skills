@@ -19,6 +19,19 @@ Controls:
 - request body cap (default 88,000 bytes, hard max 90,000: under the Kong kit's
   KNOWN_GOOD_BODY_BYTES 97,600, the largest body observed to pass; the kit worker re-checks
   the full gateway body, system prompt included, before anything is sent);
+- transport encoding ``dedup-sha256/1`` (``tools/workflow/relay_roles.py``): the cap applies to
+  the ENCODED body. The relay decodes and verifies it (``dedup_decode``: every shared value
+  hashes to its reference, every reference resolves, and the decoded payload matches both
+  declared original hashes) or refuses with ``reason_code: dedup_mismatch`` (DETERMINISTIC,
+  ``sent_to_gateway: false``). KongRoles gets the DECODED payload, so ``input_hash``,
+  ``stdin_hash``, the system prompt and the reviewer ``dispatch`` binding are those of the
+  controller payload; only the user message is the model-facing rendering
+  (``render_model_input``: the role input JSON with references kept, then each shared value
+  exactly once, after a preamble that explains references). The system prompt is NOT changed,
+  so the controller's review binding still holds. The receipt and the audit ask line record
+  ``transport_encoding`` and ``transport_bytes`` (request body, payload, model-facing sizes
+  and the model-facing hash). Every ask line also records ``settings_sent`` / ``sent_keys``
+  (temperature included) as the worker echoed them;
 - one request in flight per run (a concurrent request is refused, never queued);
 - spend guard (``SpendGuard``, LIVE-WAVE-BRIEF "Spend guard"): per-run ``--max-requests``,
   ``--max-total-tokens`` and a priced ``--budget`` (USD, list-price estimate). A call that
@@ -29,7 +42,7 @@ Controls:
 - no retries: one relay request is at most one KongRoles call, and the worker runs with
   ``KONG_SDK_MAX_RETRIES=0``;
 - append-only JSONL audit log with redacted metadata only (status, via, request id, model,
-  usage, hashes, sizes, spend totals, fault labels). Never the payload, the answer text, the
+  usage, sent settings, hashes, sizes, spend totals, fault labels). Never the payload, the answer text, the
   run token or any key.
 
 Two clients (``--client``), same KongRoles worker, receipt, redaction and UNKNOWN semantics:
@@ -84,12 +97,20 @@ from tools.workflow.kong_roles import (  # noqa: E402
 )
 from tools.workflow.relay_roles import (  # noqa: E402
     ASK_PATH,
+    DEDUP_ENCODING,
+    DEDUP_MISMATCH,
     DEFAULT_MAX_BODY,
+    ENCODED_KEYS,
     HEALTH_PATH,
+    PLAIN_KEYS,
+    SHARED_KEY,
     SPEND_CAP_CODE,
     UNKNOWN_EVIDENCE,
+    DedupMismatch,
     classify_fault,
+    dedup_decode,
 )
+from tools.workflow.review_evidence import text_hash  # noqa: E402
 
 RUNNER_KIT = ROOT / "relay" / "runner_kit"
 RUNNER_SDK = {"anthropic": "1.13.0"}  # relay/runner_kit/requirements.txt
@@ -274,12 +295,68 @@ class SpendGuard:
         }
 
 
-def worst_case(roles, role, payload):
-    """Upper bound of one call: (tokens, usd or None when the requested model is unpriced)."""
+MODEL_INPUT_PREAMBLE = (
+    "TRANSPORT ENCODING " + DEDUP_ENCODING + ". This message is your complete role input. "
+    "To fit the gateway's request size, every large JSON value that occurred more than once "
+    "in it is written ONCE, in the SHARED DOCUMENTS section below, and each place it "
+    'occurred holds a reference object {"' + SHARED_KEY + '": "<sha256>"}. Read every '
+    "reference exactly as if the referenced JSON value were written in full at that "
+    "position; it is the same value at every position that references it. Nothing was "
+    "removed, shortened or summarised. Each shared block is the JSON value itself (a JSON "
+    "string literal for text) and may contain further references. Your answer rules are "
+    "unchanged."
+)
+
+
+def render_model_input(encoded_payload, shared):
+    """The model-facing user message for a verified ``dedup-sha256/1`` request: the role
+    input JSON with references kept, then each shared value exactly once. Deterministic."""
+    parts = [
+        MODEL_INPUT_PREAMBLE,
+        "",
+        "=== ROLE INPUT (JSON) ===",
+        json.dumps(encoded_payload),
+        "=== END ROLE INPUT ===",
+        "",
+        f"=== SHARED DOCUMENTS (referenced by {SHARED_KEY} sha256; {len(shared)} blocks) ===",
+    ]
+    for ref, value in shared.items():
+        parts += [
+            f"--- {SHARED_KEY} {ref} ---",
+            json.dumps(value),
+            f"--- end {SHARED_KEY} {ref} ---",
+        ]
+    parts.append("=== END SHARED DOCUMENTS ===")
+    return "\n".join(parts)
+
+
+def wire_view(request, body, payload):
+    """How the payload travelled: (transport_encoding, model_input or None, transport_bytes).
+    ``request`` is already verified (``dedup_decode``) when it is encoded."""
+    logical = json.dumps(payload)
+    if set(request) == PLAIN_KEYS:
+        encoding, model_input, user, shared = None, None, logical, {}
+    else:
+        encoding, shared = DEDUP_ENCODING, request["shared"]
+        model_input = user = render_model_input(request["payload"], shared)
+    sizes = {
+        "request_body_bytes": len(body),
+        "payload_bytes": len(logical.encode("utf-8")),
+        "model_facing_bytes": len(user.encode("utf-8")),
+        "model_facing_hash": text_hash(user),
+        "shared_blocks": len(shared),
+        "shared_bytes": sum(len(json.dumps(v).encode("utf-8")) for v in shared.values()),
+    }
+    return encoding, model_input, sizes
+
+
+def worst_case(roles, role, payload, user=None):
+    """Upper bound of one call: (tokens, usd or None when the requested model is unpriced).
+    ``user``: the model-facing user message when it is not ``json.dumps(payload)``."""
     model = roles.models.get(role, roles.model)
     max_tokens = roles.max_tokens_for(role)
     prompt = role_prompt(role, _ALL_SUFFIXES)  # the longest system prompt this role can get
-    user = json.dumps(payload)
+    user = json.dumps(payload) if user is None else user
     tokens_in = len(prompt.encode("utf-8")) + len(user.encode("utf-8")) + INPUT_FRAMING_TOKENS
     entry = roles.prices.get(model)
     usd = None
@@ -373,8 +450,8 @@ class Relay:
         size = {"body_bytes": len(body)}
         try:
             request = json.loads(body)
-            if not isinstance(request, dict) or set(request) != {"role", "payload"}:
-                raise ValueError("body must be exactly {role, payload}")
+            if not isinstance(request, dict) or set(request) not in (PLAIN_KEYS, ENCODED_KEYS):
+                raise ValueError("body must be exactly {role, payload} or its encoded form")
         except ValueError:
             return self.refuse(
                 400, relay_id, "malformed relay request", remote, reason_code="malformed", **size
@@ -392,6 +469,24 @@ class Relay:
                 role=shown,
                 **size,
             )
+        payload = request["payload"]
+        if set(request) == ENCODED_KEYS:
+            try:
+                payload = dedup_decode(request)
+            except DedupMismatch as exc:
+                # Deterministic and nothing forwarded: the body is not the payload it declares.
+                return self.refuse(
+                    400,
+                    relay_id,
+                    f"transport encoding does not verify: {exc}",
+                    remote,
+                    reason_code=DEDUP_MISMATCH,
+                    role=role,
+                    transport_encoding=request.get("transport_encoding")
+                    if request.get("transport_encoding") == DEDUP_ENCODING
+                    else None,
+                    **size,
+                )
         if not self.in_flight.acquire(blocking=False):
             return self.refuse(
                 409,
@@ -402,7 +497,9 @@ class Relay:
                 role=role,
             )
         try:
-            return self._forward(relay_id, role, request["payload"], remote, size)
+            return self._forward(
+                relay_id, role, payload, remote, size, wire_view(request, body, payload)
+            )
         finally:
             self.asks += 1
             self.in_flight.release()
@@ -457,11 +554,30 @@ class Relay:
         )
         return sent, last, charge
 
-    def _forward(self, relay_id, role, payload, remote, size):
+    def _sent_settings(self):
+        """The non-content settings the worker echoed it sent (temperature included), so a
+        temperature-0 run is provable per call; null when no request body was built."""
+        last = getattr(self.roles, "last_call", None)
+        last = last if isinstance(last, dict) else {}
+        return {
+            "temperature_requested": getattr(self.roles, "temperature", None),
+            "settings_sent": last.get("settings_sent"),
+            "sent_keys": last.get("sent_keys"),
+        }
+
+    def _forward(self, relay_id, role, payload, remote, size, wire):
         spent_before = self.roles.spent
-        base = {"run_id": self.run_id, "relay_id": relay_id, "remote": remote, "role": role}
+        encoding, model_input, transport_bytes = wire
+        base = {
+            "run_id": self.run_id,
+            "relay_id": relay_id,
+            "remote": remote,
+            "role": role,
+            "transport_encoding": encoding,
+            "transport_bytes": transport_bytes,
+        }
         try:
-            worst = worst_case(self.roles, role, payload)
+            worst = worst_case(self.roles, role, payload, model_input)
         except (TypeError, ValueError):
             return self.refuse(
                 400, relay_id, "payload is not JSON", remote, reason_code="malformed", **size
@@ -471,7 +587,10 @@ class Relay:
             return self._cap_refusal(relay_id, role, cap, remote, size, worst)
         started = time.monotonic()
         try:
-            value = self.roles.ask(role, payload)
+            if model_input is None:
+                value = self.roles.ask(role, payload)
+            else:
+                value = self.roles.ask(role, payload, model_input=model_input)
         except KongOutcomeUnknown as exc:
             _, _, charge = self._charge(worst, None)
             evidence = {k: exc.evidence.get(k) for k in UNKNOWN_EVIDENCE}
@@ -480,6 +599,7 @@ class Relay:
                 "ask",
                 **base,
                 **size,
+                **self._sent_settings(),
                 http_status=502,
                 outcome="UNKNOWN",
                 gateway_status=evidence["status"],
@@ -505,6 +625,7 @@ class Relay:
                 "ask",
                 **base,
                 **size,
+                **self._sent_settings(),
                 http_status=422,
                 outcome="REFUSED",
                 sent_to_gateway=sent,
@@ -533,6 +654,7 @@ class Relay:
                 "ask",
                 **base,
                 **size,
+                **self._sent_settings(),
                 http_status=500,
                 outcome="UNKNOWN",
                 **evidence,
@@ -542,11 +664,14 @@ class Relay:
             return 500, {"outcome": "UNKNOWN", "relay_id": relay_id, "evidence": evidence}
         _, _, charge = self._charge(worst, True)
         receipt = dict(self.roles.receipts[-1])
-        receipt["relay_id"] = relay_id
+        receipt.update(
+            relay_id=relay_id, transport_encoding=encoding, transport_bytes=transport_bytes
+        )
         self.audit.write(
             "ask",
             **base,
             **size,
+            **self._sent_settings(),
             http_status=200,
             outcome="SUCCESS",
             wall_ms=round((time.monotonic() - started) * 1000),
