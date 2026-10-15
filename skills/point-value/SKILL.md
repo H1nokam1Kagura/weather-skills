@@ -30,13 +30,14 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/point_value.py -i <grid.zarr> -o <points.zarr
   - `--points` — a point_obs Zarr. Its point dim, lat/lon, and other 1-D
     coords (`name`, `country`, ...) are copied; its data variables are ignored.
   - `--point LAT,LON[,ID]` — repeatable; ids default to `P0`, `P1`, ....
-    **Negative latitudes need `=`**: `--point=-1.29,36.82,nairobi`.
+    Negative latitudes work as is: `--point -1.29,36.82,nairobi`.
   - `--points-csv` — columns `id,lat,lon[,name]`.
 - `--method` — `nearest` (default): the cell containing the point.
   `bilinear`: linear interpolation at the point (NaN if a surrounding cell is
   NaN or the point is beyond the outer cell centers). `cell-mean`:
-  NaN-skipping mean of the `N x N` cells around the containing cell, clipped
-  at grid edges; appends `area: mean` to `cell_methods`.
+  NaN-skipping mean of the `N x N` cells around the containing cell (cells
+  past the grid edge are left out, not repeated); appends `area: mean` to
+  `cell_methods`.
 - `--neighborhood` — odd `N` for `cell-mean` (default 3).
 - `--variable`, `-v` — repeatable; default all variables.
 - `--max-distance` — degrees. Without it, points off the grid are NaN. With
@@ -67,7 +68,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/point_value.py -i /tmp/imerg_daily.zarr \
 
 # ECMWF ensemble at two sites (members and steps kept)
 uv run ${CLAUDE_SKILL_DIR}/scripts/point_value.py -i /tmp/s2s.zarr -o /tmp/s2s_sites.zarr \
-    --point=-1.29,36.82,nairobi --point=-4.04,39.67,mombasa
+    --point -1.29,36.82,nairobi --point -4.04,39.67,mombasa
 
 # 5x5 neighborhood mean at farms, snapping to data within 0.2°
 uv run ${CLAUDE_SKILL_DIR}/scripts/point_value.py -i /tmp/smap.zarr -o /tmp/smap_farms.zarr \
