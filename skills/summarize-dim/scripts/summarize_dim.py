@@ -67,7 +67,11 @@ def summarize_dim(ds, variable, dim, method, lat_weighted, **kwargs):
         elif method == "std":
             out[var] = da.std(dim=rdims, keep_attrs=True, ddof=1)
         elif method == "mean" and lat_weighted and lat_dim in rdims:
-            out[var] = da.weighted(latitude_weights(ds[lat_dim])).mean(dim=rdims, keep_attrs=True)
+            out[var] = (
+                da.pint.dequantify()
+                .weighted(latitude_weights(ds[lat_dim]))
+                .mean(dim=rdims, keep_attrs=True)
+            )
         else:
             out[var] = getattr(da, method)(dim=rdims, keep_attrs=True)
         # Record the statistic (CF cell_methods). A spread or a sum is not the
