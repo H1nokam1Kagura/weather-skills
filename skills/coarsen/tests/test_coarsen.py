@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 from conftest import load_skill, make_gridded, run_skill, write_zarr
@@ -250,3 +251,53 @@ def test_min_fraction_requires_conservative(tmp_path, coarsen):
     with pytest.raises(SystemExit) as exc:
         _run(coarsen, src, tmp_path / "out.zarr", "--min-fraction", "0.5")
     assert exc.value.code == 2
+
+
+def _chunked_pipeline_input(tmp_path):
+    """Multi-chunk input with a per-time coord, like aggregate-temporal output."""
+    ds = _fine_grid()
+    ds = xr.concat([ds, ds.assign_coords(time=ds.time + np.timedelta64(1, "D"))], dim="time")
+    ds = ds.assign_coords(aggregation_coverage=("time", [1.0, 1.0]))
+    ds["station_count"] = ("time", [3, 4])  # a data variable with no lat/lon
+    path = tmp_path / "in.zarr"
+    ds.chunk({"time": 1, "latitude": 4, "longitude": 4}).to_zarr(path, consolidated=True)
+    return path
+
+
+@pytest.mark.parametrize("method", ["linear", "conservative"])
+def test_coarsen_chunked_input_with_non_grid_variables(tmp_path, coarsen, method):
+    src = _chunked_pipeline_input(tmp_path)
+    got = _run(coarsen, src, tmp_path / "out.zarr", "--method", method)
+    out = xr.open_zarr(tmp_path / "out.zarr")
+    assert got.sizes == {"time": 2, "latitude": 2, "longitude": 2}
+    assert out["station_count"].dims == ("time",)
+    assert list(out["station_count"].values) == [3, 4]
+
+
+def test_conservative_cell_past_input_edge_is_nan_unless_min_fraction(tmp_path, coarsen):
+    # Input cells span lat 0..2, lon 10..12. Offset 0.25 puts the first target
+    # cell at -0.25..0.75 (lat) and 9.75..10.75 (lon): 75% x 75% inside.
+    src = write_zarr(_fine_grid(), tmp_path / "in.zarr")
+
+    def run(out, *extra):
+        run_skill(
+            coarsen,
+            "-i",
+            str(src),
+            "-o",
+            str(out),
+            "--target-resolution",
+            "1.0",
+            "--offset",
+            "0.25",
+            "--method",
+            "conservative",
+            *extra,
+        )
+        return xr.open_zarr(out)["precip"].isel(time=0)
+
+    strict = run(tmp_path / "a.zarr")
+    assert bool(strict.sel(latitude=0.25, longitude=10.25).isnull())
+    assert bool(strict.sel(latitude=1.25, longitude=11.25).notnull())
+    loose = run(tmp_path / "b.zarr", "--min-fraction", "0.5")
+    assert bool(loose.sel(latitude=0.25, longitude=10.25).notnull())

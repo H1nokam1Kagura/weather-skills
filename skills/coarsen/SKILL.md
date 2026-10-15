@@ -84,8 +84,10 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/coarsen.py --input <in.zarr> --output <out.za
   one missing source cell (a NaN day at a station-sparse pixel, a lake or
   ocean mask at the coast) makes the whole target cell NaN, so no target
   value is built from part of its area. Lowering it (e.g. `0.9`) averages
-  only the finite part — a deliberate choice, not a default. Target cells
-  that extend past the input's extent are NaN.
+  only the finite part — a deliberate choice, not a default. The part of a
+  target cell that lies past the input's edge counts as missing too, so at
+  the default an edge cell that hangs off the input is NaN rather than the
+  mean of its covered part.
 - `--variable`, `-v` — restrict to a single data variable. Default: process all.
 
 ### Longitude convention
@@ -99,8 +101,11 @@ through unchanged.
 ### Output
 
 Same shape as input except the lat/lon dims are replaced by the target grid.
-Non-spatial dims (`number`, `step`, `time`) are preserved. CF metadata on
-lat/lon and data variables is preserved.
+Non-spatial dims (`number`, `step`, `time`) and CF metadata on lat/lon and
+data variables are preserved. Data variables without both lat and lon (e.g.
+a per-time station count) pass through unchanged. With `linear`, target
+points outside the input's span (a `--reference-grid` row half a cell past
+the edge) are NaN; nothing is extrapolated.
 
 ### Provenance
 
