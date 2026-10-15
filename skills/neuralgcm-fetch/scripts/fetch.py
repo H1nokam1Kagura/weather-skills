@@ -92,6 +92,10 @@ def _filesystem():
             info = json.loads(creds_json)
         except json.JSONDecodeError as exc:
             raise DataError(f"NEURAL_GCM_SERVICE_CREDENTIALS is not valid JSON ({exc}).") from None
+        if not isinstance(info, dict):
+            raise DataError(
+                "NEURAL_GCM_SERVICE_CREDENTIALS must be a service-account key JSON object."
+            )
         try:
             return gcsfs.GCSFileSystem(token=info)
         except Exception as exc:  # noqa: BLE001 — surface ADC failures as DataError
@@ -319,7 +323,7 @@ def fetch(dataset, date, bbox, variable, cycle, probe_latest, **kwargs):
 
     Opens a consolidated Zarr under
     ``gs://neuralgcm-s2s/staging/realtime/tomorrow_now_2026/v1/<init>/<dataset>/``
-    with Google Cloud Application Default Credentials, maps dims onto the
+    with the credentials described in SKILL.md, maps dims onto the
     standard forecast cube, optionally subsets by ``--bbox`` / ``--variable``,
     and returns a Dataset for the decorator to write.
     """
@@ -348,7 +352,12 @@ def fetch(dataset, date, bbox, variable, cycle, probe_latest, **kwargs):
     else:
         ds = ensure_normalized_longitude(ds)
 
-    ds = ds.load()
+    try:
+        ds = ds.load()
+    except Exception as exc:  # noqa: BLE001
+        raise _gcs_error(exc, f"failed to read {_store_url(stamp, dataset)}") from None
+    if "number" in ds.dims:
+        print(f"Ensemble members: {ds.sizes['number']}", file=sys.stderr)
     ds.attrs.update(
         Conventions="CF-1.13",
         weather_skills_source=f"neuralgcm:{dataset}:{stamp}",
@@ -360,7 +369,10 @@ def fetch(dataset, date, bbox, variable, cycle, probe_latest, **kwargs):
         converted, _ = convert_dataarray(ds["d2m"], "degree_Celsius")
         ds["d2m"] = converted
     ds = precip_amounts_to_rates(ds, interval=_PRECIP_INTERVAL, deaccumulate=False)
-    ds = _shift_step_origin_to_zero(ds)
+    # Precip is a 6h period total labelled at its end: relabel to the period
+    # start. Temperatures are instantaneous at init + step, so keep their leads.
+    if "tp" in ds.data_vars:
+        ds = _shift_step_origin_to_zero(ds)
     return stamp_data_interval(ds)
 
 
