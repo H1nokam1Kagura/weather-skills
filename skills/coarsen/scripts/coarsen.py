@@ -184,12 +184,7 @@ def coarsen(
         raise UsageError("no data variable has both lat and lon dims; nothing to coarsen")
     other = ds.drop_vars(gridded)
     if method == "linear":
-        # Interpolation leaves uneven chunks, which Zarr can't write: go back to
-        # the input's chunk size on each other dim, one chunk across lat/lon.
-        sizes = {d: c[0] for d, c in ds[gridded].chunksizes.items()}
-        sizes.update({lat_dim: -1, lon_dim: -1})
-        out = ds[gridded].regrid.linear(target).chunk(sizes)
-        return out.assign(other.data_vars)
+        return ds[gridded].regrid.linear(target).assign(other.data_vars)
 
     # Area-weighted (cos-lat) mean over each target cell. nan_threshold is the
     # largest NaN area fraction kept, so 1 - min_fraction. Missing source

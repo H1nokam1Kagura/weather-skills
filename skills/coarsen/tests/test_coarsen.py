@@ -253,20 +253,20 @@ def test_min_fraction_requires_conservative(tmp_path, coarsen):
     assert exc.value.code == 2
 
 
-def _chunked_pipeline_input(tmp_path):
-    """Multi-chunk input with a per-time coord, like aggregate-temporal output."""
+def _pipeline_input(tmp_path):
+    """Input with a per-time coord, like aggregate-temporal output, and a non-grid variable."""
     ds = _fine_grid()
     ds = xr.concat([ds, ds.assign_coords(time=ds.time + np.timedelta64(1, "D"))], dim="time")
     ds = ds.assign_coords(aggregation_coverage=("time", [1.0, 1.0]))
     ds["station_count"] = ("time", [3, 4])  # a data variable with no lat/lon
     path = tmp_path / "in.zarr"
-    ds.chunk({"time": 1, "latitude": 4, "longitude": 4}).to_zarr(path, consolidated=True)
+    ds.to_zarr(path, consolidated=True)
     return path
 
 
 @pytest.mark.parametrize("method", ["linear", "conservative"])
-def test_coarsen_chunked_input_with_non_grid_variables(tmp_path, coarsen, method):
-    src = _chunked_pipeline_input(tmp_path)
+def test_coarsen_passes_non_grid_variables_through(tmp_path, coarsen, method):
+    src = _pipeline_input(tmp_path)
     got = _run(coarsen, src, tmp_path / "out.zarr", "--method", method)
     out = xr.open_zarr(tmp_path / "out.zarr")
     assert got.sizes == {"time": 2, "latitude": 2, "longitude": 2}
