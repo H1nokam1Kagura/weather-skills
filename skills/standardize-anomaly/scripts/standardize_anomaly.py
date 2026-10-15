@@ -9,7 +9,7 @@
 import pint
 import pint_xarray
 from weather_skills_core import Dataset, UsageError, weather_skill
-from weather_skills_core.standard_dataset import detect_spatial_dims
+from weather_skills_core.standard_dataset import ALIASES, detect_spatial_dims
 from weather_skills_core.units import ureg
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
@@ -63,10 +63,11 @@ def standardize_anomaly(ds, climatology, variable, **kwargs):
         if all(u is not None for u in units):
             try:
                 avg = avg.pint.to(units[0])
-                # std is a spread: convert by the scale only, never an offset
-                # (a 1 degree_Celsius std is 1 K, not 274.15 K).
-                to_field = [ureg.Quantity(x, units[2]).to(units[0]).magnitude for x in (0, 1)]
-                scale = to_field[1] - to_field[0]
+                # std is a spread: convert it as a difference, never with an
+                # offset (a 1 degree_Celsius or delta_degC std is 1 K, not 274.15 K).
+                std_step = ureg.Quantity(1, units[2]) - ureg.Quantity(0, units[2])
+                field_step = ureg.Quantity(1, units[0]) - ureg.Quantity(0, units[0])
+                scale = std_step.to(field_step.units).magnitude
             except (pint.DimensionalityError, pint_xarray.errors.PintExceptionGroup) as exc:
                 raise UsageError(
                     f"cannot standardize {v!r} against {avg_name!r}/{std_name!r}: {exc}. "
@@ -77,13 +78,35 @@ def standardize_anomaly(ds, climatology, variable, **kwargs):
         elif any(u is not None for u in units):
             raise UsageError(f"{v!r}, {avg_name!r} and {std_name!r} must all carry units or none")
 
+        # A forecast's lead axis would otherwise align on init time, scoring
+        # every lead against the init day's climatology.
+        clim_dims = set(avg.dims) | set(std.dims)
+        leads = [d for d in field.dims if ALIASES.get(d) == "prediction_timedelta"]
+        if any(d not in clim_dims for d in leads):
+            raise UsageError(
+                f"{v!r}: --input has lead dim(s) {leads} the climatology lacks; "
+                "run step-to-time on --input first so it aligns on valid time"
+            )
+        extra = [d for d in clim_dims if d not in field.dims]
+        if extra:
+            raise UsageError(
+                f"{v!r}: --climatology has dim(s) {extra} that --input lacks, which would "
+                "broadcast --input across them; select one entry of the climatology first"
+            )
+
         anomaly = (field - avg) / std
         # No spread (e.g. a never-wet window): the z-score is undefined.
         anomaly = anomaly.where(std > 0)
-        empty = [d for d in anomaly.dims if anomaly.sizes[d] == 0]
-        if empty:
+        short = [
+            f"{d} ({anomaly.sizes[d]} of {field.sizes[d]})"
+            for d in field.dims
+            if anomaly.sizes[d] < field.sizes[d]
+        ]
+        if short:
             raise UsageError(
-                f"{v!r}: no overlapping {empty} labels between --input and --climatology"
+                f"{v!r}: --climatology matches only some --input labels along {short}; "
+                "fetch the climatology over the input's full window and grid, or clip-region "
+                "the input to it (sub-daily input: aggregate-temporal to daily first)"
             )
         anomaly.attrs = {"units": "1", "long_name": f"{v} standardized anomaly"}
         out[f"{v}_anomaly"] = anomaly
