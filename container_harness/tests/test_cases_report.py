@@ -227,4 +227,6 @@ def test_runner_harness_error_names_its_source_root_cause_and_text(tmp_path):
     assert "runner:EvidenceMappingError" in line
     assert "role files do not correspond" in line and "with a pipe" in line
     assert "root UnsupportedInjection: unresolved trusted symbol" in line
-    assert line.count(" | ") == 4  # the error text's own pipe is escaped, the row stays 5 cells
+    # the error text's own pipe is escaped: the row stays 6 cells (5 + the labelled
+    # counterfactual column, n/a for a case that did not execute)
+    assert line.count(" | ") == 5 and line.endswith(" | n/a |")

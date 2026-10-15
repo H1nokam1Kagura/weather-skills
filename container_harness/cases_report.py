@@ -19,6 +19,11 @@ Per case exactly one status:
                                    is named (container, tracer, projection, scorer, driver)
 Oracles are PROPOSED (unratified): every dimension result is diagnostic, never ratified.
 Nothing is PASS without observed evidence; MISSING stays MISSING.
+
+Every EXECUTED case also carries a separate, labelled counterfactual "with AMD-V27-WARN-IS-PASS"
+(warn_counterfactual.py; JSON key warn_counterfactual.JSON_KEY, its own RESULTS.md column). It is
+never applied to the headline: dimensions/terminal/assertions and frozen_summary stay exactly as
+the frozen scorer computed them in score.json.
 """
 
 import argparse
@@ -28,6 +33,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
+sys.path.insert(0, str(HERE))
+
+import warn_counterfactual as wcf  # noqa: E402
 HEADER = (
     "Oracles are PROPOSED (unratified). Scoring is DIAGNOSTIC, not ratified: no dimension result "
     "here is a scored SIMKIT result. A case is EXECUTED only if the controller actually ran; "
@@ -140,6 +148,8 @@ def build(admission, cases_dir, run_url=None):
     rows = admission["cases"]
     per_case = []
     scored_all = []
+    cf_scored_all = []
+    rescorer = None
     for row in rows:
         res = classify(row, arts.get(row["case_id"]))
         entry = {
@@ -168,6 +178,23 @@ def build(admission, cases_dir, run_url=None):
                 f"not scored: {res['status']}",
             )
         scored_all.append(scored)
+        cf_scored = scored
+        if res["status"] == "EXECUTED":
+            # Labelled counterfactual, computed on a COPY: never written back into entry's
+            # frozen dimensions/terminal/assertions or into scored_all.
+            projection = load(arts[row["case_id"]] / "projection.json") or {}
+            if projection.get("status") != "OK":
+                entry[wcf.JSON_KEY] = wcf.not_computed(
+                    f"projection {projection.get('status', 'ABSENT')}"
+                )
+            else:
+                if rescorer is None:
+                    rescorer = wcf.Rescorer(root)
+                entry[wcf.JSON_KEY], cf = rescorer.counterfactual(
+                    row["case_id"], (projection.get("projection") or {}).get("evidence"), scored
+                )
+                cf_scored = cf or scored
+        cf_scored_all.append(cf_scored)
         entry.pop("scored", None)
     counts = {}
     for e in per_case:
@@ -184,6 +211,35 @@ def build(admission, cases_dir, run_url=None):
     for p in pairs.values():
         pair_counts[p["status"]] = pair_counts.get(p["status"], 0) + 1
     executed = counts.get("EXECUTED", 0)
+    cf_entries = [e for e in per_case if wcf.JSON_KEY in e]
+    computed = [e for e in cf_entries if e[wcf.JSON_KEY]["status"] == "COMPUTED"]
+    counterfactual = {
+        "label": wcf.LABEL,
+        "amendment_id": wcf.AMENDMENT_ID,
+        "applied_to_headline": False,
+        "decision": wcf.DECISION,
+        "note": wcf.NOTE,
+        "executed_cases": len(cf_entries),
+        "computed_cases": len(computed),
+        "not_computed_or_failed_method_check": {
+            e["case_id"]: e[wcf.JSON_KEY]["status"] for e in cf_entries if e not in computed
+        },
+        "cases_with_no_non_pass_assertion": {
+            "as_frozen": sum(
+                1
+                for e in computed
+                if all(v == "PASS" for v in (e.get("assertions") or {}).values())
+            ),
+            wcf.LABEL: sum(1 for e in computed if not e[wcf.JSON_KEY]["non_pass"]),
+            "of_computed": len(computed),
+        },
+        "assertions_changed": {
+            e["case_id"]: e[wcf.JSON_KEY]["assertions_changed"]
+            for e in computed
+            if e[wcf.JSON_KEY]["assertions_changed"]
+        },
+        "summary": score_mod.summarize(cf_scored_all),
+    }
     return {
         "schema": "simkit.gha-results/1",
         "header": HEADER,
@@ -206,6 +262,7 @@ def build(admission, cases_dir, run_url=None):
         "top_missing_capabilities": admission.get("missing_capability_counts"),
         "missing_capability_reasons": admission.get("missing_capability_reasons"),
         "frozen_summary": score_mod.summarize(scored_all),
+        wcf.JSON_KEY: counterfactual,
         "pairs": sorted(pairs.values(), key=lambda p: p["pair_id"]),
         "cases": per_case,
     }
@@ -246,8 +303,11 @@ def markdown(res):
         "",
         "## Cases",
         "",
-        "| case | mode | roles | status | detail |",
-        "|---|---|---|---|---|",
+        "`detail` is the result as frozen (the headline). The last column is a labelled "
+        f"counterfactual: {wcf.NOTE}",
+        "",
+        f"| case | mode | roles | status | detail (as frozen) | {wcf.COLUMN} |",
+        "|---|---|---|---|---|---|",
     ]
     for e in res["cases"]:
         if e["status"] == "NOT_IMPLEMENTED":
@@ -262,8 +322,10 @@ def markdown(res):
             detail = harness_error_detail(e)
         else:
             detail = e.get("demoted", "")
+        cf = _cell(wcf.summary_cell(e.get(wcf.JSON_KEY)), limit=600)
         lines.append(
-            f"| {e['case_id']} | {e['execution_mode']} | {e['role_mode']} | {e['status']} | {detail} |"
+            f"| {e['case_id']} | {e['execution_mode']} | {e['role_mode']} | {e['status']} "
+            f"| {detail} | {cf} |"
         )
     lines += [
         "",
@@ -274,6 +336,42 @@ def markdown(res):
         "```",
         "",
     ]
+    cfr = res.get(wcf.JSON_KEY)
+    if cfr:
+        clean = cfr["cases_with_no_non_pass_assertion"]
+        lines += [
+            f"## Counterfactual: {wcf.LABEL} "
+            "(not applied; the frozen result above is the headline)",
+            "",
+            f"> {cfr['note']}",
+            "",
+            f"- Decision: {cfr['decision']}",
+            f"- Executed cases: {cfr['executed_cases']}; counterfactual computed: "
+            f"{cfr['computed_cases']}"
+            + (
+                "; not computed / method check failed: "
+                f"{cfr['not_computed_or_failed_method_check']}"
+                if cfr["not_computed_or_failed_method_check"]
+                else ""
+            ),
+            f"- Cases with no non-PASS assertion: as frozen {clean['as_frozen']} of "
+            f"{clean['of_computed']}; {wcf.LABEL} {clean[wcf.LABEL]} of {clean['of_computed']}",
+            "",
+            f"| case | assertion | as frozen | {wcf.LABEL} |",
+            "|---|---|---|---|",
+            *[
+                f"| {cid} | {aid} | {v['as_frozen']} | {v[wcf.LABEL]} |"
+                for cid, changed in cfr["assertions_changed"].items()
+                for aid, v in changed.items()
+            ],
+            "",
+            f"Counterfactual summary ({wcf.LABEL}; rates over decided cases only):",
+            "",
+            "```",
+            json.dumps(cfr["summary"], indent=1),
+            "```",
+            "",
+        ]
     return "\n".join(lines)
 
 
