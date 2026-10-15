@@ -149,7 +149,6 @@ class Rescorer:
 
     def __init__(self, root):
         import case_driver  # host-safe: stdlib-only at import; load_cases imports the frozen simkit
-
         from simkit.cli import profile_refs
         from simkit.guarded import score_case_guarded
         from simkit.profile import Profile

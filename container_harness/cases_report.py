@@ -36,6 +36,7 @@ REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 
 import warn_counterfactual as wcf  # noqa: E402
+
 HEADER = (
     "Oracles are PROPOSED (unratified). Scoring is DIAGNOSTIC, not ratified: no dimension result "
     "here is a scored SIMKIT result. A case is EXECUTED only if the controller actually ran; "
