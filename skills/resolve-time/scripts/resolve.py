@@ -48,7 +48,7 @@ def _shift(d: date, n: int, unit: str, *, window: bool) -> date:
 
 def _parse(query: str, as_of: date) -> tuple[date, date, str]:
     """Return (start, end, kind) against the calendar clock ``as_of``."""
-    q = query.strip()
+    q = query.strip().lower()
     if not q or " " in q:
         raise UsageError(
             f"unknown query {query!r}. {_QUERY_HELP}" if q else f"pass a query token. {_QUERY_HELP}"
@@ -147,8 +147,17 @@ def resolve_time(query, as_of, emit, **kwargs):
     """Resolve a relative date query to absolute --start-time/--end-time or --date."""
     if query is None:
         raise UsageError(f"pass a query token. {_QUERY_HELP}")
+    if as_of is not None and as_of.strip().lower() == "none":
+        # What a fetcher's --probe-latest prints when nothing is published.
+        raise UsageError(
+            "--as-of none: the fetcher's --probe-latest found no published data, so "
+            "there is no window to end on; check the product and dates before fetching"
+        )
     as_of_date = datetime.now(UTC).date() if as_of is None else parse_date(as_of)
-    start, end, kind = _parse(query, as_of_date)
+    try:
+        start, end, kind = _parse(query, as_of_date)
+    except (ValueError, OverflowError) as exc:
+        raise UsageError(f"{query!r} is outside the calendar range ({exc})") from None
     print(f"as_of={as_of_date.isoformat()}", file=sys.stderr)
 
     time_kind = "date" if kind == "point" else "range"

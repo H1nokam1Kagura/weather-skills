@@ -95,11 +95,12 @@ INIT=$(uv run skills/dynamical-fetch/scripts/fetch.py --probe-latest noaa-gfs-fo
 
 ### Arguments
 
-- `query` (positional) — token from the table above. Not English.
+- `query` (positional) — token from the table above (any case). Not English.
 - `--as-of` — clock date `YYYY-MM-DD`. Default: today's date in UTC. Pass it
   to reproduce a window, honor an explicit "as of Friday", or end any window
   (rolling or `last-week` / `last-dekad` / `last-month`) on or before a
-  probed latest day.
+  probed latest day. `--as-of none` (a probe that found nothing published)
+  exits 2 saying so.
 - `--emit` — `flags` (default; splice onto the next skill), `iso`
   (`YYYY-MM-DD` or `START/END`), or `json`.
 
