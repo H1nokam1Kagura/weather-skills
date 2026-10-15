@@ -346,8 +346,8 @@ class Controller:
             value = read_checkpoint(root)  # unreadable: no durable place for a decision
         attribution, override, problems = recovery.parse_request(request, supervisor)
         book = recovery.ledger(value["context"])
-        interruption = recovery.latest_unanswered(value["context"])
-        decision = recovery.new_decision(request, attribution, override, interruption)
+        # checkpoint_counters + controller_pid; an observed stop is recorded once (wave 7).
+        decision, interruption = recovery.open_decision(root, value, request, attribution, override)
         verify = "resume_verification"
         checked, failed, refusals = [], [], []
 
@@ -510,14 +510,16 @@ class Controller:
                     gate="gate_evidence",
                 ),
             )
-        if not failed and initiated == "operator_ledger":
+        # Attribution binds pass or fail: a REFUSED operator resume keeps its ledger record.
+        attributable = not problems and "run_directory" not in failed
+        if attributable and initiated == "operator_ledger":
             checked.append("operator_record")
             bound, problem = recovery.check_operator_record(self, attribution["operator_record_id"])
             if problem:
                 fail(problem, Refused("no accepted operator resume record", gate=verify))
             else:
                 decision["operator_record_id"] = bound
-        elif not failed and initiated is None and override is None:
+        elif attributable and initiated is None and override is None:
             # An unattributed request becomes an operator_ledger resume only when the operator
             # channel hands out an accepted user resume record for it (P-01).
             bound, _ = recovery.operator_authorization(self)
@@ -1535,7 +1537,7 @@ class Controller:
         self.emit("before_tool", {"skill": skill, "argv": argv})
         self.integrity()
         self.pending = {"kind": "tool", "skill": skill, "argv": argv}
-        self.checkpoint()
+        write_boundary.pending_checkpoint(self, skill, argv)  # PermissionError: pending cleared
         receipts = {"tool": skill} if "dispatch_evidence" in self.context else {}
         self.process_window = [] if receipts else None
         try:
