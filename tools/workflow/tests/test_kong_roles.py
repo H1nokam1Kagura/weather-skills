@@ -8,8 +8,11 @@ import pytest
 from tools.workflow.agents import PROMPTS, role_prompt
 from tools.workflow.contracts import Refused, digest
 from tools.workflow.kong_roles import (
+    COST_BASIS,
     KIT_PYTHON,
     KIT_ROOT,
+    LIVE_ROLE_MAX_TOKENS,
+    PINNED_PRICES,
     WORKER_SOURCE,
     KongOutcomeUnknown,
     KongRoles,
@@ -229,6 +232,63 @@ def test_policy_ack_prices_and_prompt_variants_are_enforced(tmp_path):
         agent.ask("not-a-role", {})
 
 
+def test_pinned_list_price_reconciles_so_a_priced_run_makes_many_calls(tmp_path):
+    python = tmp_path / "python.exe"
+    python.write_text("")
+    process = Process(*[envelope(response_id=f"msg_{i}") for i in range(12)])
+    agent = KongRoles(process, tmp_path / "ctx", budget=5, data_policy_ack=True, kit_python=python)
+    for _ in range(12):
+        assert agent.ask("verifier", {}) == ANSWER
+    assert agent.prices == PINNED_PRICES and len(agent.receipts) == 12
+    assert {r["cost_basis"] for r in agent.receipts} == {COST_BASIS}
+    assert COST_BASIS == "Anthropic list-price estimate; Kong billing not observed"
+    assert agent.spent == pytest.approx(12 * (1000 * 3 + 100 * 15) / 1e6)
+    off = KongRoles(Process(), tmp_path / "ctx", data_policy_ack=True, budget_guard="off")
+    assert off.prices == {}  # untracked runs get no table by default
+
+
+def test_role_max_tokens_and_temperature_reach_request_and_receipt(tmp_path):
+    process = Process(envelope(), envelope())
+    agent = roles(
+        tmp_path, process, role_max_tokens=LIVE_ROLE_MAX_TOKENS, temperature=0, max_tokens=2048
+    )
+    agent.ask("planner", {})
+    agent.ask("verifier", {})
+    assert [c["stdin"]["max_tokens"] for c in process.calls] == [4096, 2048]
+    assert [c["stdin"]["temperature"] for c in process.calls] == [0, 0]
+    assert [r["settings"]["max_tokens"] for r in agent.receipts] == [4096, 2048]
+    assert agent.provenance()["role_max_tokens"] == {"planner": 4096, "repairer": 4096}
+    for bad in ({"nope": 10}, {"planner": 0}, {"planner": 64001}, {"planner": 1.5}):
+        with pytest.raises(ValueError):
+            roles(tmp_path, Process(), role_max_tokens=bad)
+
+
+def test_response_id_session_source_is_observed_and_required(tmp_path):
+    process = Process(envelope(response_id="msg_a"), envelope(response_id=None))
+    agent = roles(tmp_path, process, session_source="response_id")
+    agent.ask("verifier", {})
+    assert agent.receipts[0]["session_id"] == "msg_a" == agent.receipts[0]["response_id"]
+    with pytest.raises(Refused, match="no response id"):
+        agent.ask("verifier", {})
+    assert len(agent.receipts) == 1 and agent.last_call["sent"] is True
+    with pytest.raises(ValueError):
+        roles(tmp_path, Process(), session_source="minted")
+
+
+def test_last_call_reports_whether_anything_can_have_left(tmp_path):
+    agent = roles(tmp_path, Process({"sent": False, "error_type": "E", "error": {}}))
+    with pytest.raises(Refused):
+        agent.ask("verifier", {})
+    assert agent.last_call["sent"] is False
+    agent = roles(tmp_path, Process(error=TimeoutError("killed")))
+    with pytest.raises(KongOutcomeUnknown):
+        agent.ask("verifier", {})
+    assert agent.last_call["sent"] is None  # may have left: unknown, never False
+    agent = roles(tmp_path, Process(envelope()))
+    agent.ask("verifier", {})
+    assert agent.last_call["sent"] is True and agent.last_call["cost_usd"] == pytest.approx(0.0045)
+
+
 def test_dispatch_observation_mirrors_native_roles(tmp_path):
     agent = roles(tmp_path, Process(envelope()))
     seen = []
@@ -289,13 +349,20 @@ def test_real_worker_against_mock_reaches_gateway_and_validates_output(tmp_path,
 
 
 @needs_kit
-def test_real_worker_rejects_unsupported_sdk_argument_before_sending(tmp_path, mock_gateway):
+def test_real_worker_sends_temperature_through_the_sdk_passthrough(tmp_path, mock_gateway):
+    # anthropic-python 1.13 Messages.create has no typed temperature argument (this test used
+    # to pin that it was refused pre-send). The live-wave brief sets temperature 0 for every
+    # role, so the worker now sends the API field through the SDK's extra_body and echoes it.
     (tmp_path / "proc").mkdir()
     agent = mock_roles(tmp_path, mock_gateway)
-    agent.temperature = 0.0  # anthropic-python 1.13 Messages.create has no temperature
-    with pytest.raises(Refused, match="before sending: TypeError"):
-        agent.ask("verifier", {"synthetic": True})
-    assert agent.spent == 0.0
+    agent.temperature = 0.0
+    with pytest.raises(Refused, match="invalid verifier Kong response"):
+        agent.ask("verifier", {"synthetic": True})  # the mock answers plain "OK", not JSON
+    record = json.loads(next((tmp_path / "proc").glob("process-*.json")).read_text())
+    worker = json.loads(record["stdout"])
+    assert worker["sent"] is True and "temperature" not in worker["sent_settings"]
+    assert worker["sent_settings"]["extra_body"] == {"temperature": 0.0}
+    assert "extra_body" in worker["sent_keys"]
 
 
 @needs_kit
