@@ -362,6 +362,10 @@ def parse_trace_file(path, tid):
                     Event(ts, tid, seg, lineno, "delivery", name=dm.group(1), raw_args=dm.group(2))
                 )
                 continue
+            gm = GROUP_STOP.match(rest)  # interrupt broker SIGSTOP (no syscall; see the end)
+            if gm:
+                segments[-1].append(Event(ts, tid, seg, lineno, "group_stop", name=gm.group(1)))
+                continue
             sm = SYSCALL.match(rest)
             if sm:
                 segments[-1].append(
@@ -627,6 +631,8 @@ def analyze(outdir, run_dir=None):
     add_harness(decoy, entry_pid, parse_int(status.get("decoy_pgid")), "decoy")
     sampler = parse_int(status.get("ram_sampler_pid"))
     add_harness(sampler, entry_pid, parse_int(status.get("ram_sampler_pgid")), "ram-sampler")
+    broker_pid = parse_int(status.get("interrupt_broker_pid"))  # absent unless a stop case
+    add_harness(broker_pid, entry_pid, parse_int(status.get("interrupt_broker_pgid")), BROKER)
 
     # ---- global replay in time order
     all_events = []
@@ -1247,6 +1253,10 @@ def analyze(outdir, run_dir=None):
         ]
     notes["created_outside_run_dir"] = outside
     notes["created_then_deleted"] = sorted({r["path"] for r in created if r["deleted_later"]})
+    if broker_engaged(outdir, status):  # harness_stop_controller cases only
+        apply_interrupt_broker(
+            outdir, status, evidence, missing, notes, procs, root_key, kills, deliveries, complete
+        )
     evidence["missing"] = missing
     evidence["harness_notes"] = notes
     evidence["detail"] = {
@@ -1429,6 +1439,199 @@ def max_concurrent(procs, root_key):
         cur += d
         best = max(best, cur)
     return best
+
+
+# ------------------------------------------------------------------ interrupt broker (Wave 7 D)
+# harness_stop_controller cases only. interrupt_broker.py (root, untraced, a child of the entry
+# shell) freezes and SIGKILLs controller incarnation 1 -- a fork, a direct child of the traced
+# root -- and its descendants, and records the facts in $OUT/interrupt_broker.json. Here:
+#   * max_concurrent_children counts the direct children of the traced root AND of every
+#     incarnation the broker declared (a verified stop) and the trace confirms (that pid is a
+#     direct child of the traced root, alive at the request, and its trace ends "killed by
+#     SIGKILL"); the incarnations themselves are not tool children. Without this, incarnation-1
+#     tools are invisible and the fork counts as one child (V23-CONCURRENCY would pass falsely).
+#     A declared stop the trace does not confirm, a refused/failed stop, or an absent/unfinished
+#     record makes the field MISSING, never a guess.
+#   * broker signals (si_pid = broker pid, outside the tree) are harness actions: never in
+#     signalled_pids (they are no kill-family attempt of the tree), listed in harness_notes
+#     (interrupt_broker_deliveries, sigkill_deaths_by_interrupt_broker).
+#   * the broker's facts (output_bytes harness-observed via /proc before the kill, OI-04) go to
+#     evidence[BROKER_EVIDENCE_KEY], each stop with its trace confirmation.
+# A case with no stop scheduled has none of the status keys and no record: nothing here runs.
+BROKER = "interrupt-broker"
+BROKER_RECORD = "interrupt_broker.json"
+BROKER_SCHEMA = "simkit.interrupt-broker/1"
+BROKER_EVIDENCE_KEY = "harness_interrupt_broker"
+CONCURRENCY_FIELD = "harness_observations.max_concurrent_children"
+# strace's group-stop line ("--- stopped by SIGSTOP ---"): the process is frozen, no syscall.
+GROUP_STOP = re.compile(r"^--- stopped by (SIG\w+) ---$")
+
+
+def broker_engaged(outdir, status):
+    return (
+        status.get("interrupt_broker_needed") in ("1", "error")
+        or "interrupt_broker_pid" in status
+        or (Path(outdir) / BROKER_RECORD).exists()
+    )
+
+
+def read_broker_record(outdir, status):
+    """-> (record or None, reason)."""
+    if status.get("interrupt_broker_needed") == "error":
+        return (
+            None,
+            "interrupt broker need check failed: whether the case stops a controller is unknown",
+        )
+    path = Path(outdir) / BROKER_RECORD
+    if not path.exists():
+        return None, "interrupt broker record absent"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"interrupt broker record unreadable: {exc}"[:200]
+    if not isinstance(record, dict) or record.get("schema") != BROKER_SCHEMA:
+        return None, "interrupt broker record has an unknown schema"
+    if not isinstance(record.get("stops"), list):
+        return None, "interrupt broker record has no stops list"
+    if record.get("complete") is not True:
+        return None, "interrupt broker did not finish (record incomplete)"
+    if record.get("tracer_check") != "TracerPid":
+        return (
+            None,
+            f"interrupt broker ran without the TracerPid check ({record.get('tracer_check')})",
+        )
+    if status.get("interrupt_broker_needed") == "1" and status.get("interrupt_broker_ready") != "1":
+        return None, "interrupt broker channel was not ready: an incarnation kill is unobserved"
+    if status.get("interrupt_broker_exit", "0") != "0":
+        return None, f"interrupt broker exited {status.get('interrupt_broker_exit')}"
+    spid = parse_int(status.get("interrupt_broker_pid"))
+    if spid is not None and record.get("broker_pid") != spid:
+        return None, "interrupt broker record pid differs from interrupt_broker_pid"
+    return record, None
+
+
+def _concurrency_missing(evidence, missing, reason):
+    evidence["harness_observations"].pop("max_concurrent_children", None)
+    missing.setdefault(CONCURRENCY_FIELD, reason)
+
+
+def max_concurrent_over_incarnations(procs, root_key, incarnation_keys):
+    """Most direct children of the traced root or of a confirmed incarnation alive at once; an
+    incarnation is not itself a child (same tie rule as max_concurrent)."""
+    parents = {root_key, *incarnation_keys}
+    points = []
+    for p in procs.values():
+        if p.creator in parents and p.key not in parents:
+            if p.start is not None and p.end is not None:
+                points.append((p.start, 1))
+                points.append((p.end, -1))
+    points.sort(key=lambda x: (x[0], x[1]))
+    best = cur = 0
+    for _, d in points:
+        cur += d
+        best = max(best, cur)
+    return best
+
+
+def apply_interrupt_broker(
+    outdir, status, evidence, missing, notes, procs, root_key, kills, deliveries, complete
+):
+    broker_pid = parse_int(status.get("interrupt_broker_pid"))
+    section = {
+        "source": "harness interrupt_broker.py (root, untraced, outside the traced tree): "
+        "harness actions, never controller signals; output_bytes harness-observed via /proc "
+        "before SIGKILL",
+        "status": "OK",
+        "broker_pid": broker_pid,
+        "record": BROKER_RECORD,
+        "stops": [],
+        "incarnation_pids": [],
+        "harness_killed_pids": [],
+    }
+    record, reason = read_broker_record(outdir, status)
+    tree_pids = {p.pid for p in procs.values()}
+    if record is not None and broker_pid in tree_pids:
+        record, reason = None, "interrupt broker pid is also a traced pid"
+    if record is None:
+        section.update(status="UNAVAILABLE", reason=reason)
+        _concurrency_missing(evidence, missing, reason)
+        evidence[BROKER_EVIDENCE_KEY] = section
+        return
+    section["output_bytes_basis"] = record.get("output_bytes_basis")
+    killed_at = {}  # pid -> [ts_ns of "killed by SIGKILL"]
+    for k in kills:
+        if k["signal"] == "SIGKILL":
+            killed_at.setdefault(k["pid"], []).append(k["ts_ns"])
+    incarnations, problems, harness_kills = [], [], []  # harness_kills: (pid, requested_at)
+    for i, stop in enumerate(record["stops"]):
+        out = dict(stop) if isinstance(stop, dict) else {"raw": stop}
+        pid, req = out.get("pid"), out.get("requested_at_ns")
+        if not isinstance(req, int):
+            req = None
+        claimed = [p for p in out.get("killed") or [] if isinstance(p, int)]
+        confirmed_kills = sorted(
+            p for p in claimed if req is not None and any(t >= req for t in killed_at.get(p, []))
+        )
+        cands = [
+            p
+            for p in procs.values()
+            if p.pid == pid
+            and p.creator == root_key
+            and req is not None
+            and p.start is not None
+            and p.start <= req
+            and (p.end is None or req <= p.end)
+        ]
+        confirmed = bool(out.get("verified")) and len(cands) == 1 and pid in confirmed_kills
+        out.update(
+            trace_confirmed=confirmed,
+            trace_incarnation_key=cands[0].key if len(cands) == 1 else None,
+            trace_confirmed_kills=confirmed_kills,
+            trace_unconfirmed_kills=sorted(set(claimed) - set(confirmed_kills)),
+        )
+        section["stops"].append(out)
+        harness_kills += [(p, req) for p in confirmed_kills]
+        if not out.get("verified"):
+            problems.append(f"stop {i} (pid {pid}) refused by the broker")
+            continue
+        if not out.get("ok"):
+            problems.append(f"stop {i} (pid {pid}) failed in the broker")
+        if confirmed:
+            incarnations.append(cands[0].key)
+        else:
+            problems.append(f"stop {i} (pid {pid}) not confirmed by the trace")
+    section["incarnation_pids"] = [procs[k].pid for k in incarnations]
+    section["harness_killed_pids"] = sorted({p for p, _ in harness_kills})
+
+    def by_broker(k):
+        return any(k["pid"] == p and k["ts_ns"] >= req for p, req in harness_kills)
+
+    deaths = notes.get("sigkill_deaths_without_attempt", [])
+    notes["sigkill_deaths_without_attempt"] = [k for k in deaths if not by_broker(k)]
+    notes["sigkill_deaths_by_interrupt_broker"] = [k for k in deaths if by_broker(k)]
+    notes["interrupt_broker_deliveries"] = [
+        d for d in deliveries if broker_pid is not None and d["si_pid"] == broker_pid
+    ]
+    notes["semantics"]["max_concurrent_children"] = (
+        "direct child processes of the controller (the traced root) and of every "
+        "broker-declared, trace-confirmed incarnation alive at once; the incarnations "
+        "themselves are not counted"
+    )
+    notes["semantics"]["interrupt_broker"] = (
+        "broker SIGSTOP/SIGKILL (si_pid = broker, outside the tree) are harness actions, "
+        "never controller signals: not in signalled_pids"
+    )
+    if not record["stops"]:
+        section["status"] = "NO_STOP_REQUESTED"
+    if problems:
+        section["status"] = "UNCONFIRMED"
+        section["problems"] = problems
+        _concurrency_missing(evidence, missing, "; ".join(problems)[:300])
+    elif complete and "max_concurrent_children" in evidence["harness_observations"]:
+        evidence["harness_observations"]["max_concurrent_children"] = (
+            max_concurrent_over_incarnations(procs, root_key, incarnations)
+        )
+    evidence[BROKER_EVIDENCE_KEY] = section
 
 
 def main(argv):

@@ -412,8 +412,18 @@ def case_profile(
     processes_factory,
     definition=DEFINITION_PATH,
     prepared_repo=None,
+    interrupt_broker=None,
 ):
-    """The run_case profile the traced ``run`` passes (one builder, also driven by tests)."""
+    """The run_case profile the traced ``run`` passes (one builder, also driven by tests).
+
+    ``interrupt_broker``: the harness_stop_controller kill channel (interrupt_broker.py
+    documents the protocol). None reads it from the environment: a BrokerClient only when the
+    root entry shell started the broker for this case and the traced root inherited its FIFOs
+    on fds 5/6 (SIMKIT_INTERRUPT_BROKER); otherwise None (no broker: the in-process route)."""
+    from container_harness import interrupt_broker as broker
+
+    if interrupt_broker is None:
+        interrupt_broker = broker.channel_from_env()
     work = Path(work)
     goal = adapter.select_profile(case, document)["goal"]
     factory = getattr(adapter, SUBST_FACTORY, None)
@@ -447,6 +457,8 @@ def case_profile(
         # run_case's harness bookkeeping leaves through fd 4, not harness/ (outside the frozen
         # created_paths allow-list HARNESS_RUN_DIR).
         "projection_inputs_channel": inputs_channel,
+        # interrupt_broker.PROFILE_KEY: BrokerClient (request_stop(pid) -> ack) or None.
+        broker.PROFILE_KEY: interrupt_broker,
     }
 
 
