@@ -516,6 +516,11 @@ def test_e15_p1_inj_third_change_stops_at_the_rereview_cap(rereviews, frozen):
     assert trace["states"] == PROFILE_STATES[: PROFILE_STATES.index("REVIEW_APPROVED") + 1]
     assert len(report["rereview"]["rereviews"]) == 2
     assert trace["active_approval"]["reviewer_occurrence"] == 3
+    # The current manifest is the third (unadopted) bump, observed by the harness at run end,
+    # not the last build the controller adopted (run-4 E15-P1-INJ projection defect).
+    symbols = local.evidence["symbols"]
+    assert symbols["HARNESS_MANIFEST_HASH:current"] == trace["material_changes"][-1]["to_hash"]
+    assert symbols["HARNESS_MANIFEST_HASH:current"] != local.checkpoint["build_hash"]
     out = scored(local, frozen_inj)
     assert out["assertions"]["TS"] == "PASS" and out["terminal"] == "PASS"
     assert unexplained_fails(local, frozen_inj) == []
