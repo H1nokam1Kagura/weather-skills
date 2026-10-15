@@ -65,7 +65,8 @@ Issues go to a `rhiza-research` repository: by default
 `weather-skills`. When the report is about a skill installed from another
 rhiza-research skill repo, pass `--repo` with the repo that owns that skill
 (its name is in the skill's install source or README) so the issue lands in
-the right tracker. Only allow-listed repos are accepted; `--help` lists them.
+the right tracker. Allowed: `weather-skills`, `weather-skills-core`,
+`weather-skills-plotting`, `chc-skills`.
 
 ### Arguments
 - `--title` — the issue title. Required, must not be empty.
