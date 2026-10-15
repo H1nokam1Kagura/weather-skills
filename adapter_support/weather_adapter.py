@@ -6,6 +6,7 @@ D4). run_case is opt-in and refuses any case needing an undeclared capability.
 """
 
 import copy
+import functools
 import json
 import re
 import uuid
@@ -16,6 +17,8 @@ from simkit.adapter import Adapter
 from adapter_support import (
     evidence_projection,
     pre_review_projection,
+    resume_driver,
+    resume_projection,
     role_substitution,
     shadow_projection,
 )
@@ -60,6 +63,7 @@ SYMBOL_TABLE = (
     "HARNESS_RESOLVED_ARTIFACT_PATH:onset",
     "HARNESS_RESOLVED_ARTIFACT_PATH:map",
     "HARNESS_SOURCE_HASH:" + review_evidence.DEFINITION_SOURCE_ID,
+    "HARNESS_HASH:onset_partial_at_interrupt",
 )
 SYMBOL_PATTERNS = (
     re.compile(r"HARNESS_PLAN_HASH:v[1-9][0-9]*"),
@@ -94,6 +98,11 @@ class WeatherAdapter(Adapter):
         "CAP-REREVIEW": "record_material_changes",
         "CAP-LEDGER-APPEND": "append_ledger_record",
         "CAP-OPERATOR-RECORD-SETUP": "append_attributed_operator_record",
+        "CAP-RESUME-ATTRIBUTION": "attribute_resumes",
+        "CAP-AUTO-RESUME": "inject_intermittent_interruption",
+        "CAP-DIAGNOSIS": "record_diagnosis",
+        "CAP-OPERATOR-NOTIFY": "record_operator_notification",
+        "CAP-MECHANICAL-REPAIR": "record_mechanical_repair",
     }
 
     def __init__(self, enable_run_case=False, producers=None):
@@ -125,6 +134,7 @@ class WeatherAdapter(Adapter):
             if callable(getattr(type(self), method_name, None)):
                 implemented.add(capability)
         gated = {c for c, r in self.producers["capabilities"].items() if r.get("d4_gated") is True}
+        gated |= resume_driver.D4_GATED  # wave 7: declared only by a reviewed record
         return {c for c in implemented if c not in gated or self.d4_declared(c)}
 
     def can_run(self):
@@ -424,6 +434,10 @@ class WeatherAdapter(Adapter):
         missing = sorted(set(case["adapter_requirements"]) - self.implemented_capabilities())
         if missing:
             raise AdapterRefusal(f"case requires undeclared capabilities: {missing}")
+        # D21 (CR-05): each scheduled operation's implied capability must be declared too.
+        implied = resume_driver.implied_missing(case, self.implemented_capabilities())
+        if implied:
+            raise AdapterRefusal(f"case schedule implies undeclared capabilities: {implied}")
         variant = self.select_profile(case, profile["profile_document"])
         # CAP-SHADOW: invocation points, vocabulary and the shadow decision entries (delivered
         # by shadow_projection, not InjectionHooks), mapped or refused before any side effect.
@@ -431,8 +445,10 @@ class WeatherAdapter(Adapter):
         if shadow_plan["configured"] and "CAP-SHADOW" not in self.implemented_capabilities():
             raise AdapterRefusal("the case configures the shadow policy; CAP-SHADOW is undeclared")
         scheduled = shadow_projection.schedule_without_shadow(case, shadow_plan)
-        # The schedule is mapped or refused here, before any side effect (CAP-ROLE-SUBSTITUTE).
-        role_substitution.refuse_unsupported_schedule(scheduled)
+        # The schedule is mapped or refused here, before any side effect (CAP-ROLE-SUBSTITUTE);
+        # the mid-process stop form only with a stopper (the forked route, resume_driver).
+        resume_driver.refuse_unsupported_schedule(scheduled, resume_driver.stop_delivery(scheduled))
+        resume_driver.refuse_unsupported_route(scheduled, shadow_plan["configured"])
         fixture_plan = self.apply_fixture_operation(scheduled, profile["repo"])
         schedule_plan = self.substitute_role_output(scheduled, variant["goal"])
         max_repairs = self.configure_repair(case)
@@ -467,6 +483,7 @@ class WeatherAdapter(Adapter):
         roles = profile["roles_factory"](run_dir)
         # The case schedule runs chained behind the launch observer, whose records stay intact.
         schedule_hooks = role_substitution.case_hooks(schedule_plan, roles, prepared["case_root"])
+        stop_channel = resume_driver.arm(schedule_hooks, scheduled)  # None: no controller stop
         # HARNESS_RUN_ID (FX-OPERATOR-RECORD payloads): the harness-assigned operator run id,
         # handed to the controller as operator_run_id; the controller checks each record's.
         operator_run_id = f"harness-run-{uuid.uuid4()}"
@@ -478,7 +495,8 @@ class WeatherAdapter(Adapter):
         )
         if schedule_hooks is not None:
             schedule_hooks.prepare(seeded["request"], prepared["source"])
-        controller = Controller(
+        build = functools.partial(
+            Controller,
             repo,
             seeded["request"],
             prepared["source"],
@@ -494,10 +512,28 @@ class WeatherAdapter(Adapter):
             operator_run_id=operator_run_id,
             policy_mode=shadow_projection.policy_mode(shadow_plan),
         )
-        try:
-            controller.run()
-        except Exception:  # noqa: BLE001 - the controller recorded its own terminal
-            pass
+        resumed = None
+        if stop_channel is None:
+            controller = build()
+            try:
+                controller.run()
+            except Exception:  # noqa: BLE001 - the controller recorded its own terminal
+                pass
+        else:
+            # harness_stop_controller: fork, stop, kill, resume as incarnation 2 (resume_driver).
+            stop_channel.observer, stop_channel.schedule_hooks = observer, schedule_hooks
+            resumed = resume_driver.drive(
+                stop_channel,
+                build,
+                case=scheduled,
+                schedule_plan=schedule_plan,
+                prepared=prepared,
+                profile=profile,
+                run_dir=run_dir,
+                operator_run_id=operator_run_id,
+            )
+            controller, observer = resumed.controller, resumed.observer
+            schedule_hooks, processes = resumed.schedule_hooks, resumed.processes
         artifacts = [v for k, v in controller.paths.items() if k != "source"]
         tags = evidence_projection.tag_outputs(
             run_dir, harness_dir, artifacts, write=channel is None
@@ -516,6 +552,8 @@ class WeatherAdapter(Adapter):
         }
         if expected_after is not None:
             harness_inputs["source_expected_after"] = expected_after
+        if resumed is not None:
+            harness_inputs["resume_route"] = resumed.record  # resume_projection reads it
         fixture_record = None
         if fixture_plan["entries"]:
             fixture_record = fixture_ops.fixture_report(
@@ -541,6 +579,8 @@ class WeatherAdapter(Adapter):
             summary["case_schedule"] = schedule_hooks.report()
         if shadow_driver is not None:
             summary["shadow_schedule"] = shadow_driver.report()
+        if resumed is not None:
+            summary["resume_route"] = resumed.record
         if channel is None:
             # Persisted before projecting, so a post-trace re-projection has them even when
             # the in-process projection refuses.
@@ -1017,3 +1057,111 @@ class WeatherAdapter(Adapter):
                 }
             )
         )
+
+    # ---- Wave 7: interrupt and resume family (adapter_support/resume_driver.py delivers;
+    # these return what the controller recorded, or MISSING; each is D4-gated)
+
+    def interrupt_controller(self, run_dir, harness=None):
+        """CAP-INTERRUPT: controller_trace.interruptions (the controller's ledger, including the
+        controller_killed inference of an observed stop) plus the harness's own stop record for
+        a forked-route run (who was killed, how, with what facts). Delivery is run_case: the
+        case's InjectionHooks at the stop boundary, then resume_driver's kill."""
+        projection = self.capture_evidence(run_dir, harness)
+        out = resume_projection.trace_report(projection, "interruptions")
+        observed = projection["evidence"]["harness_observations"].get("controller_incarnations")
+        if observed is not None:
+            out["harness_stop"] = observed
+        return out
+
+    def request_resume(self, run_dir, harness=None):
+        """CAP-RESUME: controller_trace.resume (every decision, accepted or refused, with its
+        verification and checkpoint_counters) and budget_ledger.at_checkpoint, or MISSING. The
+        operator resume itself is requested by run_case (Controller.request_resume)."""
+        projection = self.capture_evidence(run_dir, harness)
+        out = resume_projection.trace_report(projection, "resume")
+        ledger = projection["evidence"]["budget_ledger"]
+        if "at_checkpoint" in ledger:
+            out["at_checkpoint"] = ledger["at_checkpoint"]
+        return out
+
+    def attribute_resumes(self, run_dir, harness=None):
+        """CAP-RESUME-ATTRIBUTION: per decision initiated_by, override_requested,
+        operator_record_id, interruption_index, refusal_record (bound refused or accepted),
+        and budget_ledger.final.automatic_resumes_used."""
+        projection = self.capture_evidence(run_dir, harness)
+        out = resume_projection.trace_report(projection, "resume")
+        if "resume" in out:
+            keys = (
+                "result",
+                "initiated_by",
+                "override_requested",
+                "operator_record_id",
+                "interruption_index",
+                "refusal_record",
+            )
+            out["attribution"] = [{k: d[k] for k in keys if k in d} for d in out["resume"]]
+        final = projection["evidence"]["budget_ledger"]["final"]
+        if "automatic_resumes_used" in final:
+            out["automatic_resumes_used"] = final["automatic_resumes_used"]
+        return out
+
+    def arm_midprocess_trigger(self, run_dir, harness=None):
+        """CAP-MIDPROCESS: the mid-process stop as delivered (armed at before_tool, fired on the
+        tool's own process_launch after its durable start receipt) and the harness's onset
+        observation at the interrupt, or MISSING when the run had no mid-process stop."""
+        projection = self.capture_evidence(run_dir, harness)
+        stop = ((harness or {}).get("resume_route") or {}).get("stop") or {}
+        if stop.get("trigger") != "process_launch":
+            return {"status": "MISSING", "reason": "no mid-process stop was delivered"}
+        observations = projection["evidence"]["harness_observations"]
+        out = {"stop": stop}
+        if "onset_partial" in observations:
+            out["onset_partial"] = observations["onset_partial"]
+        out["missing"] = [m for m in projection["missing"] if m["capability"] == "CAP-MIDPROCESS"]
+        return out
+
+    def deny_write(self, run_dir, harness=None):
+        """CAP-DENY-WRITE: the controller's own denial records (context run_dir_denials: the
+        pre-launch run-directory denial; write_denials: the commit-time one), or MISSING."""
+        native = evidence_projection.NativeRun(run_dir)
+        out = {
+            name: native.context[name]
+            for name in ("run_dir_denials", "write_denials")
+            if name in native.context
+        }
+        if not out:
+            return {"status": "MISSING", "reason": "the controller recorded no write denial"}
+        return out
+
+    def inject_intermittent_interruption(self, run_dir, harness=None):
+        """CAP-AUTO-RESUME: the classified interruptions (failure_class, at_state, pending) the
+        controller recorded and its automatic resumes. Delivery is the case schedule's
+        harness_drop_model_connection interrupt (InjectionHooks, a real ConnectionResetError or
+        TimeoutError at a durable nothing-pending boundary)."""
+        projection = self.capture_evidence(run_dir, harness)
+        out = resume_projection.trace_report(projection, "interruptions")
+        if "interruptions" in out:
+            decisions = projection["evidence"]["controller_trace"].get("resume", [])
+            out["automatic_resumes"] = [
+                d for d in decisions if d.get("initiated_by") == "automatic"
+            ]
+        return out
+
+    def record_diagnosis(self, run_dir, harness=None):
+        """CAP-DIAGNOSIS: controller_trace.diagnoses. For repeated transient faults the
+        controller records evidenced true, mechanical false (disclosed: E14-P1-INJ C3 is then
+        vacuous)."""
+        projection = self.capture_evidence(run_dir, harness)
+        return resume_projection.trace_report(projection, "diagnoses")
+
+    def record_operator_notification(self, run_dir, harness=None):
+        """CAP-OPERATOR-NOTIFY: controller_trace.operator_notifications (stop record with every
+        interruption's failure class, diagnosis reference)."""
+        projection = self.capture_evidence(run_dir, harness)
+        return resume_projection.trace_report(projection, "operator_notifications")
+
+    def record_mechanical_repair(self, run_dir, harness=None):
+        """CAP-MECHANICAL-REPAIR: controller_trace.mechanical_repairs. REPAIR_ACTIONS is empty
+        by design (D31), so this producer only ever records [] (disclosed)."""
+        projection = self.capture_evidence(run_dir, harness)
+        return resume_projection.trace_report(projection, "mechanical_repairs")
