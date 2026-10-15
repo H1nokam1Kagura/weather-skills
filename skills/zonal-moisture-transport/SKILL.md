@@ -20,9 +20,17 @@ IVT_x = (1/g) ∫ qu dp     g = 9.80665 m s-2,  dp in Pa
 ```
 
 The integral is trapezoidal along the ontology `vertical` dim (also `level`,
-`isobaricInhPa`, …). Pressure coords in hPa are converted to Pa. Shared dims
-are inner-joined, so a 7-level `q` stack and a 10-level `u` stack keep the
-overlapping levels only.
+`isobaricInhPa`, …), over ascending pressure, so the sign does not depend on
+the stored level order. Pressure coords in hPa are converted to Pa; `q` is
+converted to `kg kg-1` (e.g. from `g kg-1`) and `u` to `m s-1` (e.g. from
+`km h-1`) by their `units` attrs. Shared dims are inner-joined, so a 7-level
+`q` stack and a 10-level `u` stack keep the overlapping levels only.
+
+Missing levels are never filled. A level with no finite `q*u` anywhere is
+dropped and named on stderr (`WARNING: dropping vertical levels ...`) — the
+46-day product has no `specific_humidity` above 200 hPa, so its column is
+1000–200 hPa. A level missing in only some columns (e.g. below ground) makes
+those columns NaN.
 
 `--no-integrate` writes the per-level product `qu` (`kg kg-1 m s-1`) instead
 — use that after `select` has already sliced one pressure (e.g. 850 hPa).
@@ -76,7 +84,7 @@ destroys that input.
 | `--no-integrate` | `qu` | `kg kg-1 m s-1` | Per-level eastward moisture flux |
 
 Integrated output drops the vertical dim. Dataset attrs from the first input
-are preserved. Positive `viwve` is eastward transport.
+are preserved. Positive `viwve` is eastward transport, negative westward.
 
 ### Provenance
 
