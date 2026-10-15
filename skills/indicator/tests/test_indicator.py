@@ -458,3 +458,72 @@ def test_backward_free_rule_has_no_tail_note(tmp_path, indicator_fn, capsys):
         "--rule", "precip sum 1d >= 5",
     )  # fmt: skip
     assert "looks" not in capsys.readouterr().err
+
+
+def test_nan_day_makes_every_covering_window_unknown(tmp_path, indicator_fn):
+    ds = _daily(8)
+    ds["precip"].values[:, 0, 0] = [0, 0, np.nan, 0, 0, 0, 0, 0]
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        indicator_fn, "-i", str(src), "-o", str(out), "--rule", "precip count-below 1 3d >= 3"
+    )
+    got = _cell(out).values  # windows starting days 0-2 cover the gap; days 6-7 are the tail
+    np.testing.assert_array_equal(got, [np.nan, np.nan, np.nan, 1, 1, 1, np.nan, np.nan])
+
+
+def test_cumulative_probability_tail_is_unknown(tmp_path, indicator_fn):
+    """A member that has not hit by the tail is undecided, so P is unknown, not 1."""
+    ds = _daily(6).expand_dims(number=[0, 1]).copy(deep=True)
+    ds["precip"].values[0, :, 0, 0] = [0, 30, 0, 0, 0, 0]  # member 0 onset on day 0
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        indicator_fn, "-i", str(src), "-o", str(out),
+        "--rule", "precip sum 3d >= 20", "--cumulative", "--probability",
+    )  # fmt: skip
+    np.testing.assert_array_equal(
+        _cell(out, "probability").values, [0.5, 0.5, 0.5, 0.5, np.nan, np.nan]
+    )
+
+
+def test_probability_is_unknown_when_a_member_is_missing(tmp_path, indicator_fn):
+    ds = _daily(2).expand_dims(number=[0, 1, 2]).copy(deep=True)
+    ds["precip"].values[:, 0, 0, 0] = [30, np.nan, 0]
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        indicator_fn, "-i", str(src), "-o", str(out),
+        "--rule", "precip sum 1d >= 20", "--probability",
+    )  # fmt: skip
+    np.testing.assert_array_equal(_cell(out, "probability").values, [np.nan, 0.0])
+
+
+def test_detect_any_is_unknown_across_a_gap(tmp_path, indicator_fn):
+    """A missing day is not a dry day: no hit with a gap is unknown, not 0."""
+    gap = _daily(5)
+    gap["precip"].values[:, 0, 0] = [0, np.nan, 0, 0, 0]
+    tail = _daily(5)
+    tail["precip"].values[:, 0, 0] = [0, 0, 0, 0, np.nan]  # trailing run = undecided tail
+    for ds, want in ((gap, np.nan), (tail, 0.0)):
+        src = write_zarr(ds, tmp_path / "in.zarr")
+        out = tmp_path / "out.zarr"
+        run_skill(
+            indicator_fn, "-i", str(src), "-o", str(out),
+            "--rule", "precip sum 1d >= 20", "--detect", "any",
+        )  # fmt: skip
+        np.testing.assert_array_equal(_cell(out).values, want)
+
+
+def test_within_one_true_day_decides_an_incomplete_lookahead(tmp_path, indicator_fn):
+    """A dry spell already seen is a known false start even if later days are undecided."""
+    ds = _daily(7)
+    ds["precip"].values[:, 0, 0] = [0, 0, 0, 0, 0, 5, 5]
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+    run_skill(
+        indicator_fn, "-i", str(src), "-o", str(out),
+        "--rule", "not precip consecutive-below 1 3d within 5d",
+    )  # fmt: skip
+    # Spell mask is 1,1,1,0,0,nan,nan: day 0/1 see a spell; day 2 needs days 5-7.
+    np.testing.assert_array_equal(_cell(out).values, [0, 0] + [np.nan] * 5)

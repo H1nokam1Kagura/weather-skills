@@ -59,8 +59,10 @@ window with `select` first (MAM/OND is not built in).
 the window (`precip count-below 1 10d >= 7`). Consecutive clauses have no
 `<op> <threshold>` — they are true when every day in the window matches.
 `after Nd` shifts the clause N days later. `within Nd` is true if the clause
-is true on **any** of the next N days (incomplete look-ahead is NaN). `not`
-inverts that clause. `after` and `within` cannot appear on the same clause.
+is true on **any** of the next N days (one true day decides it; false needs
+all N days decided, else NaN). `not` inverts that clause. Missing input days
+make every window that covers them NaN (never dry or wet); `and`/`or` stay
+decided when one side alone decides them. `after` and `within` cannot appear on the same clause.
 Windows look forward too, so the last dates of the input cannot be decided
 (27 days for `icpac-onset`). The skill prints the last decidable date on
 stderr: after it, NaN means "not yet known", not "no event", and a
@@ -82,10 +84,17 @@ Applied in order. Default: 0/1 `indicator`, all dims kept.
 2. `--detect first|any` — collapse time. `first` writes `indicator_time`
    and `indicator_doy` (datetime axis only); both are NaT/NaN when the rule is
    never true **or** when missing data comes before the first true day (a gap
-   could hide an earlier onset, so the date is unknown, not later). `any` writes 0/1.
+   could hide an earlier onset, so the date is unknown, not later).
+   `indicator_doy` is the calendar day of year, so it wraps at 1 January —
+   do not average it across members whose onsets straddle the year end.
+   `any` writes 0/1: 1 if true on any day; 0 if never true with no gap
+   before the last decided day (the trailing undecidable tail is ignored, so
+   0 means "no event through the last decidable date"); NaN otherwise.
    Mutex with `--cumulative`. `--detect first` cannot combine with
    `--probability` (dates are not 0/1).
 3. `--probability` — mean over `number`. Variable `probability` (`units="1"`).
+   NaN wherever any member is NaN (undecided members are not dropped: with
+   `--cumulative` the tail stays NaN until every member has hit).
    No-op on the ensemble axis if `number` is absent (still 0/1).
 
 | Want | Flags |
@@ -95,24 +104,24 @@ Applied in order. Default: 0/1 `indicator`, all dims kept.
 | P(onset has occurred by this date) | `--cumulative --probability` |
 | P(event happens at least once) | `--detect any --probability` |
 | Onset date map | `--detect first`, then `plot` (do not reduce `number` first) |
-| Mean onset day-of-year | `--detect first`, then `summarize-dim --dim number --method mean` on `indicator_doy` |
+| Mean onset day-of-year | `--detect first`, then `summarize-dim --dim number --method mean` on `indicator_doy` (not across 1 January) |
 
 ## Usage
 
 ```
 uv run ${CLAUDE_SKILL_DIR}/scripts/indicator.py \
-    -i <daily.zarr> -o <out.zarr> --rule <alias-or-clauses> \
+    -i <daily-or-weekly.zarr> -o <out.zarr> --rule <alias-or-clauses> \
     [--variable NAME] [--time-dim DIM] \
     [--detect first|any] [--cumulative] [--probability]
 ```
 
 ### Arguments
 
-- `--input`, `-i` — daily standard dataset Zarr.
+- `--input`, `-i` — daily or weekly standard dataset Zarr.
 - `--output`, `-o` — output Zarr.
 - `--rule` — alias or clause string (required, once).
 - `--variable`, `-v` — override the variable named in every clause.
-- `--time-dim` — daily axis (default `time` if length > 1, else `step`).
+- `--time-dim` — daily/weekly axis (default `time` if length > 1, else `step`).
 - `--detect` — `first` or `any`.
 - `--cumulative` — running OR along the daily axis.
 - `--probability` — ensemble fraction.

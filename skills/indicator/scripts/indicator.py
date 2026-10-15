@@ -361,14 +361,17 @@ def _left_roll(da: xr.DataArray, dim: str, window: int, method: str) -> xr.DataA
 
 
 def _within(mask: xr.DataArray, dim: str, days: int) -> xr.DataArray:
-    """True if ``mask`` is True on any of the next ``days`` labels; NaN if incomplete."""
+    """True if ``mask`` is True on any of the next ``days`` labels.
+
+    One True decides it; otherwise False needs every label decided (else NaN).
+    """
     if days < 1:
         raise UsageError(f"within window must be >= 1d; got {days}")
     shifted = [mask.shift({dim: -k}) for k in range(1, days + 1)]
     stack = xr.concat(shifted, dim="_look")
     complete = stack.notnull().all("_look")
     hit = (stack == 1).any("_look")
-    return xr.where(complete, hit.astype("float32"), np.nan)
+    return xr.where(hit, 1.0, xr.where(complete, 0.0, np.nan))
 
 
 def _combine(a: xr.DataArray, b: xr.DataArray, how: str) -> xr.DataArray:
@@ -390,9 +393,13 @@ def _cumulative(mask: xr.DataArray, dim: str) -> xr.DataArray:
 
 
 def _detect_any(mask: xr.DataArray, dim: str) -> xr.DataArray:
-    finite = mask.notnull().any(dim)
     hit = (mask == 1).any(dim)
-    return hit.astype("float32").where(finite)
+    # A gap followed by decided days could hide the event: unknown, not 0. The
+    # trailing NaN run is the undecidable look-ahead tail, reported on stderr.
+    decided = mask.notnull()
+    gap = (~decided & (decided.cumsum(dim) < decided.sum(dim))).any(dim)
+    known_miss = decided.any(dim) & ~gap
+    return xr.where(hit, 1.0, xr.where(known_miss, 0.0, np.nan))
 
 
 def _detect_first(mask: xr.DataArray, dim: str) -> xr.Dataset:
@@ -413,7 +420,9 @@ def _detect_first(mask: xr.DataArray, dim: str) -> xr.Dataset:
 def _probability(mask: xr.DataArray) -> xr.DataArray:
     if "number" not in mask.dims:
         return mask.astype("float32")
-    return mask.mean("number", skipna=True).astype("float32")
+    # NaN unless every member is decided: skipping undecided members biases the
+    # fraction (with --cumulative, only members that already hit stay decided).
+    return mask.mean("number", skipna=False).astype("float32")
 
 
 def _axis(ds, time_dim: str | None) -> str:
