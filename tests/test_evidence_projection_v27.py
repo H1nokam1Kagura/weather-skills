@@ -1231,7 +1231,9 @@ def test_run_case_persists_projection_inputs_for_the_post_trace_projection(relea
     inputs = json.loads(inputs_path.read_text(encoding="utf-8"))
     assert inputs["schema"] == "weather-adapter.evidence-projection-inputs/1"
     assert inputs["case_id"] == "RELEASED-MAP" and inputs["run_dir"] == str(released.run)
-    assert set(project_in_container.INPUT_KEYS) <= set(inputs)
+    # fixture_operations is carried only for a case that schedules a fixture operation.
+    assert set(project_in_container.INPUT_KEYS) - {"fixture_operations"} <= set(inputs)
+    assert "fixture_operations" not in inputs
     adapter = WeatherAdapter()
     observations = write_observations(
         tmp_path, harness_observations(adapter.capture_evidence(released.run))
@@ -1249,7 +1251,7 @@ def test_run_case_persists_projection_inputs_for_the_post_trace_projection(relea
     ev = merged["projection"]["evidence"]
     # What the in-process projection had is back: source_pre, authorized goal, provenance,
     # launch-time hashes; plus the trace observations.
-    harness = {k: inputs[k] for k in project_in_container.INPUT_KEYS}
+    harness = {k: inputs[k] for k in project_in_container.INPUT_KEYS if k in inputs}
     expected = adapter.capture_evidence(
         released.run, {**harness, "observations_path": observations}
     )

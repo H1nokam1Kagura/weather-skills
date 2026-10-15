@@ -325,11 +325,16 @@ def channel_note(channel):
 def authorizations(projection):
     """CAP-LEDGER-SEED: the authorization decisions the controller recorded.
 
-    One record per AUTHORIZED transition, whose evidence must be the request's authorization
-    record (validated at capture by contracts.request_goal: a user message quoted verbatim,
-    bound to the goal hash). ``[]`` when a finished run never authorized; MISSING when the
-    run did not finish (more could follow).
+    One record per surviving AUTHORIZED transition, whose evidence must be the request's
+    authorization record (validated at capture by contracts.request_goal: a user message quoted
+    verbatim, bound to the goal hash). An AUTHORIZED transition a return to review withdrew is
+    not an authorization the run acts under: the surviving history is the replayed clock of
+    fixture_rereview_projection.transition_history (CAP-REREVIEW, review finding X3), never the
+    raw transition events. ``[]`` when a finished run never authorized; MISSING when the run did
+    not finish (more could follow).
     """
+    from adapter_support.fixture_rereview_projection import transition_history
+
     native = projection.n
     if not native.finished():
         projection.gap(
@@ -342,7 +347,8 @@ def authorizations(projection):
     authorization = request["authorization"]
     speakers = {m["id"]: m["speaker"] for m in request["messages"]}
     out = []
-    for event in native.kinds("transition"):
+    surviving, _ = transition_history(native)
+    for event in surviving:
         transition = event["transition"]
         if transition["to"] != "AUTHORIZED":
             continue

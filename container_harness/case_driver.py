@@ -9,7 +9,9 @@ usage (inside the harness image, cwd /opt/ctl):
         Generates the synthetic fixture with the pinned generator into /work/gen.
     python -m container_harness.case_driver prepare CASE_ID /work    (untraced, uid 1000)
         The adapter's prepare_fixture stages the case root (source/, harness/manifest.json,
-        empty run/) before the trace; record in /work/prepared-fixture.json.
+        empty run/) before the trace; record in /work/prepared-fixture.json. A case with a
+        repository fixture operation also gets its disposable repository copy case/repo staged
+        here (record in /work/prepared-repo.json).
     python -m container_harness.case_driver run CASE_ID /work        (traced root, uid 1000)
         THE traced controller process: the frozen runner dispatches the one case to
         WeatherAdapter(enable_run_case=True).run_case, which re-checks admission, re-verifies
@@ -309,8 +311,41 @@ def prepare(case_id, work):
         presented_fetch_version=_fetch_version(),
     )
     (work / PREPARED_NAME).write_text(json.dumps(prepared, indent=1) + "\n", encoding="utf-8")
-    print(json.dumps({k: prepared[k] for k in ("case_id", "case_root", "run", "source_pre")}))
+    repo_copy = prepare_repo_copy(case, work)
+    summary = {k: prepared[k] for k in ("case_id", "case_root", "run", "source_pre")}
+    summary["repo_copy"] = repo_copy["repo"] if repo_copy is not None else None
+    print(json.dumps(summary))
     return 0
+
+
+PREPARED_REPO_NAME = "prepared-repo.json"
+
+
+def prepare_repo_copy(case, work, repo=CTL, adapter=None):
+    """Untraced (in ``prepare``): the disposable controller-repository copy case_root/repo that
+    the case's repository fixture operations edit (CAP-FIXTURE-OP: FX-DEF-PARAM-EDIT,
+    FX-DEF-TOUCH, FX-RUNTIME-MANIFEST-BUMP), staged BEFORE the trace so none of its paths is a
+    created path of the traced run (frozen all_under HARNESS_RUN_DIR). The record goes to
+    /work/prepared-repo.json; the traced ``run`` passes it as profile["prepared_repo"] and
+    run_case re-verifies it (fixture_rereview_projection.adopt_repo_copy), staging nothing.
+
+    -> the staging record, or None when the case schedules no repository operation or its
+    fixture plan is refused (run_case then refuses the case with the same reason, before any
+    side effect; nothing is staged here for it)."""
+    from adapter_support import fixture_rereview_projection as frx
+    from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter
+
+    adapter = adapter or WeatherAdapter(enable_run_case=True)
+    try:
+        plan = adapter.apply_fixture_operation(case, repo)
+    except AdapterRefusal:
+        return None
+    if not plan["needs_repo_copy"]:
+        return None
+    work = Path(work)
+    record = frx.stage_repo_copy(repo, work / "case")
+    (work / PREPARED_REPO_NAME).write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
+    return record
 
 
 def _record_channel():
@@ -376,6 +411,7 @@ def case_profile(
     inputs_channel,
     processes_factory,
     definition=DEFINITION_PATH,
+    prepared_repo=None,
 ):
     """The run_case profile the traced ``run`` passes (one builder, also driven by tests)."""
     work = Path(work)
@@ -389,6 +425,8 @@ def case_profile(
         "generator_provenance": _generator_provenance(spec, pins),
         "presented_fetch_version": version,
         "prepared_fixture": prepared,
+        # The repository copy ``prepare`` staged untraced (prepare_repo_copy), or None.
+        "prepared_repo": prepared_repo,
         # D1: the pinned reference definition, hash-verified (a path: Controller binds it via
         # claim_gates.bind_definition_source, reading bytes).
         "definition_source": reference_definition(definition),
@@ -449,6 +487,12 @@ def run(case_id, work):
             # In the traced container the fixture must be staged before the trace; staging
             # here would put source/ and harness/ in created_paths, outside HARNESS_RUN_DIR.
             raise RuntimeError("no pre-staged fixture (case_driver prepare did not run)")
+        prepared_repo_path = work / PREPARED_REPO_NAME
+        prepared_repo = (
+            json.loads(prepared_repo_path.read_text(encoding="utf-8"))
+            if prepared_repo_path.is_file()
+            else None
+        )
         profile = case_profile(
             case,
             adapter,
@@ -461,6 +505,7 @@ def run(case_id, work):
             prepared=prepared,
             inputs_channel=inputs_channel,
             processes_factory=lambda run_dir: Processes(Path(run_dir) / "processes"),
+            prepared_repo=prepared_repo,
         )
         (record,) = frozen_run([case], adapter, profile, only={case_id})
     except Exception as exc:  # noqa: BLE001 - recorded as the driver's own HARNESS_ERROR

@@ -161,19 +161,23 @@ def rereviews(lab, frozen):
     return {s: execute(lab, copy.deepcopy(frozen[PREFIX + s])) for s in WITH_REREVIEW}
 
 
-def without_plan_scope(frozen, short):
-    """LOCAL variant (not a frozen case): the E15 schedule with plan_scope removed, so every
-    bump is delivered (see the plan_scope finding in the E15 tests)."""
-    case = copy.deepcopy(frozen[PREFIX + short])
-    case["id"] += "-LOCAL-NO-PLAN-SCOPE"
-    for spec in case["injection_schedule"]:
-        assert spec["selector"].pop("plan_scope") == "initial"
+def bump_after_authorization(frozen):
+    """LOCAL variant (not a frozen case): E15-P1-CTL with its one schedule entry being a
+    runtime-manifest bump at after_transition AUTHORIZED occurrence 1, so the return to review
+    withdraws an AUTHORIZED transition (the frozen bumps all land before AUTHORIZED)."""
+    case = copy.deepcopy(frozen[PREFIX + "E15-P1-CTL"])
+    case["id"] += "-LOCAL-BUMP-AFTER-AUTHORIZED"
+    bump = copy.deepcopy(case["injection_schedule"][0])
+    assert bump["payload"]["fixture_operation"] == "FX-RUNTIME-MANIFEST-BUMP"
+    bump.update(hook="after_transition", requires=[])
+    bump["selector"] = {"role_or_tool_or_stage": "AUTHORIZED", "occurrence": 1}
+    case["injection_schedule"] = [bump]
     return case
 
 
 @pytest.fixture(scope="module")
-def rereviews_delivered(lab, frozen):
-    return {s: execute(lab, without_plan_scope(frozen, s)) for s in WITH_REREVIEW}
+def reauthorized(lab, frozen):
+    return execute(lab, bump_after_authorization(frozen))
 
 
 # --------------------------------------------------------------------------- CAP-FIXTURE-OP
@@ -411,20 +415,20 @@ def test_x3_rereview_run_projects_with_the_surviving_history(rereviews):
     events = dispatch_events(result.run)
     raw = [e["transition"] for e in events if e["kind"] == "transition"]
     assert raw != result.checkpoint["events"]  # the pre-fix projection refused here
-    assert [t["to"] for t in raw].count("REVIEW_APPROVED") == 2
+    assert [t["to"] for t in raw].count("REVIEW_APPROVED") == 3  # approval + two re-reviews
     trace = result.evidence["controller_trace"]
     assert trace["states"] == PROFILE_STATES and trace["final_state"] == "RELEASED"
-    (withdrawn,) = next(n for n in result.report["notes"] if "withdrawn_transitions" in n)[
+    withdrawals = next(n for n in result.report["notes"] if "withdrawn_transitions" in n)[
         "withdrawn_transitions"
     ]
-    assert [w["state"] for w in withdrawn["withdrawn"]] == ["REVIEW_APPROVED"]
+    assert [[w["state"] for w in r["withdrawn"]] for r in withdrawals] == [["REVIEW_APPROVED"]] * 2
     surviving = [e for e in events if e["kind"] == "transition"][-8]
     assert surviving["transition"]["to"] == "REVIEW_APPROVED"
     assert (
         result.evidence["event_seq"]["controller_trace.states[REVIEW_APPROVED]"]
         == (surviving["sequence"])
     )
-    assert withdrawn["withdrawn"][0]["sequence"] < surviving["sequence"]
+    assert all(r["withdrawn"][0]["sequence"] < surviving["sequence"] for r in withdrawals)
     found = score.run_evidence_findings(
         next(
             a["predicate"]["operand"]
@@ -454,22 +458,14 @@ def assert_rereview_records(result, bumps):
     return trace, report
 
 
-def test_e15_p1_ctl_two_rereviews_release_under_the_replacing_approval(
-    rereviews, rereviews_delivered, frozen
-):
+def test_e15_p1_ctl_two_rereviews_release_under_the_replacing_approval(rereviews, frozen):
     frozen_ctl = frozen[PREFIX + "E15-P1-CTL"]
-    # Frozen schedule: bump-2 (occurrence 2, plan_scope initial) is never delivered. Finding:
-    # runner.Controller.accepted_approval reports plan_scope "initial" only while the binding
-    # equals the first binding, and a manifest bump changes the binding; the frozen meaning is
-    # "the first accepted plan identity" (schedule_fixes.py). The run releases after one
-    # re-review, which the projection reports as observed.
-    result = rereviews["E15-P1-CTL"]
-    entries = result.report["harness"]["case_schedule"]["coverage"]["dependencies"]["entries"]
-    assert [e["disposition"] for e in entries] == ["DELIVERED", "INACTIVE"]
-    trace, _ = assert_rereview_records(result, 1)
-    assert trace["final_state"] == "RELEASED"
-    # Delivered (local variant): two re-reviews of v1, each a replacing approval; release.
-    local = rereviews_delivered["E15-P1-CTL"]
+    # Frozen schedule, verbatim: plan_scope "initial" is the first accepted PLAN identity
+    # (schedule_fixes.py), and a manifest bump re-binds the same plan, so bump-2 (occurrence 2,
+    # plan_scope initial) is delivered: two re-reviews of v1, each a replacing approval; release.
+    local = rereviews["E15-P1-CTL"]
+    entries = local.report["harness"]["case_schedule"]["coverage"]["dependencies"]["entries"]
+    assert [e["disposition"] for e in entries] == ["DELIVERED", "DELIVERED"]
     trace, report = assert_rereview_records(local, 2)
     approval = trace["active_approval"]
     superseded = report["rereview"]["superseded_approvals"]
@@ -495,13 +491,11 @@ def test_e15_p1_ctl_two_rereviews_release_under_the_replacing_approval(
     assert unexplained_fails(local, frozen_ctl) == []
 
 
-def test_e15_p1_inj_third_change_stops_at_the_rereview_cap(rereviews, rereviews_delivered, frozen):
+def test_e15_p1_inj_third_change_stops_at_the_rereview_cap(rereviews, frozen):
     frozen_inj = frozen[PREFIX + "E15-P1-INJ"]
-    result = rereviews["E15-P1-INJ"]  # frozen schedule: same plan_scope finding as CTL
-    entries = result.report["harness"]["case_schedule"]["coverage"]["dependencies"]["entries"]
-    assert [e["disposition"] for e in entries] == ["DELIVERED", "INACTIVE", "INACTIVE"]
-    assert_rereview_records(result, 1)
-    local = rereviews_delivered["E15-P1-INJ"]
+    local = rereviews["E15-P1-INJ"]  # frozen schedule, verbatim: all three bumps delivered
+    entries = local.report["harness"]["case_schedule"]["coverage"]["dependencies"]["entries"]
+    assert [e["disposition"] for e in entries] == ["DELIVERED"] * 3
     trace, report = assert_rereview_records(local, 3)
     # Two re-reviews used; the third change is recorded, then the cap refuses at the binding
     # check, still approved and with nothing produced (the frozen acceptable alternative).
@@ -519,7 +513,7 @@ def test_e15_p1_inj_third_change_stops_at_the_rereview_cap(rereviews, rereviews_
     assert unexplained_fails(local, frozen_inj) == []
 
 
-def test_rereview_lists_are_empty_only_for_a_finished_run(runs, rereviews_delivered, tmp_path):
+def test_rereview_lists_are_empty_only_for_a_finished_run(runs, rereviews, tmp_path):
     finished = runs["E03-P1-CTL"].evidence["controller_trace"]
     assert finished["material_changes"] == [] and finished["source_rechecks"] == []
 
@@ -533,7 +527,7 @@ def test_rereview_lists_are_empty_only_for_a_finished_run(runs, rereviews_delive
         (run / "result.json").unlink()
         return []
 
-    for name, source in (("e03", runs["E03-P1-CTL"]), ("e15", rereviews_delivered["E15-P1-CTL"])):
+    for name, source in (("e03", runs["E03-P1-CTL"]), ("e15", rereviews["E15-P1-CTL"])):
         run = rewrite_run(source.run, tmp_path / name, unfinish)
         projection = WeatherAdapter().capture_evidence(run)
         trace = projection["evidence"]["controller_trace"]
@@ -547,8 +541,8 @@ def test_rereview_lists_are_empty_only_for_a_finished_run(runs, rereviews_delive
             assert owners["controller_trace.source_rechecks"] == "CAP-REREVIEW"
 
 
-def test_tampered_rereview_records_refuse_the_projection(rereviews_delivered, tmp_path):
-    source = rereviews_delivered["E15-P1-CTL"].run
+def test_tampered_rereview_records_refuse_the_projection(rereviews, tmp_path):
+    source = rereviews["E15-P1-CTL"].run
 
     def change_file(run, payload):
         path = run / "material-change-000.json"
@@ -584,3 +578,23 @@ def test_tampered_rereview_records_refuse_the_projection(rereviews_delivered, tm
     assert native_checkpoint(source)["context"]["rereviews"][0]["withdrawn_states"] == [
         "REVIEW_APPROVED"
     ]
+
+
+def test_withdrawn_authorization_is_not_an_authorization(reauthorized):
+    """A return to review that withdraws an AUTHORIZED transition leaves one authorization:
+    controller_trace.authorizations counts the surviving history, not every transition event."""
+    result = reauthorized
+    (entry,) = fixture_record(result)["entries"]
+    assert entry["status"] == "APPLIED" and entry["build_id_to"] == "build-2"
+    events = dispatch_events(result.run)
+    authorized = [
+        e for e in events if e["kind"] == "transition" and e["transition"]["to"] == "AUTHORIZED"
+    ]
+    assert len(authorized) == 2  # the withdrawn one and the re-authorization
+    (rereview,) = result.checkpoint["context"]["rereviews"]
+    assert "AUTHORIZED" in rereview["withdrawn_states"]
+    trace = result.evidence["controller_trace"]
+    assert trace["final_state"] == "RELEASED" and trace["states"] == PROFILE_STATES
+    (authorization,) = trace["authorizations"]
+    assert authorization["authorized_at"] == authorized[-1]["sequence"]
+    assert authorization["source"] == "operator_ledger" and authorization["speaker"] == "user"

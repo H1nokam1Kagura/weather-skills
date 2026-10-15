@@ -706,13 +706,17 @@ class Controller:
         ):
             return None
         counter = self.context.setdefault(
-            "accepted_approvals", {"occurrence": 0, "initial_binding_hash": None}
+            "accepted_approvals",
+            {"occurrence": 0, "initial_binding_hash": None, "initial_plan_hash": None},
         )
+        plan_hash = self.plan_hash()
         counter["occurrence"] += 1
         if counter["occurrence"] == 1:
             counter["initial_binding_hash"] = self.binding
+            counter["initial_plan_hash"] = plan_hash
         self.checkpoint()
         initial = counter["initial_binding_hash"]
+        initial_plan = counter.get("initial_plan_hash")  # absent in a pre-change checkpoint
         return {
             "role": "reviewer",
             "target": "reviewer",
@@ -722,8 +726,14 @@ class Controller:
             "binding_valid": True,
             "controller_accepted": True,
             "approval_committed": True,
+            # plan_scope is the plan identity (frozen schedule contract: "initial means the
+            # first accepted plan identity"), the plan-version hash, not the binding: a
+            # runtime-manifest or source change re-binds the same plan and stays "initial".
             # No parent-plan binding exists in this controller, so never child_of_initial.
-            "plan_scope": "initial" if self.binding == initial else None,
+            "plan_scope": "initial" if plan_hash == initial_plan else None,
+            "plan_hash": plan_hash,
+            "initial_plan_hash": initial_plan,
+            "parent_plan_hash": None,
             "binding_hash": self.binding,
             "initial_binding_hash": initial,
             "parent_binding_hash": None,
