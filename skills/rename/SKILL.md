@@ -36,9 +36,8 @@ destroys the input.
 - `--input`, `-i` — input Zarr containing a weather-skills standard dataset.
 - `--output`, `-o` — output Zarr.
 - `--to-name` — the new variable name; becomes the output variable's name.
-- `--variable`, `-v` — source data variable to rename. If omitted and the input
-  has a single data variable, that one is used. If multiple data vars are
-  present, `--variable` is required.
+- `--variable`, `-v` — source data variable to rename. If omitted, the input
+  must have exactly one data variable, and that one is used.
 
 Renaming `--variable` to a name it already has is a valid no-op: the output is
 written with a fresh provenance entry so it can still be the store a downstream
@@ -47,14 +46,18 @@ step reads.
 ### Output
 
 Same dims, coords, and data variables as the input, except the selected variable
-is named `--to-name`. The renamed variable keeps all of its own attrs; all other
-variables, coords, dims, and dataset attrs are unchanged.
+is named `--to-name`. The renamed variable keeps its values and attrs; all other
+variables, coords, dims, and dataset attrs are unchanged apart from the appended
+provenance entry. Like every skill output, precip amounts (e.g. `kg m-2`, `mm`)
+are re-stamped with the standard amount `standard_name` on write.
 
 The skill exits with code 2 and a clear message when: the input is missing; the
-output exists and is not a directory; `--variable` names a value that is not a
-data variable; the input has multiple data vars and no `--variable` is given; or
-`--to-name` already names a different existing variable, coordinate, or
-dimension (renaming onto it would clash).
+output exists and is not a directory; `--variable` is not a data variable (a
+coordinate such as `latitude` or `time` is refused, not renamed); `--variable`
+is omitted and the input does not have exactly one data var; `--to-name` is
+empty or contains `/` (Zarr would store it as a nested group and the variable
+would vanish); or `--to-name` already names a different existing variable,
+coordinate, or dimension (renaming onto it would clash).
 
 ### Provenance
 
