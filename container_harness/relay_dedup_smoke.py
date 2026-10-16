@@ -17,6 +17,9 @@ Started by ``launch.py relay-smoke --client relay_dedup_smoke`` as the container
 Prints exactly one JSON object on stdout: the same key-absence (names only) and egress probes
 as ``relay_smoke.py`` (reused), the payload/encoding prediction, exactly one ``reviewer`` call
 through RelayRoles (no retries) with its redacted receipt, and the reviewer answer (synthetic).
+When the relay refuses the answer as invalid, ``answer_diagnostic`` carries the relay's
+bounded shape of it (stop_reason, content block types, output tokens, length, empty / fenced,
+first and last 300 characters) so the failure is diagnosable from the evidence.
 
 Data policy: the payload is synthetic generated text, Not Sensitive. The canary is a fresh
 random token per run, so a model cannot produce it without reading the shared block.
@@ -275,6 +278,21 @@ def key_absence():
     }
 
 
+def refused_fields(roles, exc):
+    """The container record of a refused call. ``answer_diagnostic`` is the relay's bounded
+    shape of an answer that did not validate (stop_reason, content block types, output tokens,
+    length, empty / fenced, head / tail of this synthetic answer); null for other refusals."""
+    refusal = getattr(roles, "last_refusal", None) or {}
+    return {
+        "outcome": "REFUSED",
+        "reason": str(exc),
+        "gate": exc.gate,
+        "relay_id": refusal.get("relay_id"),
+        "reason_code": refusal.get("reason_code"),
+        "answer_diagnostic": refusal.get("answer_diagnostic"),
+    }
+
+
 def main():
     out = {"schema": SCHEMA, "uid": os.getuid(), "payload_classification": "synthetic"}
     out.update(key_absence())
@@ -301,7 +319,7 @@ def main():
     except RelayOutcomeUnknown as exc:
         out.update(outcome="UNKNOWN", evidence=exc.evidence)
     except Refused as exc:
-        out.update(outcome="REFUSED", reason=str(exc), gate=exc.gate)
+        out.update(refused_fields(roles, exc))
     else:
         receipt = roles.receipts[-1]
         out.update(

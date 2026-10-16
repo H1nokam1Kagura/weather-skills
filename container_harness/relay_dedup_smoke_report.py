@@ -37,6 +37,18 @@ EXPECTED_MODEL = "claude-sonnet-4-6"
 REVIEWER_KEYS = {"verdict", "binding_hash", "findings"}
 REVIEWER_VERDICTS = {"APPROVE", "REJECT", "NEEDS-INFO"}
 TOKEN_KEYS = ("input_tokens", "output_tokens")
+EXCERPT_KEYS = ("head", "tail")  # kong_roles.ANSWER_EXCERPT_KEYS: never in the relay audit
+REFUSED_KEYS = (
+    "outcome",
+    "reason",
+    "reason_code",
+    "relay_id",
+    "answer_diagnostic",
+    "audit_usage",
+    "audit_stop_reason",
+    "audit_model_observed",
+    "audit_answer_shape",
+)
 
 
 def reviewer_schema_errors(answer, binding_hash):
@@ -76,6 +88,26 @@ def _ints(usage):
     return isinstance(usage, dict) and all(
         type(usage.get(k)) is int and usage[k] >= 0 for k in TOKEN_KEYS
     )
+
+
+def refused_answer(smoke, ask):
+    """Why the reviewer call was refused, from both sides: the container's view (reason, the
+    relay's bounded ``answer_diagnostic`` of this synthetic answer) and the relay audit's
+    non-content view (usage, stop_reason, ``answer_shape``). All null on SUCCESS."""
+    if smoke.get("outcome") == "SUCCESS":
+        return dict.fromkeys(REFUSED_KEYS)
+    diagnostic = smoke.get("answer_diagnostic")
+    return {
+        "outcome": smoke.get("outcome"),
+        "reason": smoke.get("reason"),
+        "reason_code": smoke.get("reason_code") or ask.get("reason_code"),
+        "relay_id": smoke.get("relay_id") or ask.get("relay_id"),
+        "answer_diagnostic": diagnostic if isinstance(diagnostic, dict) else None,
+        "audit_usage": ask.get("usage"),
+        "audit_stop_reason": ask.get("stop_reason"),
+        "audit_model_observed": ask.get("model_observed"),
+        "audit_answer_shape": ask.get("answer_shape"),
+    }
 
 
 def evaluate(out, relay):
@@ -267,6 +299,27 @@ def evaluate(out, relay):
     )
     leaked = sorted({k for a in audit for k in a if k in base.AUDIT_FORBIDDEN_KEYS})
     check("audit_redacted_fields_only", not leaked, leaked)
+    shape = ask.get("answer_shape")
+    check(
+        "audit_answer_shape_has_no_excerpt",
+        shape is None or (isinstance(shape, dict) and not set(shape) & set(EXCERPT_KEYS)),
+        sorted(shape) if isinstance(shape, dict) else shape,
+    )
+    refused = refused_answer(smoke, ask)
+    check(
+        "invalid_answer_diagnosable",
+        smoke.get("outcome") == "SUCCESS"
+        or (
+            refused["reason_code"] != "invalid_answer"
+            and smoke.get("outcome") in ("REFUSED", "UNKNOWN")
+        )
+        or (
+            isinstance(refused["answer_diagnostic"], dict)
+            and isinstance(refused["audit_answer_shape"], dict)
+            and _ints(refused["audit_usage"])
+        ),
+        {k: refused[k] for k in ("reason_code", "audit_usage", "audit_stop_reason")},
+    )
     check(
         "relay_stopped_itself",
         any(a.get("event") == "relay_stop" for a in audit),
@@ -305,6 +358,7 @@ def evaluate(out, relay):
         "payload_classification": "synthetic generated text, Not Sensitive",
         "live_call": measured,
         "answer": answer,
+        "refused_answer": refused,
         "canary_sha256": prediction.get("canary_sha256"),
         "prediction": prediction,
         "egress_probes": smoke.get("egress_probes"),
@@ -320,6 +374,27 @@ def markdown(result):
         "",
         f"live call: `{json.dumps(result['live_call'])}`",
         "",
+    ]
+    refused = result.get("refused_answer") or {}
+    if refused.get("outcome") is not None:
+        diagnostic = refused.get("answer_diagnostic") or {}
+        shape = {k: v for k, v in diagnostic.items() if k not in EXCERPT_KEYS}
+        lines += [
+            f"refused: `{refused.get('reason_code')}` ({refused.get('relay_id')}): "
+            f"{json.dumps(refused.get('reason'))}",
+            "",
+            f"relay audit: usage `{json.dumps(refused.get('audit_usage'))}`, stop_reason "
+            f"`{json.dumps(refused.get('audit_stop_reason'))}`, answer_shape "
+            f"`{json.dumps(refused.get('audit_answer_shape'))}`",
+            "",
+            f"answer diagnostic (synthetic, bounded): `{json.dumps(shape)}`",
+            "",
+        ]
+        for key in EXCERPT_KEYS:
+            if diagnostic.get(key) is not None:
+                # A four-backtick fence, so a ```json-fenced answer excerpt renders verbatim.
+                lines += [f"answer {key}:", "", "````text", diagnostic[key], "````", ""]
+    lines += [
         "| check | pass | observed |",
         "|---|---|---|",
     ]

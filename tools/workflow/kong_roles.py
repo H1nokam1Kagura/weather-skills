@@ -64,6 +64,10 @@ Settings the live relay sets (``relay/kong_relay_host.py``; the defaults here ar
 Outcome semantics (mirrors ``Roles``; UNKNOWN never becomes success):
 - ``Refused``: nothing was sent (unknown role, budget, policy, worker failed pre-send), or a
   response came back and is not a valid role answer (cost still reconciled when computable).
+  Such a refusal leaves ``last_call["answer_diagnostic"]`` (``answer_diagnostic``: stop_reason,
+  content block types, output tokens, text length, empty / fenced flags and a bounded head and
+  tail) plus the observed non-content metadata (``OBSERVED_KEYS``) for the relay to record; an
+  empty answer is named as such rather than as a JSON syntax error.
 - ``KongOutcomeUnknown``: a request may have reached the gateway and no valid answer was
   observed (HTTP error, timeout, crash, unparseable worker output). With the guard on the
   budget reservation is kept, because the call may have been billed.
@@ -193,7 +197,9 @@ try:
         out.update(ok=True, model=message.model, response_id=message.id,
                    stop_reason=message.stop_reason, usage=usage,
                    text=kong_client.text_of(message), via=info.get("via"),
-                   request_id=info.get("request_id"))
+                   request_id=info.get("request_id"),
+                   content_types=[str(getattr(b, "type", None))
+                                  for b in (getattr(message, "content", None) or [])][:16])
 except Exception as err:
     out["error_type"] = type(err).__name__
     try:
@@ -202,6 +208,55 @@ except Exception as err:
         out["error"] = {"message": "worker failed before a sanitizer was available"}
 print(json.dumps(out))
 """
+
+
+ANSWER_EXCERPT_CHARS = 300  # head / tail of a refused answer; synthetic content only
+ANSWER_EXCERPT_KEYS = ("head", "tail")  # content: never written to the relay audit
+MAX_CONTENT_TYPES = 16
+# Non-content response metadata kept on ``last_call`` once a message came back, so a refused
+# answer is still audited with what the gateway reported (the relay's invalid_answer line).
+OBSERVED_KEYS = ("model_observed", "stop_reason", "response_id", "request_id", "via", "latency_ms")
+
+
+def _short(value, limit=64):
+    """A model- or gateway-controlled label, bounded; None when not a string."""
+    return value[:limit] if isinstance(value, str) else None
+
+
+def answer_diagnostic(envelope):
+    """Bounded shape of a returned answer that did not validate, so an invalid answer is
+    diagnosable without the full text: stop_reason, content block types, output tokens, text
+    length, whether it is fenced or empty, and the first and last ``ANSWER_EXCERPT_CHARS``
+    characters (``head`` / ``tail``, the only content; ``answer_shape`` drops them)."""
+    text = envelope.get("text")
+    is_text = isinstance(text, str)
+    stripped = text.strip() if is_text else ""
+    types = envelope.get("content_types")
+    usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
+    tokens = usage.get("output_tokens")
+    limit = ANSWER_EXCERPT_CHARS
+    return {
+        "stop_reason": _short(envelope.get("stop_reason")),
+        "content_types": [_short(str(t)) for t in types[:MAX_CONTENT_TYPES]]
+        if isinstance(types, list)
+        else None,
+        "output_tokens": tokens if type(tokens) is int and tokens >= 0 else None,
+        "text_is_string": is_text,
+        "text_chars": len(text) if is_text else None,
+        "stripped_chars": len(stripped),
+        "empty": not stripped,
+        "fenced": stripped.startswith("```"),
+        "starts_with_brace": stripped.startswith("{"),
+        "head": text[:limit] if is_text else None,
+        "tail": text[-limit:] if is_text and len(text) > limit else None,
+    }
+
+
+def answer_shape(diagnostic):
+    """``answer_diagnostic`` without its content excerpts: safe for the redacted audit."""
+    if not isinstance(diagnostic, dict):
+        return None
+    return {k: v for k, v in diagnostic.items() if k not in ANSWER_EXCERPT_KEYS}
 
 
 class KongOutcomeUnknown(RuntimeError):
@@ -482,7 +537,15 @@ class KongRoles:
         else:
             cost, cost_basis = None, "untracked"
         self.last_call.update(
-            sent=True, usage=usage, cost_usd=cost, response_id=envelope.get("response_id")
+            sent=True,
+            usage=usage,
+            cost_usd=cost,
+            model_observed=_short(observed, 128),
+            stop_reason=_short(envelope.get("stop_reason")),
+            response_id=_short(envelope.get("response_id"), 128),
+            request_id=_short(envelope.get("request_id"), 128),
+            via=_short(envelope.get("via"), 128),
+            latency_ms=envelope.get("latency_ms") if _finite(envelope.get("latency_ms")) else None,
         )
         try:
             if self.spent > self.budget:
@@ -496,8 +559,19 @@ class KongRoles:
                     raise ValueError("response carries no response id for the session")
             if session in self.sessions:
                 raise ValueError("repeated independent session identity")
-            value, output_form = parse_role_object(envelope.get("text"))
+            text = envelope.get("text")
+            if isinstance(text, str) and not text.strip():
+                # Name the empty answer instead of letting json.loads report "Expecting value".
+                diagnostic = answer_diagnostic(envelope)
+                raise ValueError(
+                    f"empty answer (stop_reason {diagnostic['stop_reason']!r}, content "
+                    f"{diagnostic['content_types']!r}, output_tokens "
+                    f"{diagnostic['output_tokens']!r})"
+                )
+            value, output_form = parse_role_object(text)
         except (ValueError, TypeError) as exc:
+            # Bounded and synthetic-only; the relay audits answer_shape() of it, never the text.
+            self.last_call["answer_diagnostic"] = answer_diagnostic(envelope)
             raise Refused(f"invalid {role} Kong response: {exc}") from exc
         self.sessions.add(session)
         self.receipts.append(

@@ -132,8 +132,9 @@ def test_production_client_sends_it_dedup_encoded(monkeypatch):
 class Worker:
     """Fake kit worker: answers like a model that resolved the reference (or not)."""
 
-    def __init__(self, quote=True):
+    def __init__(self, quote=True, override=None):
         self.quote = quote
+        self.override = override or {}  # envelope fields of an invalid answer
         self.calls = []
 
     def run(self, argv, cwd, env, stdin):
@@ -161,16 +162,18 @@ class Worker:
             "mock": False,  # recorded as a live receipt so the report's live checks apply
             "sent_settings": SENT_SETTINGS,
             "sent_keys": ["extra_body", "max_tokens", "messages", "model", "system"],
+            "content_types": ["text"],
         }
+        envelope.update(self.override)
         return {"exit_code": 0, "stdout": json.dumps(envelope), "stderr": ""}
 
 
-def record_offline_run(tmp_path, quote=True):
+def record_offline_run(tmp_path, quote=True, override=None):
     """Drive the real client -> relay -> KongRoles path offline and write the evidence files
     the workflow would (launch.json, the container JSON, key-scan.json, net.json, audit)."""
     python = tmp_path / "python.exe"
     python.write_text("")
-    worker = Worker(quote)
+    worker = Worker(quote, override)
     roles = KongRoles(
         worker,
         tmp_path / "ctx",
@@ -194,12 +197,15 @@ def record_offline_run(tmp_path, quote=True):
         prediction = smoke.predict(payload, CANARY)
         system, user = prediction.pop("_system"), prediction.pop("_user")
         health = client.health()
-        value = client.ask("reviewer", payload)
+        try:
+            value, refused = client.ask("reviewer", payload), None
+        except Refused as exc:
+            value, refused = None, smoke.refused_fields(client, exc)
     finally:
         server.shutdown()
         server.server_close()
     audit.write("relay_stop", run_id=RUN, reason="max_requests reached")
-    receipt = client.receipts[-1]
+    receipt = client.receipts[-1] if client.receipts else {}
     (call,) = worker.calls
     assert call["user"] == user and call["system"] == system  # prediction is exact
     probes = [
@@ -229,6 +235,10 @@ def record_offline_run(tmp_path, quote=True):
         "gateway_body_bytes": smoke.gateway_body_bytes(system, user, receipt.get("settings_sent")),
         "gateway_body_basis": "reconstructed",
     }
+    if refused is not None:  # what relay_dedup_smoke.main records for a refused call
+        for key in ("answer", "receipt", "gateway_body_bytes", "gateway_body_basis"):
+            container.pop(key)
+        container.update(refused)
     launch_rec = {
         "client": "relay_dedup_smoke",
         "run_conditions": {"never_privileged": True, "relay_only_network": True},
@@ -276,8 +286,82 @@ def test_report_passes_on_recorded_evidence(recorded):
     assert call["tokens"] == {"input_tokens": 17_000, "output_tokens": 90}
     assert call["estimated_usd"] == pytest.approx((17_000 * 3 + 90 * 15) / 1e6)
     assert call["temperature_sent"] == 0
+    assert set(result["refused_answer"].values()) == {None}  # nothing refused
     # the audit never holds the content or the canary
     assert CANARY not in (relay_dir / "relay-audit.jsonl").read_text()
+
+
+EMPTY_ANSWER = {  # the shape smoke 1 (run 38855128796) is consistent with: 0 output tokens
+    "text": "",
+    "stop_reason": "refusal",
+    "content_types": [],
+    "usage": {"input_tokens": 12_433, "output_tokens": 0},
+}
+
+
+def test_empty_answer_is_named_and_diagnosable(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    out, relay_dir = record_offline_run(tmp_path, override=EMPTY_ANSWER)
+    assert report.main(["x", str(out), str(relay_dir)]) == 1
+    result = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())
+    refused = result["refused_answer"]
+    assert refused["outcome"] == "REFUSED" and refused["reason_code"] == "invalid_answer"
+    assert "empty answer (stop_reason 'refusal', content [], output_tokens 0)" in refused["reason"]
+    diagnostic = refused["answer_diagnostic"]
+    assert diagnostic["empty"] is True and diagnostic["stop_reason"] == "refusal"
+    assert diagnostic["output_tokens"] == 0 and diagnostic["content_types"] == []
+    assert diagnostic["head"] == "" and diagnostic["tail"] is None
+    # the relay audit now records the observed usage on the invalid-answer line (not a gap)
+    assert refused["audit_usage"] == EMPTY_ANSWER["usage"]
+    assert refused["audit_stop_reason"] == "refusal"
+    assert refused["audit_model_observed"] == "claude-sonnet-4-6"
+    assert "head" not in refused["audit_answer_shape"]
+    checks = result["checks"]
+    for name in ("invalid_answer_diagnosable", "audit_answer_shape_has_no_excerpt"):
+        assert checks[name]["passed"] is True, name
+    assert checks["audit_redacted_fields_only"]["passed"] is True
+    assert checks["role_call_success"]["passed"] is False  # diagnosable is not a pass
+    md = (out / "RELAY-DEDUP-SMOKE.md").read_text()
+    assert "refused: `invalid_answer`" in md and '"stop_reason": "refusal"' in md
+
+
+def test_prose_answer_excerpt_reaches_the_report_never_the_audit(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    opening = "PROSE-OPENING I reviewed the synthetic plan carefully."
+    text = opening + " " + "detail " * 200 + "PROSE-CLOSING"
+    override = {"text": text, "usage": {"input_tokens": 12_433, "output_tokens": 300}}
+    out, relay_dir = record_offline_run(tmp_path, override=override)
+    assert report.main(["x", str(out), str(relay_dir)]) == 1
+    result = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())
+    diagnostic = result["refused_answer"]["answer_diagnostic"]
+    assert diagnostic["head"].startswith(opening) and len(diagnostic["head"]) == 300
+    assert diagnostic["tail"].endswith("PROSE-CLOSING") and len(diagnostic["tail"]) == 300
+    assert diagnostic["text_chars"] == len(text) and diagnostic["fenced"] is False
+    assert "Expecting value" in result["refused_answer"]["reason"]
+    audit = (relay_dir / "relay-audit.jsonl").read_text()
+    assert "PROSE-OPENING" not in audit and "PROSE-CLOSING" not in audit
+    (ask,) = [json.loads(x) for x in audit.splitlines() if '"event": "ask"' in x]
+    assert ask["usage"] == override["usage"] and ask["answer_shape"]["text_chars"] == len(text)
+    assert ask["cost_usd"] == pytest.approx((12_433 * 3 + 300 * 15) / 1e6)
+    md = (out / "RELAY-DEDUP-SMOKE.md").read_text()
+    assert "answer head:" in md and "PROSE-OPENING" in md and "PROSE-CLOSING" in md
+
+
+@pytest.mark.parametrize(
+    "check, change",
+    [
+        ("audit_answer_shape_has_no_excerpt", lambda a: a["answer_shape"].update(head="x")),
+        ("invalid_answer_diagnosable", lambda a: a.pop("usage")),
+        ("invalid_answer_diagnosable", lambda a: a.pop("answer_shape")),
+    ],
+)
+def test_invalid_answer_evidence_fails_closed(tmp_path, monkeypatch, check, change):
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    out, relay_dir = record_offline_run(tmp_path, override=EMPTY_ANSWER)
+    edit_audit(relay_dir, change)
+    report.main(["x", str(out), str(relay_dir)])
+    checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
+    assert checks[check]["passed"] is False
 
 
 def test_report_fails_when_the_answer_misses_the_canary(tmp_path, monkeypatch):

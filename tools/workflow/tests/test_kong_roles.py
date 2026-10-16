@@ -8,6 +8,7 @@ import pytest
 from tools.workflow.agents import PROMPTS, role_prompt
 from tools.workflow.contracts import Refused, digest
 from tools.workflow.kong_roles import (
+    ANSWER_EXCERPT_CHARS,
     COST_BASIS,
     KIT_PYTHON,
     KIT_ROOT,
@@ -16,6 +17,8 @@ from tools.workflow.kong_roles import (
     WORKER_SOURCE,
     KongOutcomeUnknown,
     KongRoles,
+    answer_diagnostic,
+    answer_shape,
 )
 from tools.workflow.processes import Processes
 from tools.workflow.review_evidence import text_hash
@@ -216,6 +219,69 @@ def test_invalid_answers_cannot_be_receipts(tmp_path, changes):
     with pytest.raises(Refused):
         agent.ask("verifier", {})
     assert agent.receipts == []
+
+
+def test_empty_answer_is_named_and_its_usage_is_recorded(tmp_path):
+    usage = {"input_tokens": 12_433, "output_tokens": 0}
+    changes = {"text": "", "stop_reason": "refusal", "content_types": [], "usage": usage}
+    agent = roles(tmp_path, Process(envelope(**changes)))
+    with pytest.raises(Refused, match=r"invalid verifier Kong response: empty answer") as caught:
+        agent.ask("verifier", {})
+    assert "stop_reason 'refusal'" in str(caught.value) and "output_tokens 0" in str(caught.value)
+    last = agent.last_call
+    # output_tokens 0 is what the gateway reported, recorded as observed, priced input-only
+    assert last["usage"] == usage and last["cost_usd"] == pytest.approx(12_433 * 3 / 1e6)
+    assert last["model_observed"] == "claude-sonnet-4-6" and last["stop_reason"] == "refusal"
+    assert last["request_id"] == "req-fake" and last["response_id"] == "msg_fake"
+    diagnostic = last["answer_diagnostic"]
+    assert diagnostic["empty"] is True and diagnostic["text_chars"] == 0
+    assert diagnostic["content_types"] == [] and diagnostic["output_tokens"] == 0
+
+
+def test_answer_diagnostic_is_bounded_and_shape_drops_the_excerpt():
+    text = "  ```python\n" + "a" * 1000 + "\n```  "
+    diagnostic = answer_diagnostic(
+        {
+            "text": text,
+            "stop_reason": "end_turn" + "x" * 200,
+            "content_types": ["thinking", "text", *["text"] * 40],
+            "usage": {"output_tokens": 300},
+        }
+    )
+    assert diagnostic["fenced"] is True and diagnostic["empty"] is False
+    assert diagnostic["starts_with_brace"] is False and diagnostic["text_chars"] == len(text)
+    assert len(diagnostic["head"]) == len(diagnostic["tail"]) == ANSWER_EXCERPT_CHARS
+    assert diagnostic["head"] == text[:300] and diagnostic["tail"] == text[-300:]
+    assert len(diagnostic["stop_reason"]) == 64 and len(diagnostic["content_types"]) == 16
+    assert diagnostic["content_types"][:2] == ["thinking", "text"]
+    shape = answer_shape(diagnostic)
+    assert "head" not in shape and "tail" not in shape and shape["text_chars"] == len(text)
+    short = answer_diagnostic({"text": "{}"})
+    assert short["head"] == "{}" and short["tail"] is None and short["content_types"] is None
+    missing = answer_diagnostic({"text": None})
+    assert missing["text_is_string"] is False and missing["head"] is None
+    assert answer_shape(None) is None
+
+
+@pytest.mark.parametrize(
+    "text, form",
+    [
+        ('```json\n{"verdict": "PASS"}\n```', "json_fence"),
+        ('\n\n  {"verdict": "PASS"}  \n', "bare"),
+    ],
+)
+def test_single_json_fence_and_surrounding_whitespace_are_accepted(tmp_path, text, form):
+    # The shared output rule (agents.parse_role_object) already tolerates both; the live
+    # reviewer failure was not a fence (that would not fail at char 0 with 0 output tokens).
+    agent = roles(tmp_path, Process(envelope(text=text)))
+    assert agent.ask("verifier", {}) == {"verdict": "PASS"}
+    assert agent.receipts[0]["output_form"] == form
+    assert "answer_diagnostic" not in agent.last_call
+
+
+def test_worker_records_content_block_types():
+    assert "content_types=" in WORKER_SOURCE and "[:16]" in WORKER_SOURCE
+    compile(WORKER_SOURCE, "<worker>", "exec")
 
 
 def test_policy_ack_prices_and_prompt_variants_are_enforced(tmp_path):

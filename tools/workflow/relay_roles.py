@@ -419,6 +419,10 @@ class RelayRoles:
         self.receipts = []
         self.sessions = set()
         self.unknown_outcomes = []
+        # The latest definite relay refusal of an ask ({relay_id, reason_code,
+        # answer_diagnostic}); answer_diagnostic is the relay's bounded shape of an answer that
+        # did not validate (kong_roles.answer_diagnostic), else None. Diagnostic only.
+        self.last_refusal = None
 
     @classmethod
     def from_env(cls, environ=None, **kwargs):
@@ -478,6 +482,7 @@ class RelayRoles:
             raise Refused("role must be a non-empty string", gate=gate)
         if self.budget - self.spent < 0.05:
             raise Refused("aggregate model budget exhausted", gate="budget")
+        self.last_refusal = None
         try:
             input_hash = digest(payload)
             encoded = dedup_encode(payload)
@@ -567,6 +572,12 @@ class RelayRoles:
                 self.spent = spent_before + billed
             reason = envelope.get("reason")
             reason = reason if isinstance(reason, str) else "no reason given"
+            diagnostic = envelope.get("answer_diagnostic")
+            self.last_refusal = {
+                "relay_id": relay_id,
+                "reason_code": envelope.get("reason_code"),
+                "answer_diagnostic": diagnostic if isinstance(diagnostic, dict) else None,
+            }
             if envelope.get("reason_code") == SPEND_CAP_CODE:
                 # The relay's spend guard refused before forwarding: the run is out of budget.
                 raise Refused(f"{role} relay spend cap ({relay_id}): {reason}", gate="budget")

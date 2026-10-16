@@ -394,6 +394,45 @@ def test_priced_invalid_answer_reports_the_billed_amount(tmp_path, relay_host):
     assert agent.spent == pytest.approx((1000 * 3 + 100 * 15) / 1e6)
 
 
+def test_invalid_answer_audits_usage_and_shape_and_returns_the_bounded_diagnostic(
+    tmp_path, relay_host
+):
+    usage = {"input_tokens": 12_433, "output_tokens": 0}
+    url, _, _ = relay_host(
+        envelope(text="", stop_reason="refusal", content_types=[], usage=usage),
+        envelope(),
+    )
+    agent = client(url)
+    with pytest.raises(Refused, match="invalid verifier Kong response: empty answer"):
+        agent.ask("verifier", PAYLOAD)
+    refusal = agent.last_refusal
+    assert refusal["reason_code"] == "invalid_answer" and refusal["relay_id"]
+    diagnostic = refusal["answer_diagnostic"]
+    assert diagnostic["empty"] is True and diagnostic["stop_reason"] == "refusal"
+    assert diagnostic["output_tokens"] == 0 and diagnostic["head"] == ""
+    (ask,) = [x for x in audit_lines(tmp_path) if x["event"] == "ask"]
+    # The usage the gateway reported is on the line itself (relay_usage reads it from here),
+    # with the non-content metadata; the answer's shape is audited, its text never is.
+    assert ask["usage"] == usage and ask["stop_reason"] == "refusal"
+    assert ask["model_observed"] == "claude-sonnet-4-6" and ask["request_id"] == "req-fake"
+    assert ask["cost_usd"] == pytest.approx(12_433 * 3 / 1e6) == ask["billed_usd"]
+    assert ask["answer_shape"]["empty"] is True and ask["answer_shape"]["content_types"] == []
+    assert not {"head", "tail"} & set(ask["answer_shape"])
+    assert ask["spend"]["output_tokens"] == 0 and ask["spend"]["input_tokens"] == 12_433
+    # a later successful ask clears the refusal record
+    assert agent.ask("verifier", PAYLOAD) == ANSWER and agent.last_refusal is None
+
+
+def test_refusals_other_than_invalid_answers_carry_no_diagnostic(tmp_path, relay_host):
+    url, _, _ = relay_host({"sent": False, "error_type": "TypeError", "error": {}})
+    agent = client(url)
+    with pytest.raises(Refused, match="before sending"):
+        agent.ask("verifier", PAYLOAD)
+    assert agent.last_refusal["answer_diagnostic"] is None
+    (ask,) = [x for x in audit_lines(tmp_path) if x["event"] == "ask"]
+    assert "answer_shape" not in ask and "usage" not in ask
+
+
 def test_one_request_in_flight_per_run(tmp_path, relay_host):
     url, relay, process = relay_host(envelope(), delay=0.5)
     first, second = client(url), client(url)
