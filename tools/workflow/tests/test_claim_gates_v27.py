@@ -968,9 +968,7 @@ def restatement_claims(payload, variable="precip", missing_policy="preserve_nan"
     ]
 
 
-def test_plan_and_goal_restatements_pass_gate_one_without_a_checker_verdict(
-    tmp_path, monkeypatch
-):
+def test_plan_and_goal_restatements_pass_gate_one_without_a_checker_verdict(tmp_path, monkeypatch):
     def planner(payload, n):
         value = default_planner(payload, n)
         value["claims"] += restatement_claims(payload)
@@ -1071,9 +1069,7 @@ def test_frozen_dev_only_computes_facts_resolve_as_before():
 
     walk(data)
     assert found == {"last_eligible_onset_date", "excluded_input_days"}
-    new_names = set(claim_gates.derivable_facts(*controller_state())) - {
-        "last_eligible_onset_date"
-    }
+    new_names = set(claim_gates.derivable_facts(*controller_state())) - {"last_eligible_onset_date"}
     assert found & new_names == set()
 
 
