@@ -11,7 +11,7 @@ from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.standard_dataset import names_for
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
-_SKILL_VERSION = "0.0.3"
+_SKILL_VERSION = "0.0.4"
 
 
 def _coerce(values):
@@ -95,6 +95,14 @@ def concat(ds, dim, coords, **kwargs):
             "put them on one calendar first with convert-calendar"
         )
 
+    # Single-value labels, such as the time or step that select keeps.
+    # If only some inputs have one (say valid_time), xr.concat would copy the
+    # first input's value onto every input: a wrong date. Drop those labels.
+    single_labels = [{c for c in item.coords if item[c].ndim == 0} for item in dss]
+    on_every_input = set.intersection(*single_labels)
+    on_some_inputs = set.union(*single_labels) - on_every_input
+    dss = [item.drop_vars(on_some_inputs & set(item.coords)) for item in dss]
+
     if not all(has_dim):
         if coords:
             vals = _coerce([c.strip() for c in coords.split(",")])
@@ -106,8 +114,10 @@ def concat(ds, dim, coords, **kwargs):
 
     # join="exact": every other coordinate must match. The outer join pads a
     # mismatch with NaN instead, which looks like missing data.
+    # coords="different": a single-value label that differs between inputs
+    # (ECMWF step 7 days, GEFS step 14 days) becomes a label along dim.
     try:
-        out = xr.concat(dss, dim=dim, join="exact")
+        out = xr.concat(dss, dim=dim, join="exact", coords="different")
     except pint.DimensionalityError as exc:
         raise UsageError(f"inputs carry incompatible units: {exc}") from None
     except xr.AlignmentError as exc:

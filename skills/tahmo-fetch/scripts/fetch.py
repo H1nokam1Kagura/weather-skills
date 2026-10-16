@@ -29,7 +29,7 @@ from weather_skills_core.standard_utils import is_transient, require_env
 from weather_skills_core.units import stamp_data_interval
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
-_SKILL_VERSION = "0.0.3"
+_SKILL_VERSION = "0.0.4"
 
 DEFAULT_WORKERS = 8
 _TAHMO_PREFIX = "TA"
@@ -401,6 +401,16 @@ def fetch(start_time, end_time, workers, bbox, station, list_stations, probe_lat
         Conventions="CF-1.13",
         weather_skills_source="tahmo",
     )
+    # A station is complete when it reported every requested day; multi-day
+    # totals are only meaningful for those (missing days are never filled).
+    n_days = (end_time - start_time).days + 1
+    for name in sorted(ds.data_vars):
+        complete = int((ds[name].notnull().sum("time") == n_days).sum())
+        print(
+            f"{name}: {complete} of {ds.sizes['station_id']} stations complete "
+            f"(all {n_days} days {start} → {end})",
+            file=sys.stderr,
+        )
     return stamp_data_interval(ds, period="1 day")
 
 

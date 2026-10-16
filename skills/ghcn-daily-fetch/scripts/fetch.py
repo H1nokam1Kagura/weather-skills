@@ -27,7 +27,7 @@ from weather_skills_core.standard_utils import apply_write_encoding, is_transien
 from weather_skills_core.units import precip_amounts_to_rates, stamp_data_interval
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
-_SKILL_VERSION = "0.0.3"
+_SKILL_VERSION = "0.0.4"
 
 # NCEI's own HTTPS tree, not the noaa-ghcn-pds S3 mirror: the mirror's by_station
 # files for some first-order stations (e.g. USW00094728, NYC Central Park) stopped
@@ -333,6 +333,15 @@ def fetch(start_time, end_time, bbox, workers, variable, probe_latest, **kwargs)
             "the output.",
             file=sys.stderr,
         )
+
+    counts = ", ".join(
+        f"{v} {int(ds[v].notnull().sum())} of {ds[v].size}" for v in sorted(ds.data_vars)
+    )
+    print(
+        f"Kept {ds.sizes['station_id']} of {candidate_count} candidate stations; "
+        f"finite station-days: {counts}",
+        file=sys.stderr,
+    )
 
     stamp_cf_dsg(
         ds,

@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires Python 3.12 and uv.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/coarsen.py *)
 metadata:
-  version: "0.0.3"
+  version: "0.0.4"
   catalog-group: transforms
 ---
 
@@ -26,7 +26,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/coarsen.py -i IN.zarr -o OUT.zarr (--referenc
 - `--target-resolution` — target spacing in degrees. Needs `--offset`.
 - `--offset` — target points fall at `offset + k * resolution` on both axes. Needs `--target-resolution`.
 - `--method` — `linear` reads the input at each target point; `conservative` averages every input cell inside each target cell, weighted by overlap area and cos(latitude). Default: `linear`.
-- `--min-fraction` — `conservative` only: the least share of a target cell's area that must hold finite input data, in (0, 1]. Default: 1.0, so any missing input cell, or any part of the cell past the input's edge, makes the target cell NaN.
+- `--min-fraction` — `conservative` only: the least share of a target cell's area that must hold finite input data, in (0, 1]. Default: 1.0, so any missing input cell, or any part of the cell past the input's edge, makes the target cell NaN. stderr reports how many target cells hang past the input's edge; to keep them, fetch the input half a target cell wider on each side (e.g. 0.75° for a 1.5° grid) or lower `--min-fraction`.
 - `--variable`, `-v` — regrid only this data variable. Default: all.
 
 Pass `--reference-grid`, or `--target-resolution` with `--offset`.

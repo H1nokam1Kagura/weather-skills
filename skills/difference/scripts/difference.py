@@ -11,7 +11,7 @@ from weather_skills_core.standard_utils import ensure_normalized_longitude
 from weather_skills_core.units import AGGREGATION_PERIOD_ATTR, looks_like_precip_total, ureg
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
-_SKILL_VERSION = "0.0.3"
+_SKILL_VERSION = "0.0.4"
 
 _WIDEN = {1: "int16", 2: "int32", 4: "int64"}
 
@@ -38,7 +38,8 @@ def difference(ds, variable, **kwargs):
     if not vars_:
         raise UsageError(
             f"inputs share no data variable (A: {list(ds_a.data_vars)}, "
-            f"B: {list(ds_b.data_vars)}); rename one first"
+            f"B: {list(ds_b.data_vars)}); rename one to match first with edit-coords "
+            "--rename OLD=NEW (e.g. precipitation_surface=precip)"
         )
     for v in vars_:
         if v not in shared:
@@ -106,6 +107,13 @@ def difference(ds, variable, **kwargs):
         # Replace, not merge: B's attrs (a baseline's aggregation_period or
         # cell_methods) must not leak onto A's field.
         diff.attrs = dict(ds_a[v].attrs)
+        # Say what the field is now, so a colorbar does not read as the raw
+        # quantity. Always "difference": A - B is all this skill knows; calling
+        # it an anomaly is the caller's reading, set in the plot spec.
+        # standard_name stays so downstream skills still classify the variable.
+        long_name = str(diff.attrs.get("long_name") or v)
+        if "difference" not in long_name.lower():
+            diff.attrs["long_name"] = f"{long_name} difference"
         out[v] = diff
     return xr.Dataset(out)
 

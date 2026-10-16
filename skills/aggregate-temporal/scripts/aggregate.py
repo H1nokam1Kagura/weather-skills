@@ -27,7 +27,7 @@ from weather_skills_core.units import (
 )
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
-_SKILL_VERSION = "0.0.3"
+_SKILL_VERSION = "0.0.4"
 
 # Named --period → the aggregation_period string stamped for that window.
 PERIOD_TO_AGGREGATION = {
@@ -662,7 +662,16 @@ def aggregate(
                     f"--window counts rows and {dim!r} has missing rows (spacing other "
                     f"than {interval}); use --period, which counts them against coverage"
                 )
-        out = roll_and_agg(ds, window, dim, method, align=align, stride=stride_val)
+        try:
+            out = roll_and_agg(ds, window, dim, method, align=align, stride=stride_val)
+        except KeyError:
+            # A calendar stride (month, Monday) picks dates; on a weekly or
+            # monthly axis most of them are not labels, so there is nothing to pick.
+            raise UsageError(
+                f"--stride {stride} picks dates that are not on the {dim!r} axis "
+                f"(spacing {interval}); use an integer --stride (e.g. 4 for every "
+                "4th window), or --period for calendar bins"
+            ) from None
         n = out.sizes.get(dim, 0)
         if n:
             import numpy as np
