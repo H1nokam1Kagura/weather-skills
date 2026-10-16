@@ -40,7 +40,12 @@ from tools.workflow.contracts import (  # noqa: E402
     validate_goal,
     validate_plan,
 )
-from tools.workflow.role_schemas import answer_schema, answer_tool, schema_errors  # noqa: E402
+from tools.workflow.role_schemas import (  # noqa: E402
+    FROZEN_ONLY,
+    answer_schema,
+    answer_tool,
+    schema_errors,
+)
 
 CASES = "casesets/cached-onset-e2e-v2_7/frozen/agentic-e2e-injections.DEV-ONLY.json"
 # The frozen reference goal (profile cached-onset/v1), as tests/test_evidence_projection_v27.
@@ -260,6 +265,18 @@ def test_reviewer_schema_accepts_every_frozen_reviewer_answer(frozen):
     answers = [*role_outputs(frozen, "reviewer"), *(p for _, p in replacements(frozen, "reviewer"))]
     accepted = check("reviewer", EVIDENCE, answers, lambda a: reviewer_accepts(a, EVIDENCE))
     assert accepted >= 2000  # 2,048 probe-bundle outputs + 14 replacements (most accepted)
+
+
+def test_reviewer_evidence_schema_warns_off_the_frozen_only_keys():
+    """Run 38906458002: offered the union, the live model mixed the shapes (legacy + reason),
+    which the controller refuses. The frozen-only keys stay accepted but each says not to use."""
+    mixed = {"verdict": "APPROVE", "binding_hash": "b", "findings": [], "reason": "r"}
+    assert not reviewer_accepts(mixed, EVIDENCE)
+    properties = answer_schema("reviewer", EVIDENCE)["properties"]
+    frozen_only = set(properties) - {"verdict", "binding_hash", "findings"}
+    assert frozen_only == {"approved_binding", "reason", "verification_waiver"}
+    for key in frozen_only:
+        assert properties[key]["description"] == FROZEN_ONLY, key
 
 
 def test_reviewer_legacy_schema_is_the_exact_legacy_shape():

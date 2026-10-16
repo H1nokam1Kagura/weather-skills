@@ -83,6 +83,10 @@ FINDING = {
     ]
 }
 FINDINGS = {"type": "array", "items": FINDING}
+FROZEN_ONLY = (
+    "Do not use. Only for the native frozen reviewer shape, which has no binding_hash; your "
+    "answer is exactly verdict, binding_hash and findings, and adding this key makes it invalid."
+)
 NEEDS_INFO = {"type": "string", "description": "your question, only when no answer is possible"}
 
 
@@ -94,10 +98,17 @@ def _reviewer(payload):
     }
     if "review_evidence" not in payload:
         return _object(legacy, sorted(legacy), closed=True)
+    # The frozen UC-03 keys stay accepted (never stricter than the controller), but the live
+    # prompt asks for exactly the legacy three, and the controller refuses a MIX of the two
+    # shapes. Run 38906458002: the model added "reason" beside binding_hash because the schema
+    # offered it. Each frozen-only key therefore says so; no top-level anyOf (API limit).
     frozen = {
-        "approved_binding": _object({"plan_hash": STRING, "source_hash": STRING}),
-        "reason": STRING,
-        "verification_waiver": OBJECT,
+        "approved_binding": {
+            **_object({"plan_hash": STRING, "source_hash": STRING}),
+            "description": FROZEN_ONLY,
+        },
+        "reason": {**STRING, "description": FROZEN_ONLY},
+        "verification_waiver": {**OBJECT, "description": FROZEN_ONLY},
     }
     return _object({**legacy, **frozen}, ["verdict"], closed=True)
 
