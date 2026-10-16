@@ -6,8 +6,7 @@ from pathlib import Path
 # Focused skill runs do not collect tests/conftest.py. Expose the same helpers
 # here so their longstanding `from conftest import ...` imports work regardless
 # of collection order, while retaining the controller's frozen-fixture hook.
-_helpers = runpy.run_path(str(Path(__file__).parent / "tests" / "conftest.py"))
-for _name in (
+_HELPER_NAMES = (
     "REPO_ROOT",
     "SKILLS_ROOT",
     "TINY_PNG",
@@ -17,8 +16,17 @@ for _name in (
     "make_forecast",
     "make_point_obs",
     "write_zarr",
-):
-    globals()[_name] = _helpers[_name]
+)
+
+
+def __getattr__(name):
+    # Slim container-harness CI intentionally does not install the scientific
+    # stack. Import it only when a skill test requests one of these helpers.
+    if name not in _HELPER_NAMES:
+        raise AttributeError(name)
+    helpers = runpy.run_path(str(Path(__file__).parent / "tests" / "conftest.py"))
+    globals().update({key: helpers[key] for key in _HELPER_NAMES})
+    return globals()[name]
 
 
 def pytest_configure(config):
