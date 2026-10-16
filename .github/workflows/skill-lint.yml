@@ -35,7 +35,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-          CORE: git+https://github.com/rhiza-research/weather-skills-core@main
+          CORE: weather-skills-core>=0.1.1
         run: |
           set -euo pipefail
           marker='<!-- skill-lint-advisory -->'
@@ -52,9 +52,9 @@ jobs:
           fi
           printf 'Changed skills:\n'; printf '  %s\n' "${changed[@]}"
 
-          # Lint the whole tree once so the cross-skill rules (WSK201/WSK202) have
-          # the full corpus. Advisory: no --strict, so a clean run exits 0. If the
-          # linter itself cannot run, pass the job without commenting.
+          # Lint the tree once, then keep findings for the changed skills.
+          # Advisory: no --strict, so a clean run exits 0. If the linter itself
+          # cannot run, pass the job without commenting.
           if ! uvx --from "$CORE" weather-skills-core lint skills/ --format json > report.json; then
             echo "Linter did not complete; advisory step passing without a comment."
             exit 0
