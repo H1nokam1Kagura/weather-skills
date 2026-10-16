@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -148,15 +149,23 @@ def client(url, **kwargs):
 # ------------------------------------------------------------------ caps refuse before send
 
 
-def test_token_cap_refuses_before_forwarding_and_maps_to_budget(tmp_path, served):
+def test_token_cap_refuses_before_forwarding_and_maps_to_budget(tmp_path, served, monkeypatch):
     process = Process(envelope())
     relay = make_relay(tmp_path, process, max_total_tokens=500)  # below any verifier call
+    order = []
+    send = host.Handler._send
+    monkeypatch.setattr(host.Handler, "_send", lambda h, *a: (send(h, *a), order.append("sent")))
+    responded = relay.responded
+    monkeypatch.setattr(relay, "responded", lambda: (order.append("responded"), responded()))
     agent = client(served(relay))
     with pytest.raises(Refused, match="relay spend cap") as caught:
         agent.ask("verifier", PAYLOAD)
     assert caught.value.gate == "budget" and agent.spent == 0  # nothing forwarded: released
     assert process.calls == [] and relay.guard.state == "EXHAUSTED"
-    assert relay.asks_done.is_set()  # the relay stops after writing the refusal
+    # The stop is signalled on the handler thread only AFTER the refusal was written, so the
+    # client can hold the full refusal before the signal exists: wait for it, never poll once.
+    assert relay.asks_done.wait(5)
+    assert order == ["sent", "responded"]  # the refusal is on the wire before the stop
     lines = audit_lines(tmp_path)
     (cap,) = [x for x in lines if x["event"] == "spend_cap_reached"]
     assert cap["kind"] == "spend_cap_reached" and cap["cap"] == "max_total_tokens"
@@ -184,6 +193,97 @@ def test_request_and_budget_caps_refuse_before_forwarding(tmp_path):
     status, body = ask(relay, payload=big)
     assert body["reason_code"] == "relay_spend_cap" and poor.calls == []
     assert relay.guard.exhausted_by == "budget"
+
+
+def test_a_call_after_the_request_cap_is_a_spend_cap_refusal_and_a_guard_abort(tmp_path, served):
+    process = Process(envelope(), envelope(), envelope())
+    relay = make_relay(tmp_path, process, max_requests=2)
+    agent = client(served(relay))
+    assert agent.ask("verifier", PAYLOAD) == ANSWER
+    assert agent.ask("verifier", PAYLOAD) == ANSWER
+    # The cap is full but not exceeded: the relay still serves, so the next call is answered.
+    assert relay.guard.state == "OPEN" and not relay.asks_done.is_set()
+    spent = agent.spent
+    with pytest.raises(Refused, match="relay spend cap") as caught:
+        agent.ask("verifier", PAYLOAD)  # never "unreachable before sending" (gate=verifier)
+    assert caught.value.gate == "budget" and agent.spent == spent  # nothing forwarded
+    assert len(process.calls) == 2 and relay.guard.exhausted_by == "max_requests"
+    assert relay.asks_done.wait(5)  # EXHAUSTED: the relay stops after writing that refusal
+    lines = audit_lines(tmp_path)
+    (cap,) = [x for x in lines if x["event"] == "spend_cap_reached"]
+    assert cap["cap"] == "max_requests" and cap["spend"]["requests"] == 2
+    refused = [x for x in lines if x["event"] == "ask"][-1]
+    assert refused["reason_code"] == "relay_spend_cap" and refused["sent_to_gateway"] is False
+    usage = load_harness("relay_usage").usage_from_events(lines)  # what cases_report reads
+    assert usage["label"] == "RELAY_GUARD_ABORT" and usage["cap_state"] == "SPEND_CAP_REACHED"
+    assert usage["requests"] == 2 and usage["refused_before_send"] == 1
+
+
+def load_harness(name):
+    spec = importlib.util.spec_from_file_location(
+        f"{name}_guard", ROOT / "container_harness" / f"{name}.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_smoke_cap_probe_exhausts_the_cli_relay_which_stops_itself(tmp_path, monkeypatch):
+    """The relay-smoke shape end to end, minus docker: the real CLI relay (--max-requests 1)
+    on 127.0.0.1, the container client, relay_smoke.cap_probe and the smoke report's checks."""
+    process = Process(envelope())
+    started = threading.Event()
+    holder = {}
+
+    def build_roles(args, kit_root=None, kit_python=None):
+        return live_roles(tmp_path / "roles", process, budget=args.budget)
+
+    def serve(relay, binds, port):
+        servers = real_serve(relay, binds, port)
+        holder.update(relay=relay, port=servers[0].server_address[1])
+        started.set()
+        return servers
+
+    real_serve = host.serve
+    for name, _ in host.CAP_ENV.values():
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(host, "build_roles", build_roles)
+    monkeypatch.setattr(host, "serve", serve)
+    monkeypatch.setattr(host, "client_paths", lambda client: (None, None))
+    relay_dir = tmp_path / "relay"
+    argv = ["--ack-not-sensitive", "--allow-role", "verifier", "--max-requests", "1"]
+    argv += ["--run-seconds", "60", "--audit-log", str(relay_dir / "relay-audit.jsonl")]
+    argv += ["--token-file", str(tmp_path / "t"), "--ready-file", str(tmp_path / "r.json")]
+    main = threading.Thread(target=lambda: holder.update(rc=host.main(argv)), daemon=True)
+    main.start()
+    assert started.wait(10)
+    relay = holder["relay"]
+    agent = RelayRoles(f"http://127.0.0.1:{holder['port']}", relay._token, relay.run_id, budget=1)
+    agent.ask("verifier", PAYLOAD)
+    assert not relay.asks_done.is_set()  # the cap is full, not exceeded: the relay still serves
+    probe = load_harness("relay_smoke").cap_probe(agent, Refused)
+    assert probe["outcome"] == "REFUSED" and probe["gate"] == "budget"
+    assert (probe["requests"], probe["max_requests"]) == (1, 1) and len(process.calls) == 1
+    main.join(10)  # the relay stopped ITSELF: EXHAUSTED by the probe, well before run_seconds
+    assert not main.is_alive() and holder["rc"] == 0
+    lines = [json.loads(x) for x in (relay_dir / "relay-audit.jsonl").read_text().splitlines()]
+    (stop,) = [x for x in lines if x["event"] == "relay_stop"]
+    assert stop["reason"] == "spend cap reached: max_requests" and stop["requests"] == 1
+    out = tmp_path / "out"
+    out.mkdir()
+    smoke = {"outcome": "SUCCESS", "cap_probe": probe}
+    (out / "relay-smoke.container.json").write_text(json.dumps(smoke))
+    load_harness("relay_smoke_report").main(["x", str(out), str(relay_dir)])
+    checks = json.loads((out / "RELAY-SMOKE.json").read_text())["checks"]
+    for name in (
+        "audit_one_successful_ask",
+        "request_cap_refused_before_forwarding",
+        "relay_stopped_itself",
+        "audit_redacted_fields_only",
+    ):
+        assert checks[name]["passed"], (name, checks[name])
+    usage = load_harness("relay_usage").usage_from_events(lines)
+    assert usage["label"] == "RELAY_GUARD_ABORT" and usage["cap_state"] == "SPEND_CAP_REACHED"
 
 
 def test_exhausted_is_sticky_and_reported_once(tmp_path):

@@ -26,7 +26,9 @@ Classification (owner ruling live_spend_authorization_2026-10-15.rerun_on_gatewa
                         a timeout, a connection reset, or an UNKNOWN outcome with no gateway
                         response. Never counted as a failure of the system under test.
   RELAY_GUARD_ABORT     the relay's spend guard stopped the case (``relay_spend_cap`` refusal or
-                        a ``spend_cap_reached`` audit event). Deterministic: never rerun.
+                        a ``spend_cap_reached`` audit event), the request cap included: the
+                        relay answers a call past ``max_requests`` with that refusal rather
+                        than having stopped. Deterministic: never rerun.
   None                  no fault, or at least one deterministic fault (4xx other than 429,
                         a payload over the body cap, any other relay refusal, a relay internal
                         error).
@@ -393,7 +395,9 @@ def usage_from_events(events, caps=None):
     stops = [e.get("reason") for e in events if e.get("event") == "relay_stop"]
     if any(f["guard"] for f in faults):
         cap_state = "SPEND_CAP_REACHED"
-    elif "max_requests reached" in stops:
+    elif "max_requests reached" in stops:  # audits before 2026-10-15 only: the relay now
+        # keeps serving past the request cap and refuses the next call (relay_spend_cap +
+        # spend_cap_reached, so SPEND_CAP_REACHED / RELAY_GUARD_ABORT above)
         cap_state = "MAX_REQUESTS_REACHED"
     elif "run_seconds elapsed" in stops:
         cap_state = "RUN_SECONDS_ELAPSED"

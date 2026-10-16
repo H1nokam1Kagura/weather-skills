@@ -372,7 +372,20 @@ def test_scan_without_the_secret_is_not_a_pass(tmp_path, monkeypatch):
 # ------------------------------------------------------------------ smoke report
 
 
-def smoke_inputs(tmp_path, **changes):
+CAPPED_AUDIT = [
+    {"event": "ask", "outcome": "SUCCESS"},
+    {"event": "spend_cap_reached", "cap": "max_requests"},
+    {
+        "event": "ask",
+        "outcome": "REFUSED",
+        "sent_to_gateway": False,
+        "reason_code": "relay_spend_cap",
+    },
+    {"event": "relay_stop", "reason": "spend cap reached: max_requests"},
+]
+
+
+def smoke_inputs(tmp_path, audit=CAPPED_AUDIT, **changes):
     out, relay = tmp_path / "out", tmp_path / "relay"
     out.mkdir()
     relay.mkdir()
@@ -402,13 +415,19 @@ def smoke_inputs(tmp_path, **changes):
             "gateway_mock": False,
             "transport": "kong-native-anthropic",
         },
+        "cap_probe": {
+            "outcome": "REFUSED",
+            "gate": "budget",
+            "reason": "verifier relay spend cap (r-2): spend cap max_requests reached",
+            "requests": 1,
+            "max_requests": 1,
+        },
     }
     smoke.update(changes)
     (out / "launch.json").write_text(json.dumps(launch_rec))
     (out / "relay-smoke.container.json").write_text(json.dumps(smoke))
     (out / "key-scan.json").write_text(json.dumps({"key_absent": True}))
     (relay / "net.json").write_text(json.dumps({"internal": True}))
-    audit = [{"event": "ask", "outcome": "SUCCESS"}, {"event": "relay_stop", "reason": "max"}]
     (relay / "relay-audit.jsonl").write_text("\n".join(json.dumps(a) for a in audit))
     return out, relay
 
@@ -426,11 +445,33 @@ def test_smoke_report_passes_on_complete_evidence(tmp_path, monkeypatch):
         {"receipt": {"model_observed": "", "gateway_mock": False}},
         {"credential_like_env_names": ["KONG_ANTHROPIC_KEY"]},
         {"egress_probes": []},
+        {"cap_probe": {"outcome": "SKIPPED", "reason": "request cap not full"}},
+        {"cap_probe": {"outcome": "REFUSED", "gate": "verifier", "reason": "unreachable"}},
+        {"cap_probe": {"outcome": "SUCCESS"}},
     ],
 )
 def test_smoke_report_fails_closed(tmp_path, monkeypatch, change):
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     out, relay = smoke_inputs(tmp_path, **change)
+    assert relay_smoke_report.main(["x", str(out), str(relay)]) == 1
+
+
+@pytest.mark.parametrize(
+    "audit",
+    [
+        # the old max_requests stop: the probe found no relay, nothing exhausted it
+        [{"event": "ask", "outcome": "SUCCESS"}, {"event": "relay_stop", "reason": "max"}],
+        CAPPED_AUDIT[:-1],  # never stopped itself (teardown's kill writes no stop line)
+        CAPPED_AUDIT[:-1] + [{"event": "relay_stop", "reason": "run_seconds elapsed"}],
+        [CAPPED_AUDIT[0], *CAPPED_AUDIT[1:3], CAPPED_AUDIT[0], CAPPED_AUDIT[3]],  # 2 sent
+        [CAPPED_AUDIT[0], CAPPED_AUDIT[2], CAPPED_AUDIT[3]],  # no spend_cap_reached
+    ],
+)
+def test_smoke_report_fails_without_the_request_cap_refusal_and_self_stop(
+    tmp_path, monkeypatch, audit
+):
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    out, relay = smoke_inputs(tmp_path, audit=audit)
     assert relay_smoke_report.main(["x", str(out), str(relay)]) == 1
 
 

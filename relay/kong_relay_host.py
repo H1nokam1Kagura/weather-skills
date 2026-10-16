@@ -38,7 +38,12 @@ Controls:
   could exceed a cap at its WORST case is refused BEFORE forwarding (``sent_to_gateway:
   false``, ``reason_code: relay_spend_cap``); observed usage is charged after each call and an
   UNKNOWN outcome is charged at its worst case. The first cap hit makes the guard EXHAUSTED
-  (sticky), writes one ``spend_cap_reached`` audit event and stops the relay;
+  (sticky), writes one ``spend_cap_reached`` audit event and stops the relay once that refusal
+  is written. The request cap works the same way: the relay keeps serving after
+  ``--max-requests`` calls were forwarded, so the NEXT call is refused with
+  ``relay_spend_cap`` (the client's ``Refused(gate="budget")``) instead of finding no relay.
+  The relay stops itself only when EXHAUSTED (after writing the refusal) or after
+  ``--run-seconds``;
 - no retries: one relay request is at most one KongRoles call, and the worker runs with
   ``KONG_SDK_MAX_RETRIES=0``;
 - append-only JSONL audit log with redacted metadata only (status, via, request id, model,
@@ -396,8 +401,7 @@ class Relay:
         self.guard = guard or SpendGuard(budget_usd=getattr(roles, "budget", 5))
         self.in_flight = threading.Lock()
         self.asks = 0
-        self.asks_done = threading.Event()
-        self.max_asks = None
+        self.asks_done = threading.Event()  # set once the guard is EXHAUSTED: the relay stops
 
     def authenticate(self, headers):
         presented = headers.get("Authorization") or ""
@@ -505,11 +509,14 @@ class Relay:
             self.in_flight.release()
 
     def responded(self):
-        """Called after a response is fully written: stop once max_asks were forwarded or the
-        spend guard is EXHAUSTED."""
-        if self.guard.state == SpendGuard.EXHAUSTED or (
-            self.max_asks is not None and self.asks >= self.max_asks
-        ):
+        """Called after a response is fully written: stop once the spend guard is EXHAUSTED.
+
+        Never on a request count alone. A relay that stopped after its ``max_requests``-th
+        call left the next call unanswered ("unreachable before sending", the role's gate),
+        hiding the cap from the client and the report. It keeps serving instead, and that
+        next call gets a ``relay_spend_cap`` refusal that EXHAUSTS the guard (``admit``
+        returns ``max_requests``) and so stops the relay here, after the refusal is written."""
+        if self.guard.state == SpendGuard.EXHAUSTED:
             self.asks_done.set()
 
     def _cap_refusal(self, relay_id, role, cap, remote, size, worst):
@@ -929,7 +936,6 @@ def main(argv=None):
         max_body=args.max_body,
         guard=guard,
     )
-    relay.max_asks = args.max_requests  # stop once the request cap was answered
     binds = args.bind or ["127.0.0.1"]
     servers = serve(relay, binds, args.port)
     port = servers[0].server_address[1]
@@ -958,11 +964,8 @@ def main(argv=None):
     print(json.dumps({"ready": ready}), flush=True)
     reason = "run_seconds elapsed"
     try:
-        if relay.asks_done.wait(args.run_seconds):
-            if guard.state == SpendGuard.EXHAUSTED:
-                reason = f"spend cap reached: {guard.exhausted_by}"
-            else:
-                reason = "max_requests reached"
+        if relay.asks_done.wait(args.run_seconds):  # set only once EXHAUSTED
+            reason = f"spend cap reached: {guard.exhausted_by}"
     except KeyboardInterrupt:
         reason = "interrupted"
     finally:

@@ -413,11 +413,16 @@ def test_one_request_in_flight_per_run(tmp_path, relay_host):
     assert results["first"] == ANSWER and len(process.calls) == 1 and second.spent == 0
 
 
-def test_max_requests_stops_after_the_response_is_written(tmp_path, relay_host):
-    url, relay, _ = relay_host(envelope())
-    relay.max_asks = 1
-    assert client(url).ask("verifier", PAYLOAD) == ANSWER
-    assert relay.asks_done.wait(2)
+def test_request_cap_keeps_serving_then_stops_after_the_cap_refusal(tmp_path, relay_host):
+    url, relay, process = relay_host(envelope())
+    relay.guard = host.SpendGuard(budget_usd=relay.roles.budget, max_requests=1)
+    agent = client(url)
+    assert agent.ask("verifier", PAYLOAD) == ANSWER
+    assert not relay.asks_done.is_set()  # the cap is full, not exceeded: still serving
+    with pytest.raises(Refused, match="relay spend cap") as caught:
+        agent.ask("verifier", PAYLOAD)  # answered with a cap refusal, never "unreachable"
+    assert caught.value.gate == "budget" and len(process.calls) == 1
+    assert relay.asks_done.wait(2)  # EXHAUSTED: stops once that refusal was written
 
 
 def test_wildcard_binds_are_refused():
