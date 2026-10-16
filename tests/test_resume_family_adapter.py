@@ -365,13 +365,17 @@ def e14(lab, frozen):  # noqa: F811
 
 
 def test_resigned_producers_keep_24_admitted_and_the_signed_records_add_the_seven(frozen):  # noqa: F811
-    cases = list(frozen.values())
-    assert len(cases) == 66
-    # The committed file: every record the live-role wave flagged is re-signed (D4-REVIEW-LW-B /
-    # -C), so it admits SIGNED_ADMITTED (31), the same as the test-local re-signed copy.
-    assert {PREFIX + c for c in admitted(WeatherAdapter(), cases)} == SIGNED_ADMITTED
+    all_cases = list(frozen.values())
+    assert len(all_cases) == 66
+    # The committed file (live-role records signed, D4-CONFIRM-LW-A) admits SIGNED_ADMITTED (61),
+    # the same as the test-local re-signed copy.
+    assert {PREFIX + c for c in admitted(WeatherAdapter(), all_cases)} == SIGNED_ADMITTED
     committed = WeatherAdapter(producers=resigned())
     assert set(WAVE7) <= committed.implemented_capabilities()
+    assert {PREFIX + c for c in admitted(committed, all_cases)} == SIGNED_ADMITTED
+    # What wave 7 adds is measured over the offline cases (live cases are admitted by the
+    # live-role records and counted in tests/test_live_wave_adapter.py).
+    cases = [c for c in all_cases if "CAP-LIVE-ROLE" not in c["adapter_requirements"]]
     assert {PREFIX + c for c in admitted(committed, cases)} == RESIGNED_ADMITTED
     # The wave-7 records unsigned (test-local): the 24 cases admitted before wave 7.
     resigned_adapter = WeatherAdapter(producers=unsigned_wave7())
