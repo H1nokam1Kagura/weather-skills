@@ -393,14 +393,14 @@ class ForkedIncarnation:
             record = {
                 "route": "in_process_without_procfs",
                 "pid": self.pid,
-                "ok": not errors,
+                "ok": False,  # the tree's stop is unobserved (D4 w7 N-INT-3): never true here
                 "descendants": [],
                 "killed": [],
                 "output_bytes": {},
                 "errors": errors + ["no /proc: descendants and output bytes unobservable"],
             }
         record["output_bytes_basis"] = ib.OUTPUT_BYTES_BASIS
-        return record
+        return with_broker_fallback(record, broker)
 
     def reap(self, kill_on_timeout=True):
         """waitpid the child, bounded; a child still alive after REAP_TIMEOUT_S is SIGKILLed."""
@@ -616,3 +616,21 @@ def drive(channel, build, *, case, schedule_plan, prepared, profile, run_dir, op
         roles=roles,
         record=json.loads(json.dumps(record, allow_nan=False, default=str)),
     )
+
+
+def with_broker_fallback(record, broker, environ=None):
+    """Disclose a kill that fell back in-process although a broker channel was expected.
+
+    entry.sh exports SIMKIT_INTERRUPT_BROKER only once the broker is ready; when it is set but
+    no channel reached the profile (channel_from_env rejected the inherited fds), the kill above
+    ran in-process. The record says so (``broker_fallback``) and is never relabelled as a broker
+    stop: project_in_container then withholds the concurrency count (D4 w7 B-HO-1)."""
+    from container_harness import interrupt_broker as ib
+
+    environ = os.environ if environ is None else environ
+    if broker is None and environ.get(ib.ENV_VAR):
+        record["broker_fallback"] = (
+            f"{ib.ENV_VAR} was set but no broker channel was usable: the harness parent "
+            f"killed incarnation 1 itself (route {record.get('route')}), not the broker"
+        )
+    return record

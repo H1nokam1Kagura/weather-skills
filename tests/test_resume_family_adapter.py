@@ -861,3 +861,20 @@ def test_close_fds_names_only_the_descriptors_the_parent_owns():
     import io
 
     assert resume_driver._close_fds({"projection_inputs_channel": io.StringIO()}) == []
+
+
+def test_an_in_process_kill_with_a_broker_channel_expected_is_disclosed():
+    """D4 w7 B-HO-1: the silent fallback to an in-process kill is recorded, never relabelled."""
+    env = {"SIMKIT_INTERRUPT_BROKER": "request_fd=5,ack_fd=6"}
+    out = resume_driver.with_broker_fallback({"route": "in_process"}, None, env)
+    assert out["route"] == "in_process"  # never relabelled as a broker stop
+    assert "no broker channel was usable" in out["broker_fallback"]
+    assert "route in_process" in out["broker_fallback"]
+    # No channel expected (Linux pytest), or the broker was used: nothing is added.
+    assert resume_driver.with_broker_fallback({"route": "in_process"}, None, {}) == {
+        "route": "in_process"
+    }
+    broker = SimpleNamespace(request_fd=5, ack_fd=6)
+    assert "broker_fallback" not in resume_driver.with_broker_fallback(
+        {"route": "interrupt_broker"}, broker, env
+    )

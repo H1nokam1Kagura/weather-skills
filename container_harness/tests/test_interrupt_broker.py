@@ -663,13 +663,45 @@ def test_unconfirmed_or_absent_broker_facts_make_concurrency_missing(tmp_path, s
     assert ev["controller_trace"]["signalled_pids"] == [105]  # never the broker's kills
 
 
-def test_a_ready_broker_with_no_request_is_labelled_and_changes_nothing_else(tmp_path):
+def test_a_ready_broker_with_no_request_is_labelled_and_makes_concurrency_missing(tmp_path):
+    """D4 w7 B-HO-1: the fork (101) ran two overlapping tools; a root-only count (1) would be a
+    false V23-CONCURRENCY PASS, so an engaged broker that was never asked withholds the field."""
     cap, requested_at = stop_capture(tmp_path)
     write_record(cap, {**broker_record(requested_at), "stops": []})
     ev = cap.write()
-    assert ev[A.BROKER_EVIDENCE_KEY]["status"] == "NO_STOP_REQUESTED"
-    assert ev["harness_observations"]["max_concurrent_children"] == 1  # root-only basis
+    section = ev[A.BROKER_EVIDENCE_KEY]
+    assert section["status"] == "NO_STOP_REQUESTED" and section["reason"] == A.NO_STOP_REASON
+    assert "max_concurrent_children" not in ev["harness_observations"]
+    assert ev["missing"][A.CONCURRENCY_FIELD] == A.NO_STOP_REASON
     assert ev["harness_notes"]["sigkill_deaths_by_interrupt_broker"] == []
+    assert ev["controller_trace"]["signalled_pids"] == [105]  # nothing else changes
+
+
+def test_in_process_fallback_kill_in_the_container_makes_concurrency_missing(tmp_path):
+    """The broker was needed and ready, but the traced root killed incarnation 1 itself (the
+    in-process fallback): the broker record holds no stop and the kills are tree attempts."""
+    cap = start(Capture(tmp_path))
+    cap.status.update(STOP_STATUS)
+    child(cap, ROOT, 101, vfork=False)  # incarnation 1
+    for tool in (102, 103):
+        child(cap, 101, tool)
+    cap(ROOT, "kill(101, SIGSTOP) = 0")
+    cap(ROOT, "kill(102, SIGKILL) = 0")
+    cap(ROOT, "kill(103, SIGKILL) = 0")
+    cap(ROOT, "kill(101, SIGKILL) = 0")
+    for pid in (102, 103, 101):
+        cap(pid, "+++ killed by SIGKILL +++")
+    child(cap, ROOT, 104)
+    cap.exit(104)
+    cap.exit(ROOT)
+    write_record(cap, {**broker_record(ts_now(cap)), "stops": []})
+    ev = cap.write()
+    assert "max_concurrent_children" not in ev["harness_observations"]
+    assert ev["missing"][A.CONCURRENCY_FIELD] == A.NO_STOP_REASON
+    assert ev[A.BROKER_EVIDENCE_KEY]["status"] == "NO_STOP_REQUESTED"
+    assert ev[A.BROKER_EVIDENCE_KEY]["incarnation_pids"] == []
+    # The root's own kills are controller-tree attempts, correctly in signalled_pids.
+    assert {101, 102, 103} <= set(ev["controller_trace"]["signalled_pids"])
 
 
 def test_a_declared_incarnation_the_trace_shows_exiting_normally_is_not_confirmed(tmp_path):
