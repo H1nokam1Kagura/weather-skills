@@ -844,16 +844,237 @@ def test_frozen_reviewer_shape_needs_a_review_capture(tmp_path, monkeypatch):
 def test_closed_registry_and_worst_verdict_units():
     contract = {"eligible_onset_window": {"start": "2025-09-01", "end": "2025-12-02"}}
     claim = {"computes": {"fact": "last_eligible_onset_date", "value": "2025-12-02"}}
-    assert claim_gates.compute(claim, contract) == "MATCH"
+    assert claim_gates.compute(claim, contract, None, None) == "MATCH"
     claim["computes"]["value"] = "2025-12-31"
-    assert claim_gates.compute(claim, contract) == "MISMATCH"
+    assert claim_gates.compute(claim, contract, None, None) == "MISMATCH"
     claim["computes"]["fact"] = "excluded_input_days"
-    assert claim_gates.compute(claim, contract) is None
-    assert list(claim_gates.DERIVABLE_FACTS) == ["last_eligible_onset_date"]
+    assert claim_gates.compute(claim, contract, None, None) is None
+    assert list(claim_gates.DERIVABLE_FACTS) == [
+        "last_eligible_onset_date",
+        "goal_field",
+        "plan_step_arg",
+    ]
     assert claim_gates.worst(["SUPPORTED", "CONTRADICTED", "INSUFFICIENT"]) == "CONTRADICTED"
     assert claim_gates.worst([]) == "SUPPORTED"
     with pytest.raises(Refused):
         claim_gates.worst(["MAYBE"])
+
+
+# --------------------------------------------------------------------------- plan/goal facts
+
+
+def controller_state(goal=GOAL):
+    """The bound state the controller passes: its date contract, goal and accepted plan."""
+    goal = copy.deepcopy(goal)
+    end = expected_plan(goal)["steps"][1]["args"]["end_date"]
+    contract = {"eligible_onset_window": {"start": goal["start_date"], "end": end}}
+    return contract, goal, expected_plan(goal)
+
+
+def computes(fact, value):
+    return {"computes": {"fact": fact, "value": value}}
+
+
+@pytest.mark.parametrize(
+    "fact, right, wrong",
+    [
+        ("goal.variable", "precip", "tp"),
+        ("goal.missing_policy", "preserve_nan", "zero_fill"),
+        ("goal.definition_ref", "agrhymet-sos-rolling", "agrhymet-sos-strict"),
+        ("goal.bbox", [5, 36.5, -5, 42], [5, 36.5, -5, 43]),
+        ("goal.baseline", None, "1991-2020"),
+        ("goal.ensemble_claim", False, 0),  # same value, wrong JSON type: never a match
+        ("plan.onset.variable", "precip", "tp"),
+        ("plan.onset.definition_ref", "agrhymet-sos-rolling", "agrhymet-sos-strict"),
+        ("plan.map.end_date", "2025-12-02", "2025-12-31"),
+        ("plan.map.title", GOAL["title"], GOAL["title"] + "!"),
+        ("last_eligible_onset_date", "2025-12-02", "2025-12-31"),
+    ],
+)
+def test_each_registered_fact_matches_only_the_controller_value(fact, right, wrong):
+    state = controller_state()
+    assert claim_gates.compute(computes(fact, right), *state) == "MATCH"
+    assert claim_gates.compute(computes(fact, wrong), *state) == "MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "fact",
+    [
+        "excluded_input_days",  # the frozen C-TRUNCATION fact stays unregistered
+        "goal.unknown_field",
+        "plan.onset.start_date",  # an argument the onset step does not take
+        "plan.unknown_step.variable",
+        "plan.onset",
+        "goal",
+        "variable",
+        "goal_field",  # a registry key names a producer, never a fact
+        "plan_step_arg",
+    ],
+)
+def test_unknown_fact_is_never_computable(fact):
+    assert claim_gates.compute(computes(fact, "precip"), *controller_state()) is None
+
+
+def test_facts_come_from_controller_state_never_from_the_claim():
+    contract, goal, plan = controller_state()
+    # The controller's state, not the claim, decides: the same claim flips with the state.
+    claim = computes("goal.variable", "tp")
+    assert claim_gates.compute(claim, contract, goal, plan) == "MISMATCH"
+    assert claim_gates.compute(claim, contract, dict(goal, variable="tp"), plan) == "MATCH"
+    step_claim = computes("plan.onset.variable", "tp")
+    assert claim_gates.compute(step_claim, contract, goal, plan) == "MISMATCH"
+    other = copy.deepcopy(plan)
+    other["steps"][0]["args"]["variable"] = "tp"
+    assert claim_gates.compute(step_claim, contract, goal, other) == "MATCH"
+    # Without the bound state there is nothing to compute, whatever the claim says.
+    assert claim_gates.compute(computes("goal.variable", "precip"), contract, None, None) is None
+    assert claim_gates.compute(computes("plan.onset.variable", "precip"), None, goal, None) is None
+    # The facts are a detached copy: neither a caller nor a comparison can edit the records.
+    facts = claim_gates.derivable_facts(contract, goal, plan)
+    facts["goal.bbox"].append(0)
+    facts["plan.onset.variable"] = "tp"
+    assert goal["bbox"] == GOAL["bbox"] and plan == expected_plan(GOAL)
+    # The fact set is exactly the goal's fields, the plan's step arguments and the date.
+    assert set(claim_gates.derivable_facts(contract, goal, plan)) == (
+        {"last_eligible_onset_date"}
+        | {f"goal.{k}" for k in GOAL}
+        | {f"plan.{s['id']}.{a}" for s in plan["steps"] for a in s["args"]}
+    )
+
+
+def restatement_claims(payload, variable="precip", missing_policy="preserve_nan"):
+    """Restatements of the plan's own argument and a goal field, each citing a bound source
+    verbatim (the live E02/E03 claim shape, now marked derivable). Gate 1 still needs a
+    resolvable citation; the quote does not have to state the value."""
+    cite = citation(FROZEN_VERBATIM_QUOTES[0])
+    assert any(
+        s["source_id"] == cite["source_id"] for s in payload["review_evidence_request"]["sources"]
+    )
+    return [
+        {
+            "claim_id": "C-PLAN-VARIABLE",
+            "text": f"onset-date is invoked with --variable {variable}.",
+            "citations": [cite],
+            "derivable": True,
+            "computes": {"fact": "plan.onset.variable", "value": variable},
+        },
+        {
+            "claim_id": "C-GOAL-MISSING",
+            "text": f"The missing_policy is {missing_policy}.",
+            "citations": [cite],
+            "derivable": True,
+            "computes": {"fact": "goal.missing_policy", "value": missing_policy},
+        },
+    ]
+
+
+def test_plan_and_goal_restatements_pass_gate_one_without_a_checker_verdict(
+    tmp_path, monkeypatch
+):
+    def planner(payload, n):
+        value = default_planner(payload, n)
+        value["claims"] += restatement_claims(payload)
+        return value
+
+    stub = Stub(planner=planner)
+    c = make_controller(tmp_path, monkeypatch, stub, max_repairs=0)
+    with pytest.raises(ReviewReached):
+        c._run()
+    (record,) = records(c)
+    assert record["citation_gate"] == "PASS"
+    assert record["decision"] == "PRESENT_FOR_REVIEW"
+    claims = {x["claim_id"]: x for x in record["claims"]}
+    for claim_id in ("C-PLAN-VARIABLE", "C-GOAL-MISSING"):
+        assert claims[claim_id]["basis"] == "computation"
+        assert claims[claim_id]["computed"] == "MATCH"
+        assert claims[claim_id]["checker_verdict"] is None
+        assert claims[claim_id]["verdict"] == "SUPPORTED"
+    # The checker never saw them: only the non-derivable claims were judged.
+    (checker,) = [call for call in stub.calls if call["role"] == "evidence_checker"]
+    assert [x["claim_id"] for x in checker["payload"]["claims"]] == ["C-WINDOW", "C-PLOT-SCALE"]
+    assert c.repairs_used == 0
+
+
+@pytest.mark.parametrize(
+    "change, failing",
+    [
+        ({"variable": "tp"}, "C-PLAN-VARIABLE"),
+        ({"missing_policy": "zero_fill"}, "C-GOAL-MISSING"),
+    ],
+)
+def test_false_plan_or_goal_restatement_is_contradicted_by_computation(
+    tmp_path, monkeypatch, change, failing
+):
+    def planner(payload, n):
+        value = default_planner(payload, n)
+        value["claims"] += restatement_claims(payload, **change)
+        return value
+
+    stub = Stub(planner=planner)
+    c = make_controller(tmp_path, monkeypatch, stub, max_repairs=0)
+    with pytest.raises(Refused, match="bounded plan repair exhausted"):
+        c._run()
+    (record,) = records(c)
+    claim = {x["claim_id"]: x for x in record["claims"]}[failing]
+    assert claim["computed"] == "MISMATCH" and claim["verdict"] == "CONTRADICTED"
+    assert record["decision"] == "ROUTE_TO_REPAIR"
+    assert stub.count("reviewer") == 0
+
+
+def test_evidence_request_lists_the_registered_facts_and_no_values(tmp_path, monkeypatch):
+    stub = Stub()
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    (planner,) = [call for call in stub.calls if call["role"] == "planner"]
+    instruction = planner["payload"]["review_evidence_request"]["instruction"]
+    contract, goal, plan = controller_state()
+    names = sorted(claim_gates.derivable_facts(contract, goal, plan))
+    assert c.derivable_fact_names() == names
+    assert ", ".join(names) in instruction
+    assert "never against documentation" in instruction
+    assert "exactly one fact" in instruction
+    # Generic: the controller's values are never handed to the planner in the instruction.
+    for value in ("precip", "preserve_nan", "2025-12-02", "agrhymet-sos-rolling", GOAL["title"]):
+        assert value not in instruction
+
+
+def test_frozen_substituted_claims_compute_exactly_as_before():
+    """Offline invariance: the frozen claims' facts resolve as under the one-fact registry."""
+    state = controller_state()
+    by_id = {c["claim_id"]: c for c in reference_claims()}
+    assert claim_gates.compute(by_id["C-LAST-ELIGIBLE"], *state) == "MATCH"
+    truncation = computes("excluded_input_days", 29)  # frozen C-TRUNCATION injection
+    assert claim_gates.compute(truncation, *state) is None
+
+
+@pytest.mark.skipif(
+    not os.environ.get("SIMKIT_FROZEN_DEV_ONLY"),
+    reason="set SIMKIT_FROZEN_DEV_ONLY to the frozen v2.7 DEV-ONLY case file to rescan it",
+)
+def test_frozen_dev_only_computes_facts_resolve_as_before():
+    """No frozen computes fact is newly resolved by the plan/goal producers, so no frozen
+    claim's computed/verdict can change (read-only rescan of the frozen package)."""
+    data = json.loads(Path(os.environ["SIMKIT_FROZEN_DEV_ONLY"]).read_text(encoding="utf-8"))
+    found = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            spec = node.get("computes")
+            if isinstance(spec, dict) and "fact" in spec:
+                found.add(spec["fact"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(data)
+    assert found == {"last_eligible_onset_date", "excluded_input_days"}
+    new_names = set(claim_gates.derivable_facts(*controller_state())) - {
+        "last_eligible_onset_date"
+    }
+    assert found & new_names == set()
 
 
 def test_fixture_roles_substitute_the_evidence_checker():
