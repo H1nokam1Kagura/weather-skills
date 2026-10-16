@@ -9,6 +9,9 @@ Library (cases_report.py) and CLI (simkit-cases.yml):
     python container_harness/relay_usage.py live-gate ADMISSION.json --live-max-cases N
                                                      --out LIVE-GATE.json
         exit 1 when the run's live selection is not authorized (see live_gate)
+    python container_harness/relay_usage.py rerun-gate ADMISSION.json --prior-results
+            ORIGINAL/RESULTS.json --rerun-of-run-id ID --out RERUN-GATE.json [--now ISO]
+        exit 1 when a rerun dispatch is not authorized by the original run (see rerun_gate)
     python container_harness/relay_usage.py summarize RELAY_DIR
         prints usage_from_relay_dir(RELAY_DIR) (diagnostic)
 
@@ -477,6 +480,108 @@ def rerun_record(case_id, attempt, usage):
     }
 
 
+def prior_attempts(prior_results, case_id):
+    """How many attempts the original run's RESULTS.json records for one case (0 if none)."""
+    entry = next((e for e in prior_results.get("cases") or [] if e.get("case_id") == case_id), None)
+    counts = [len((entry or {}).get("attempts") or []), _int((entry or {}).get("attempt")) or 0]
+    by_case = ((prior_results.get("live") or {}).get("attempts_by_case") or {}).get(case_id)
+    counts.append(len(by_case or []))
+    return max(counts)
+
+
+def rerun_gate(admission, prior_results, run_of, now=None):
+    """Admission-time refusal of a rerun dispatch (rerun_of_run_id set) under RULING_ID.
+
+    FAIL when: the original run's RESULTS.json is absent or unreadable (prior_results None);
+    the dispatch selects no case; any selected case is not on the original's
+    live.rerun_eligible list; any selected case already has a rerun (attempts >= 2) in the
+    original; or ``now`` is before that case's earliest_rerun_utc (or the original records no
+    earliest time, so the wait cannot be checked). The report job keeps its own flags for the
+    same conditions (defence in depth)."""
+    now = now or datetime.now(UTC)
+    selected = [r.get("case_id") for r in (admission or {}).get("matrix") or []]
+    problems, cases = [], []
+    if admission is None:
+        problems.append("ADMISSION.json absent or unreadable: the selection cannot be checked")
+    if prior_results is None:
+        problems.append(
+            f"the original run {run_of!r} has no readable simkit-results RESULTS.json: "
+            "a rerun cannot be authorized"
+        )
+    elif admission is not None and not selected:
+        problems.append("the rerun dispatch selects no case")
+    if prior_results is not None:
+        eligible = {
+            r.get("case_id"): r
+            for r in (prior_results.get("live") or {}).get("rerun_eligible") or []
+        }
+        for cid in selected:
+            record = eligible.get(cid)
+            attempts = prior_attempts(prior_results, cid)
+            earliest = parse_ts((record or {}).get("earliest_rerun_utc"))
+            reasons = []
+            if record is None:
+                reasons.append("not on the original run's rerun_eligible list")
+            if attempts >= MAX_ATTEMPTS:
+                reasons.append(
+                    f"already re-dispatched in the original ({attempts} attempts; at most one "
+                    "re-dispatch per case)"
+                )
+            if record is not None and earliest is None:
+                reasons.append("the original records no earliest rerun time")
+            elif earliest is not None and now < earliest:
+                wait = (earliest - now).total_seconds()
+                reasons.append(f"too early: earliest rerun {earliest.isoformat()} ({wait:.0f} s)")
+            cases.append(
+                {
+                    "case_id": cid,
+                    "prior_attempts": attempts,
+                    "earliest_rerun_utc": earliest.isoformat() if earliest else None,
+                    "status": "FAIL" if reasons else "OK",
+                    "reasons": reasons,
+                }
+            )
+            problems += [f"{cid}: {why}" for why in reasons]
+    return {
+        "schema": "simkit.rerun-gate/1",
+        "ruling": RULING_ID,
+        "rerun_of_run_id": run_of,
+        "original_results_present": prior_results is not None,
+        "original_run_url": (prior_results or {}).get("run_url"),
+        "checked_at_utc": now.isoformat(),
+        "selected": selected,
+        "cases": cases,
+        "status": "FAIL" if problems else "OK",
+        "problems": problems,
+    }
+
+
+def _read_json(path):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def rerun_gate_summary(gate):
+    lines = [
+        f"### Rerun gate: {gate['status']} (rerun of run {gate['rerun_of_run_id']})",
+        "",
+        f"ruling: {gate['ruling']}; checked at {gate['checked_at_utc']}",
+        "",
+    ]
+    lines += [
+        f"- {c['case_id']}: {c['status']} (prior attempts {c['prior_attempts']}, earliest "
+        f"rerun {c['earliest_rerun_utc'] or 'n/a'})"
+        + (": " + "; ".join(c["reasons"]) if c["reasons"] else "")
+        for c in gate["cases"]
+    ]
+    if gate["problems"]:
+        lines += ["", "**Refused:**", *[f"- {p}" for p in gate["problems"]]]
+    return "\n".join(lines)
+
+
 # ------------------------------------------------------------------------------- CLI
 
 
@@ -489,9 +594,24 @@ def main(argv=None):
     g.add_argument("admission")
     g.add_argument("--live-max-cases", default="")
     g.add_argument("--out", required=True)
+    r = sub.add_parser("rerun-gate")
+    r.add_argument("admission")
+    r.add_argument("--prior-results", required=True)
+    r.add_argument("--rerun-of-run-id", required=True)
+    r.add_argument("--out", required=True)
+    r.add_argument("--now", default=None, help="ISO time (tests); default the current UTC time")
     s = sub.add_parser("summarize")
     s.add_argument("relay_dir")
     args = ap.parse_args(argv)
+    if args.cmd == "rerun-gate":
+        now = parse_ts(args.now) if args.now else None
+        gate = rerun_gate(
+            _read_json(args.admission), _read_json(args.prior_results), args.rerun_of_run_id, now
+        )
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(gate, indent=1) + "\n", encoding="utf-8")
+        print(rerun_gate_summary(gate))
+        return 1 if gate["status"] == "FAIL" else 0
     if args.cmd == "caps":
         caps = case_caps(json.loads(os.environ.get("MATRIX_ROW") or "{}"))
         Path(args.out).write_text(json.dumps(caps, indent=1) + "\n", encoding="utf-8")

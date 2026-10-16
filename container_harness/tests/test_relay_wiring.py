@@ -206,6 +206,40 @@ def test_report_reads_the_original_run_for_a_rerun():
     assert "github.token" in prior["with"]["github-token"]
 
 
+def test_admission_refuses_a_rerun_before_any_case_job():
+    wf = workflow()
+    adm = wf["jobs"]["admission"]
+    rerun_set = "github.event.inputs.rerun_of_run_id != ''"
+    assert adm["permissions"] == {"contents": "read", "actions": "read"}
+    assert adm["env"]["RERUN_OF_RUN_ID"] == "${{ github.event.inputs.rerun_of_run_id }}"
+    i_adm, _ = named(adm, "Frozen-runner capability admission")
+    i_dl, dl = named(adm, "Original run's results for the rerun gate")
+    i_rec, rec = named(adm, "Rerun gate record")
+    i_up, up = named(adm, "Upload admission")
+    i_gate, gate = named(adm, "Rerun gate (rerun dispatch only")
+    assert i_adm < i_dl < i_rec < i_up < i_gate
+    # only when rerun_of_run_id is set; the download never tolerates a missing original
+    assert dl["if"] == rerun_set and gate["if"] == rerun_set
+    assert rec["if"] == f"always() && {rerun_set}"
+    assert "continue-on-error" not in dl and "continue-on-error" not in gate
+    assert dl["uses"].startswith("actions/download-artifact@")
+    assert dl["with"]["name"] == "simkit-results" and dl["with"]["path"] == "rerun-prior"
+    assert dl["with"]["run-id"] == "${{ github.event.inputs.rerun_of_run_id }}"
+    assert dl["with"]["github-token"] == "${{ github.token }}"
+    for step in (rec, gate):
+        assert "container_harness/relay_usage.py rerun-gate" in step["run"]
+        assert "--prior-results rerun-prior/RESULTS.json" in step["run"]
+        assert '--rerun-of-run-id "$RERUN_OF_RUN_ID"' in step["run"]
+    # the record lands in the uploaded admission evidence; the enforcing step never swallows
+    assert '"$OUT/RERUN-GATE.json"' in rec["run"] and up["with"]["path"] == "admission-out"
+    assert "|| true" not in gate["run"]
+    # case jobs need admission, so a refused rerun starts no case (and makes no Kong call)
+    assert wf["jobs"]["case"]["needs"] == "admission"
+    # without rerun_of_run_id nothing else in admission changes: no other step reads it
+    readers = [s.get("name") for s in adm["steps"] if "rerun" in json.dumps(s).lower()]
+    assert sorted(readers) == sorted([dl["name"], rec["name"], gate["name"]])
+
+
 # ------------------------------------------------------------------ launcher
 
 
