@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires Python 3.12 and uv. Reads a consolidated Zarr from gs://weathernext/weathernext_2_0_0/zarr/2025_to_present via gcsfs. Requires Google Cloud Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS or `gcloud auth application-default login`) — any authenticated Google account works, the bucket has no special allowlist.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
 metadata:
-  version: "0.0.1"
+  version: "0.0.2"
   catalog-group: fetchers
   variables:
     - tp

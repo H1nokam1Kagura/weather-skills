@@ -23,7 +23,7 @@ from weather_skills_core.units import (
 )
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
-_SKILL_VERSION = "0.0.1"
+_SKILL_VERSION = "0.0.2"
 
 _BUCKET = "weathernext"
 _PREFIX = "weathernext_2_0_0/zarr/2025_to_present"
