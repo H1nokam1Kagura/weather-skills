@@ -10,11 +10,11 @@ answers from the substituted baselines and returns the host's receipt (KongRoles
 relay_id / transport_encoding / transport_bytes from the host's wire_view), which the real
 client validates. No model, relay or network is touched.
 
-CAP-LIVE-ROLE and CAP-BINDING-PASSTHROUGH have no adapter method yet (live-role sub-wave 3),
-so a TEST-LOCAL adapter subclass declares them (extension_methods) over the live_roles
-producers, with test-local signed producer records (pattern of
-tests/test_operator_ledger_capabilities.py signed()/producers_with). Nothing here is a
-committed declaration.
+CAP-LIVE-ROLE and CAP-BINDING-PASSTHROUGH are WeatherAdapter.invoke_live_role /
+confirm_binding_passthrough (live-role sub-wave 3), D4-gated: they are declared here only by
+test-local signed producer records over resigned() (the committed file with the wave-7
+rereview flags cleared test-locally; pattern of tests/test_operator_ledger_capabilities.py).
+Nothing here is a committed declaration.
 
 The fake relay also records, for every live call with the controller's REAL skill
 documentation in the payload, both the original payload size and the request body actually
@@ -38,12 +38,13 @@ from test_evidence_projection_v27 import (
     FROZEN_CASES_SHA256,
     MAP_GOAL,
     Lab,
+    resigned,
 )
 
 from adapter_support import fixture_rereview_projection as frx
 from adapter_support import live_roles
 from adapter_support import role_substitution as rs
-from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter, load_producers
+from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter
 from tools.workflow import agents, catalog, relay_roles, runner
 from tools.workflow.contracts import Refused, digest
 from tools.workflow.persistence import read_checkpoint
@@ -74,9 +75,9 @@ FAKE_PROMPT = "FAKE RELAY (test): no system prompt was sent to any model"
 
 
 def test_producers():
-    """The committed producer file plus test-local signed records for the two capabilities
-    whose adapter methods land in sub-wave 3."""
-    producers = load_producers()
+    """resigned() (the committed producer file with the wave-7 rereview flags cleared
+    test-locally) plus test-local signed records for the two capabilities this module runs."""
+    producers = resigned()
     for cap in (live_roles.CAPABILITY, live_roles.PASSTHROUGH_CAPABILITY):
         producers["capabilities"][cap] = {
             **SIGN,
@@ -86,22 +87,6 @@ def test_producers():
 
 
 test_producers.__test__ = False  # a helper, not a test
-
-
-class LiveLabAdapter(WeatherAdapter):
-    """TEST-LOCAL stand-in for the sub-wave 3 adapter methods; delegates to live_roles."""
-
-    extension_methods = {
-        **WeatherAdapter.extension_methods,
-        live_roles.CAPABILITY: "invoke_live_role",
-        live_roles.PASSTHROUGH_CAPABILITY: "confirm_binding_passthrough",
-    }
-
-    def invoke_live_role(self, case, goal, run_dir, relay_factory):
-        return live_roles.live_roles_factory(case, goal, run_dir, relay_factory)
-
-    def confirm_binding_passthrough(self, run_dir):
-        return live_roles.confirm_binding_passthrough(run_dir)
 
 
 def load_relay_host():
@@ -292,7 +277,7 @@ def goal_of(case):
 
 
 def execute(lab, case):
-    adapter = LiveLabAdapter(enable_run_case=True, producers=test_producers())
+    adapter = WeatherAdapter(enable_run_case=True, producers=test_producers())
     goal = goal_of(case)
     profile = lab.profile(goal, case, stub=None)
     built, relays = [], []

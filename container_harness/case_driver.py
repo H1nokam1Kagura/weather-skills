@@ -32,6 +32,7 @@ in-process evidence for scoring; missing evidence stays missing.
 
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -51,6 +52,9 @@ SUBST = "CAP-ROLE-SUBSTITUTE"
 BLOCKED_LIVE = "BLOCKED_LIVE_ROLE_TRANSPORT"
 BLOCKED_SUBST = "BLOCKED_SUBSTITUTED_ROLE_WIRING"
 SUBST_FACTORY = "substituted_roles_factory"  # adapter hook the driver needs: (case, goal, run_dir)
+# Live-role hook (CAP-LIVE-ROLE): (case, goal, run_dir, relay_factory) -> the combined roles, all
+# live or mixed live + substituted (adapter_support/live_roles.py CombinedRoles).
+LIVE_FACTORY = "invoke_live_role"
 
 
 def sha256(path):
@@ -91,6 +95,149 @@ def pair_id(case):
     return case.get("pair_id") or case["id"].rsplit("-", 1)[0]
 
 
+def live_factory(adapter):
+    """The adapter's own invoke_live_role (an override of the frozen base method), or None."""
+    from simkit.adapter import Adapter
+
+    method = getattr(type(adapter), LIVE_FACTORY, None)
+    if not callable(method) or method is getattr(Adapter, LIVE_FACTORY, None):
+        return None
+    return getattr(adapter, LIVE_FACTORY)
+
+
+# ------------------------------------------------------------------------------- relay caps
+# LIVE-WAVE-BRIEF.md "Spend guard": admission computes each live case's relay caps from the
+# frozen roles, repair limits and re-review count, and the matrix row carries them
+# (container_harness/relay_usage.py case_caps reads them; the relay enforces them):
+#   expected_calls; max_requests = min(24, max(8, 2 x expected));
+#   max_total_tokens = 1.5 x sum over expected calls of (input bound + per-role max_tokens);
+#   max_model_usd = the case's frozen budget.max_model_usd.
+MAX_REQUESTS_CEILING, MAX_REQUESTS_FLOOR = 24, 8
+TOKEN_CAP_FACTOR = 1.5
+# Fixture-operation targets (fixture_rereview_projection.FIXTURE_TARGETS) whose change after the
+# run starts can return the run to review: each may add one review round.
+REREVIEW_TARGETS = frozenset({"repo_copy", "source"})
+RELAY_HOST = Path(__file__).resolve().parents[1] / "relay" / "kong_relay_host.py"
+
+
+def _relay_host():
+    """The host relay module (relay/ is not a package): its worst-case input constants are the
+    ones the relay's own admission uses, read here rather than copied."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("kong_relay_host_caps", RELAY_HOST)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def call_token_bound(role, relay=None):
+    """Upper bound of the tokens the relay can charge one call of ``role`` at admission
+    (kong_relay_host.worst_case: one token per byte of system prompt and user message, plus the
+    framing, forced-tool and output bounds), for the largest request the client sends.
+
+    The user message is bounded by the client body cap (relay_roles.DEFAULT_MAX_BODY: every
+    body sent is at most that). A plain body's user message is json.dumps(payload), inside the
+    body. A dedup-sha256/1 body's model-facing message adds the fixed preamble and headers plus
+    two marker lines per shared block (bounded here at 256 bytes each), and a shared block is
+    at least DEDUP_MIN_BYTES of the body, so there are at most DEFAULT_MAX_BODY //
+    DEDUP_MIN_BYTES blocks."""
+    from tools.workflow.agents import role_prompt
+    from tools.workflow.kong_roles import DEFAULT_MAX_TOKENS, LIVE_ROLE_MAX_TOKENS
+    from tools.workflow.relay_roles import DEDUP_MIN_BYTES, DEFAULT_MAX_BODY
+    from tools.workflow.role_schemas import request_overhead_bytes
+
+    relay = relay or _relay_host()
+    user = (
+        DEFAULT_MAX_BODY
+        + len(relay.MODEL_INPUT_PREAMBLE.encode("utf-8"))
+        + 256
+        + 256 * (DEFAULT_MAX_BODY // DEDUP_MIN_BYTES)
+    )
+    prompt = len(role_prompt(role, relay._ALL_SUFFIXES).encode("utf-8"))
+    tokens_in = prompt + user + relay.INPUT_FRAMING_TOKENS
+    tokens_in += request_overhead_bytes(role) + relay.TOOL_USE_SYSTEM_TOKENS
+    return tokens_in + LIVE_ROLE_MAX_TOKENS.get(role, DEFAULT_MAX_TOKENS)
+
+
+def expected_live_calls(case):
+    """{native role: upper bound of its live relay calls} for one live case, from the frozen
+    agent_roles, budget.max_repair_attempts and the schedule. Over-counting only loosens the
+    caps; under-counting would let the relay stop a legitimate run, so every rule rounds up:
+
+    * review rounds R = max(1 + repairs + material changes, the highest reviewer occurrence a
+      schedule entry selects); a material change is a scheduled source / repository fixture
+      operation after the run starts;
+    * compiler 3 (compiler_1..3), planner 1, repairer = repairs, evidence_checker R,
+      reviewer R minus the occurrences routed to the substituted double (split occurrence),
+      verifier 1, shadow_policy one per shadow state plus one per extra round;
+    * plus one call per scheduled interrupt (a resume may re-ask the interrupted role).
+    A transport retry adds no relay request: the injected fault raises before any byte is sent.
+    """
+    from adapter_support import live_roles
+    from adapter_support.fixture_rereview_projection import FIXTURE_TARGETS
+    from tools.workflow.policy import SHADOW_STATES
+
+    table = live_roles.routing_table(case)
+    repairs = case["budget"]["max_repair_attempts"]
+    schedule = case.get("injection_schedule") or []
+    material, interrupts, reviewer_occurrence = 0, 0, 1
+    for spec in schedule:
+        payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+        operation = spec.get("operation")
+        if operation == "interrupt":
+            interrupts += 1
+        if (
+            operation == "mutate_fixture"
+            and spec.get("hook") != "before_run"
+            and FIXTURE_TARGETS.get(payload.get("fixture_operation")) in REREVIEW_TARGETS
+        ):
+            material += 1
+        selector = spec.get("selector") or {}
+        if selector.get("role_or_tool_or_stage") == "reviewer":
+            occurrence = selector.get("occurrence", 1)
+            if type(occurrence) is int:
+                reviewer_occurrence = max(reviewer_occurrence, occurrence)
+    rounds = max(1 + repairs + material, reviewer_occurrence)
+    per_role = {
+        "compiler": 3,
+        "planner": 1,
+        "repairer": repairs,
+        "evidence_checker": rounds,
+        "reviewer": rounds - len(table["split"].get("reviewer", [])),
+        "verifier": 1,
+        "shadow_policy": len(SHADOW_STATES) + rounds - 1,
+    }
+    calls = {role: per_role.get(role, 1) for role in table["live"]}
+    calls = {role: n for role, n in calls.items() if n > 0}
+    return calls, interrupts
+
+
+def live_relay_plan(case):
+    """The matrix fields of one live case: live_roles (native relay role names),
+    expected_calls, max_requests, max_total_tokens, max_model_usd, and how each was derived."""
+    calls, interrupts = expected_live_calls(case)
+    expected = sum(calls.values()) + interrupts
+    relay = _relay_host()
+    bounds = {role: call_token_bound(role, relay) for role in calls}
+    # A re-asked role after an interrupt is bounded by the largest per-call bound.
+    worst = sum(n * bounds[role] for role, n in calls.items())
+    worst += interrupts * max(bounds.values(), default=0)
+    return {
+        "live_roles": sorted(calls),
+        "expected_calls": expected,
+        "max_requests": min(MAX_REQUESTS_CEILING, max(MAX_REQUESTS_FLOOR, 2 * expected)),
+        "max_total_tokens": math.ceil(TOKEN_CAP_FACTOR * worst),
+        "max_model_usd": case["budget"]["max_model_usd"],
+        "relay_caps_basis": {
+            "calls_by_role": calls,
+            "interrupt_reasks": interrupts,
+            "token_bound_by_role": bounds,
+            "rule": "LIVE-WAVE-BRIEF Spend guard; container_harness/case_driver.py",
+        },
+    }
+
+
 # ------------------------------------------------------------------------------- admission
 
 
@@ -98,7 +245,7 @@ def admission(selector, smoke_ids=None):
     root, pins_sha = frozen_root()
     from simkit.runner import run as frozen_run
 
-    from adapter_support.weather_adapter import WeatherAdapter
+    from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter
 
     cases, ratified = load_cases(root)
     real = WeatherAdapter(enable_run_case=True)
@@ -135,12 +282,21 @@ def admission(selector, smoke_ids=None):
             disposition = "NOT_IMPLEMENTED"
         elif SUBST in case["adapter_requirements"] and not has_factory:
             disposition = BLOCKED_SUBST
-        elif mode == "live" and SUBST in case["adapter_requirements"]:
-            # Live + substituted roles in one run need a combining adapter hook (not built).
+        elif mode == "live" and live_factory(real) is None:
+            # Live roles, all live or mixed, run only through the combining hook.
             disposition = BLOCKED_LIVE
         else:
-            # Live-only cases run with RelayRoles through the host relay (simkit-cases.yml).
+            # Live cases run through invoke_live_role -> RelayRoles -> the host relay
+            # (simkit-cases.yml); the relay is still required at run time (``run``).
             disposition = "RUNNABLE"
+        live_plan = None
+        if mode == "live":
+            try:
+                live_plan = live_relay_plan(case)
+            except AdapterRefusal as exc:
+                if disposition == "RUNNABLE":
+                    disposition = BLOCKED_LIVE
+                live_plan = {"refused": str(exc)}
         rows.append(
             {
                 "case_id": case["id"],
@@ -157,6 +313,8 @@ def admission(selector, smoke_ids=None):
                 "required_capabilities": sorted(case["adapter_requirements"]),
             }
         )
+        if live_plan is not None:
+            rows[-1]["live_relay_plan"] = live_plan
     runnable = sorted(r["case_id"] for r in rows if r["disposition"] == "RUNNABLE")
     # Live-role cases make paid Kong calls: only an explicit 'live' selector or explicit ids
     # select them; 'substituted' and the push smoke never do.
@@ -199,6 +357,7 @@ def admission(selector, smoke_ids=None):
     disp = {}
     for r in rows:
         disp[r["disposition"]] = disp.get(r["disposition"], 0) + 1
+    rows_by_id = {r["case_id"]: r for r in rows}
     return {
         "schema": "simkit.gha-admission/1",
         "frozen_final_pins_sha256": pins_sha,
@@ -224,8 +383,29 @@ def admission(selector, smoke_ids=None):
         ),
         "missing_capability_reasons": {cap: why_missing(cap) for cap in missing_counts},
         "cases": rows,
-        "matrix": [{"case_id": i, "role_mode": role_mode(by_id[i])} for i in selected],
+        "matrix": [matrix_row(by_id[i], rows_by_id[i]) for i in selected],
     }
+
+
+# The live-case matrix fields container_harness/relay_usage.py case_caps reads.
+MATRIX_RELAY_FIELDS = (
+    "live_roles",
+    "expected_calls",
+    "max_requests",
+    "max_total_tokens",
+    "max_model_usd",
+)
+
+
+def matrix_row(case, row):
+    """One case-job matrix row: case id and role mode, plus the relay caps for a live case."""
+    out = {"case_id": case["id"], "role_mode": role_mode(case)}
+    plan = row.get("live_relay_plan")
+    if out["role_mode"] == "live":
+        if not isinstance(plan, dict) or "refused" in plan:  # pragma: no cover - not RUNNABLE
+            raise SystemExit(f"selected live case {case['id']} has no relay plan: {plan}")
+        out.update({k: plan[k] for k in MATRIX_RELAY_FIELDS})
+    return out
 
 
 # ------------------------------------------------------------------------------- stage / run
@@ -369,10 +549,10 @@ def _inputs_channel():
     return os.fdopen(4, "w", encoding="utf-8")
 
 
-def _relay_roles():
+def _relay_roles(**kwargs):
     from tools.workflow.relay_roles import RelayRoles
 
-    return RelayRoles.from_env()
+    return RelayRoles.from_env(**kwargs)
 
 
 DEFINITION_PATH = Path(__file__).resolve().parent / "pinned" / "definitions"
@@ -427,6 +607,24 @@ def case_profile(
     work = Path(work)
     goal = adapter.select_profile(case, document)["goal"]
     factory = getattr(adapter, SUBST_FACTORY, None)
+    if live:
+        combine = live_factory(adapter)
+        if combine is None:
+            raise RuntimeError(f"{BLOCKED_LIVE}: adapter has no {LIVE_FACTORY}")
+        budget = case["budget"]["max_model_usd"]
+
+        def roles_factory(run_dir):
+            # Key-free client of the host Kong relay (owner ruling: the key never enters this
+            # container; only SIMKIT_RELAY_URL/TOKEN/RUN_ID/MODEL are present), combined with
+            # the case's substituted double when the case is mixed. No relay: refused, never
+            # replaced by substituted roles.
+            return combine(case, goal, run_dir, lambda _run_dir: _relay_roles(budget=budget))
+
+    else:
+
+        def roles_factory(run_dir):
+            return factory(case, goal, run_dir)
+
     return {
         "profile_document": document,
         "source_ledger": document["reference_fixture"]["source_ledger"],
@@ -441,13 +639,7 @@ def case_profile(
         # claim_gates.bind_definition_source, reading bytes).
         "definition_source": reference_definition(definition),
         "repo": CTL,
-        "roles_factory": (
-            # Key-free client of the host Kong relay (owner ruling: the key never enters
-            # this container; only SIMKIT_RELAY_URL/TOKEN/RUN_ID/MODEL are present).
-            (lambda run_dir: _relay_roles())
-            if live
-            else (lambda run_dir: factory(case, goal, run_dir))
-        ),
+        "roles_factory": roles_factory,
         # Real memory reader: UC-07 reading is the container VM's figure (owner ruling).
         "processes_factory": processes_factory,
         "input_supplement": {
@@ -481,8 +673,8 @@ def run(case_id, work):
         adapter = WeatherAdapter(enable_run_case=True)
         factory = getattr(adapter, SUBST_FACTORY, None)
         live = role_mode(case) == "live"
-        if live and SUBST in case["adapter_requirements"]:
-            raise RuntimeError(f"{BLOCKED_LIVE}: live + substituted role wiring is not built")
+        if live and live_factory(adapter) is None:
+            raise RuntimeError(f"{BLOCKED_LIVE}: adapter has no {LIVE_FACTORY}")
         if live and not os.environ.get("SIMKIT_RELAY_URL"):
             raise RuntimeError(f"{BLOCKED_LIVE}: no host relay configured for this container")
         if not live and not callable(factory):
