@@ -94,6 +94,12 @@ CONTAINER_ONLY = {
     "U8",
     "U11",
 }
+# Frozen assertion ids are numbered per case: in E10-P1-CTL / E11-P1-CTL the created-paths
+# assertion (all_under filesystem_snapshot.created_paths, RC10/U11 elsewhere) is U12, which in
+# the E14 cases names a different, in-process assertion. Excluded for these cases only; a test
+# below pins that each such id reads only created_paths.
+CONTAINER_ONLY_IN_CASE = {"E10-P1-CTL": {"U12"}, "E11-P1-CTL": {"U12"}}
+CREATED_PATHS = "filesystem_snapshot.created_paths"
 ONSET_DELAY_S = 1.5
 ONSET_TOOL = """
 if name == "onset_date":
@@ -205,7 +211,9 @@ def verdicts(result, *ids):
 
 def case_assertions(result):
     """Every frozen assertion the in-process route can decide (CONTAINER_ONLY excluded)."""
-    return [a["id"] for a in result.case["assertions"] if a["id"] not in CONTAINER_ONLY]
+    short = result.case["id"].removeprefix(PREFIX).removesuffix("-TD")
+    excluded = CONTAINER_ONLY | CONTAINER_ONLY_IN_CASE.get(short, set())
+    return [a["id"] for a in result.case["assertions"] if a["id"] not in excluded]
 
 
 def missing(report, prefix):
@@ -553,16 +561,11 @@ NATIVE_TERMINAL = {
     "E11-P1-CTL": ("RELEASED", None, "ACCEPTED"),
     "E11-P1-INJ": ("INCOMPLETE", "pending_operation", "REFUSED"),
 }
-# Controller-side defects (sub-wave A files, outside this sub-wave) that keep the stopped cases
-# from projecting/scoring. Strict: the test must start passing (and the mark be removed) once
-# they are fixed.
-CONTROLLER_DEFECTS = (
-    "controller defects outside sub-wave C: (1) recovery.record_accepted/record_refused append "
-    "a resume transition request to context.transition_requests without the per-record "
-    "transition-request-NNN.json the transition projection verifies against; (2) a resume "
-    "from a checkpoint older than the last dispatch event overwrites the killed incarnation's "
-    "launch_check/process_launch events (E11-P1-INJ loses its onset-date process receipt)"
-)
+# The thread double never kills incarnation 1 and observes no killed process's output (OI-04:
+# unobserved stays MISSING, never 0), so on E11-P1-INJ (stopped mid onset-date) the combined
+# output total is unobservable: exactly these verdicts, and only on the double. The forked
+# route observes the bytes before SIGKILL and must PASS them.
+THREAD_DOUBLE_UNOBSERVED = {"E11-P1-INJ": {"V24-OUTPUT": "NOT_OBSERVED", "V25-EVIDENCE": "FAIL"}}
 
 
 def check_native_route(results, real):
@@ -630,8 +633,9 @@ def check_native_route(results, real):
         assert "onset_partial" not in results[short].route  # not a mid-process stop
 
 
-def check_projected(results):
-    """The projection of the stopped cases, scored with the frozen scorer."""
+def check_projected(results, unobserved=None):
+    """The projection of the stopped cases, scored with the frozen scorer. ``unobserved``
+    names, per case, the exact non-PASS verdicts a route cannot observe (default: none)."""
     for short, result in results.items():
         assert result.refusal is None, f"{short}: {result.refusal}"
         trace = result.evidence["controller_trace"]
@@ -639,7 +643,8 @@ def check_projected(results):
         assert "at_checkpoint" in result.evidence["budget_ledger"]
         assert scored(result)["terminal"] == "PASS", short
         decided = verdicts(result, *case_assertions(result))
-        assert {k: v for k, v in decided.items() if v != "PASS"} == {}, short
+        expected = (unobserved or {}).get(short, {})
+        assert {k: v for k, v in decided.items() if v != "PASS"} == expected, short
     e11i = results["E11-P1-INJ"]
     stop = e11i.adapter.arm_midprocess_trigger(e11i.run, e11i.harness)
     assert stop["stop"]["trigger"] == "process_launch"
@@ -658,9 +663,25 @@ def test_thread_double_drives_the_parent_logic_and_the_controller_decides(double
         assert result.route["kill"]["ok"] is False  # the double never claims a kill
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=CONTROLLER_DEFECTS)
 def test_thread_double_projects_and_scores_the_frozen_outcomes(doubled):
-    check_projected(doubled)
+    check_projected(doubled, unobserved=THREAD_DOUBLE_UNOBSERVED)
+    # The killed onset-date start receipt survives the resume (never overwritten); its exit
+    # and output bytes stay MISSING on the double, never 0.
+    e11i = doubled["E11-P1-INJ"]
+    (receipt,) = [p for p in e11i.evidence["process_receipts"] if p["tool"] == "onset-date"]
+    assert receipt["end"] is None and receipt["exit_code"] is None
+    assert receipt.get("output_bytes") is None
+    assert missing(e11i.report, f"process_receipts[serial={receipt['serial']}].output_bytes")
+    assert missing(e11i.report, "budget_ledger.final.combined_process_output_bytes")
+
+
+def test_case_local_container_only_ids_read_only_created_paths(frozen):  # noqa: F811
+    for short, ids in CONTAINER_ONLY_IN_CASE.items():
+        assertions = {a["id"]: a for a in frozen[PREFIX + short]["assertions"]}
+        for assertion_id in ids:
+            predicate = assertions[assertion_id]["predicate"]
+            assert predicate["operator"] == "all_under", (short, assertion_id)
+            assert predicate["observation"] == CREATED_PATHS, (short, assertion_id)
 
 
 @FORK
@@ -673,7 +694,6 @@ def test_forked_route_kills_incarnation_1_and_resumes_as_incarnation_2(forked):
 
 
 @FORK
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=CONTROLLER_DEFECTS)
 def test_forked_route_projects_and_scores_the_frozen_outcomes(forked):
     check_projected(forked)
     for result in forked.values():
@@ -692,24 +712,18 @@ def test_forked_route_projects_and_scores_the_frozen_outcomes(forked):
 
 
 def test_stop_route_methods_need_the_projection(doubled):
-    """interrupt_controller / request_resume / attribute_resumes read the projection; while it
-    refuses (CONTROLLER_DEFECTS) they raise, never return a partial answer."""
+    """interrupt_controller / request_resume / attribute_resumes read the projection (which
+    no longer refuses the stopped cases: wave 7f controller fixes)."""
     e10i = doubled["E10-P1-INJ"]
-    if e10i.refusal is None:  # once the controller defects are fixed
-        stopped = e10i.adapter.interrupt_controller(e10i.run, e10i.harness)
-        assert stopped["interruptions"][0]["failure_class"] == "controller_killed"
-        assert stopped["harness_stop"]["incarnations"] == e10i.route["incarnations"]
-        (decision,) = e10i.adapter.attribute_resumes(e10i.run, e10i.harness)["attribution"]
-        assert decision["result"] == "REFUSED" and decision["initiated_by"] == "operator_ledger"
-        assert decision["operator_record_id"] == "HARNESS-OPERATOR-RESUME-2"
-        return
-    for method in (
-        e10i.adapter.interrupt_controller,
-        e10i.adapter.request_resume,
-        e10i.adapter.attribute_resumes,
-    ):
-        with pytest.raises(ep.EvidenceMappingError):
-            method(e10i.run, e10i.harness)
+    assert e10i.refusal is None, e10i.refusal
+    stopped = e10i.adapter.interrupt_controller(e10i.run, e10i.harness)
+    assert stopped["interruptions"][0]["failure_class"] == "controller_killed"
+    assert stopped["harness_stop"]["incarnations"] == e10i.route["incarnations"]
+    resumed = e10i.adapter.request_resume(e10i.run, e10i.harness)
+    assert len(resumed["resume"]) == 1 and "at_checkpoint" in resumed
+    (decision,) = e10i.adapter.attribute_resumes(e10i.run, e10i.harness)["attribution"]
+    assert decision["result"] == "REFUSED" and decision["initiated_by"] == "operator_ledger"
+    assert decision["operator_record_id"] == "HARNESS-OPERATOR-RESUME-2"
     # deny_write reads the controller's own context only: no denial was recorded.
     assert e10i.adapter.deny_write(e10i.run, e10i.harness)["status"] == "MISSING"
 
