@@ -1,7 +1,7 @@
 {
   "schema": "workflow.profile-proposal/1",
   "status": "EXPERIMENTAL_SYNTHETIC_SUBSET_ONLY",
-  "implementation": "tools/verification_profiles; see tools/verification-profiles.md for executable subset and limitations. Not registered in the production controller or frozen SIMKIT adapter.",
+  "implementation": "tools.workflow verification dispatches tools/verification_profiles and adapter_support/verification_adapter.py. Separate 19-case diagnostic SIMKIT caseset; normal admission withheld by unsigned VERIFICATION-PRODUCERS.json. See tools/verification-profiles.md for scope and limitations.",
   "purpose": "Executable-controller extensions for short-window rainfall verification and historical GEFS verification",
   "activation_gate": "Implement and review the contracts, controller transitions, evidence projection and new synthetic cases before registering either profile. This document grants no capability or live authority.",
   "profiles": [

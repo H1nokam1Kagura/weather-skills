@@ -133,13 +133,35 @@ class Controller:
         self.save()
 
     def pause(self):
-        """Trusted harness/operator action; consumed before the next synchronous operation."""
-        self.state["pause_requested"] = True
-        self.event("operator_pause", boundary="between_synchronous_operations")
+        """Publish intent without overwriting the active owner's checkpoint."""
+        # Unique immutable records let concurrent callers publish without a shared .tmp
+        # file. Only run(), under its lock, consumes intent and writes the checkpoint.
+        intent = {"binding_hash": self.binding, "id": str(uuid.uuid4()), "action": "pause"}
+        atomic_json(self.root / f"operator-pause-{intent['id']}.json", intent)
+
+    def pending_pauses(self):
+        consumed = set(self.state.get("consumed_pauses", []))
+        pending = []
+        for path in sorted(self.root.glob("operator-pause-*.json")):
+            intent = json.loads(path.read_text(encoding="utf-8"))
+            require(
+                intent.get("binding_hash") == self.binding
+                and intent.get("action") == "pause"
+                and path.name == f"operator-pause-{intent.get('id')}.json",
+                "invalid operator intent",
+            )
+            if intent["id"] not in consumed:
+                pending.append(intent["id"])
+        return pending
 
     def before_operation(self):
         if self.on_operation:
             self.on_operation(self)
+        pending = self.pending_pauses()
+        if pending:
+            self.state["pause_requested"] = True
+            self.state.setdefault("consumed_pauses", []).extend(pending)
+            self.event("operator_pause", intents=pending, boundary="between_synchronous_operations")
         if self.state["pause_requested"]:
             raise Paused()
         if (
@@ -161,10 +183,21 @@ class Controller:
             "invalid role invocation receipt",
         )
         previous.append(copy.deepcopy(receipt))
+        evidence = {"role": role, "input": payload, "output": answer, "receipt": receipt}
+        path = self.root / f"role-{len(previous):03}.json"
+        atomic_json(path, evidence)
+        self.state.setdefault("role_artifacts", []).append(
+            {"name": path.name, "hash": tree_hash(path)}
+        )
         self.save()
         return answer
 
     def verify_completed(self):
+        for record in self.state.get("role_artifacts", []):
+            require(Path(record["name"]).name == record["name"], "invalid role evidence path")
+            require(
+                tree_hash(self.root / record["name"]) == record["hash"], "role evidence changed"
+            )
         for index, entry in enumerate(self.state["ledger"]):
             if entry["status"] != "VERIFIED":
                 continue
@@ -229,6 +262,7 @@ class Controller:
                     self.state["status"] != "BLOCKED", "blocked run requires a new reviewed request"
                 )
                 self.state["pause_requested"] = False
+                self.state.setdefault("consumed_pauses", []).extend(self.pending_pauses())
                 self.event("operator_resume", source_artifact_runtime_checks="PASS")
             self.elapsed_base = self.state["elapsed_seconds"]
             self.started, self.running = time.perf_counter(), True
@@ -257,6 +291,7 @@ class Controller:
                     if entry["product"] not in cached:
                         self.grant.verify()
                         datasets, probe = inspect(self.request, product, records)
+                        cached.clear()  # retain only one initialization's bounded decoded sources
                         cached[entry["product"]] = datasets
                         if entry["product"] not in self.state["probes"]:
                             self.state["probes"][entry["product"]] = probe
@@ -332,6 +367,7 @@ class Controller:
                     answer == {"verdict": "PASS", "binding_hash": final_binding},
                     "final verifier refused",
                 )
+                self.before_operation()
                 complete = all(
                     e["status"] == "VERIFIED"
                     and all(m["uncertainty"]["status"] == "ESTIMATED" for m in e["scores"].values())

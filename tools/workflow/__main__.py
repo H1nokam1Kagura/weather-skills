@@ -16,8 +16,15 @@ from .runner import Controller
 
 
 def main():
+    if sys.argv[1:2] == ["verification"]:
+        from tools.verification_profiles.lifecycle import main as verification_main
+
+        raise SystemExit(verification_main(sys.argv[2:]))
     parser = argparse.ArgumentParser(description="Controlled scientific workflow lifecycle")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser(
+        "verification", help="Gated verification-profile lifecycle and SIMKIT cases"
+    )
     run = commands.add_parser("run", help="Start a fresh reviewed workflow")
     run.add_argument("--request", type=Path, required=True)
     run.add_argument("--source", type=Path, required=True)

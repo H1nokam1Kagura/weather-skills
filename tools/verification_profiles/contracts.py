@@ -188,6 +188,7 @@ def build_identity(repo):
         repo / "tools/workflow/catalog.py",
         repo / "tools/workflow/contracts.py",
         repo / "tools/workflow/persistence.py",
+        repo / "adapter_support/verification_adapter.py",
     ]
     # Python bytecode is host-local and is not part of a reviewed implementation.
     files = [p for root in paths for p in (root.rglob("*.py") if root.is_dir() else [root])]

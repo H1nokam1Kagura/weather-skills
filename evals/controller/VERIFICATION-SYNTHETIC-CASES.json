@@ -1,9 +1,11 @@
 {
   "schema": "verification.synthetic-case-index/1",
-  "status": "LOCAL_TESTS_NOT_INDEPENDENTLY_REVIEWED",
+  "status": "EXECUTABLE_DIAGNOSTIC_CASESET_UNRATIFIED",
+  "executable_cases": "evals/controller/verification-v1/cases.json",
+  "runner": "python -m tools.workflow verification eval --diagnostic --run-dir <new-path>",
   "test_module": "tests/test_verification_profiles.py",
   "execution": "pytest using real scientific skills, deterministic synthetic inputs and substituted roles",
-  "simkit_admission": "NOT_REGISTERED",
+  "simkit_admission": "PENDING_SEPARATE_CAPABILITY_REVIEW",
   "production_release": false,
   "cases": [
     {"id": "WINDOW-ALL", "tests": ["test_real_skills_all_windows"], "oracle": "2/5/10-day MAE equals 0.5 times window length, baseline zero, exact paired counts"},
