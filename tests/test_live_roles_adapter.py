@@ -136,9 +136,15 @@ class FakeRelay:
     """Zero-cost RelayRoles stand-in: same ask/receipts/spent/budget/model/dispatch_* interface,
     answers from the substituted baselines. Each ask runs a REAL relay_roles.RelayRoles client
     (encoding, body cap, envelope + receipt validation, spend reconcile, dispatch observation)
-    over FakeHostTransport, so the fake cannot drift from the current relay protocol."""
+    over FakeHostTransport, so the fake cannot drift from the current relay protocol.
 
-    def __init__(self, case, goal, budget=5, model=MODEL):
+    Its receipts say what it is: gateway_mock true, cost_basis "no model called". A live member
+    refuses such a receipt (B-LR-1) unless the member was constructed with the test-only
+    opt-out, so every zero-cost run here passes allow_gateway_mock=True EXPLICITLY."""
+
+    def __init__(self, case, goal, budget=5, model=MODEL, allow_gateway_mock=False):
+        # live_roles.GATEWAY_MOCK_OPT_OUT: an instance attribute set at construction only.
+        self.allow_gateway_mock = allow_gateway_mock
         every = {
             "id": case["id"],
             "agent_roles": {"substituted": sorted(rs.NATIVE_ROLE)},
@@ -283,7 +289,9 @@ def execute(lab, case):
     built, relays = [], []
 
     def relay_factory(run_dir):
-        relays.append(FakeRelay(case, goal, budget=case["budget"]["max_model_usd"]))
+        relays.append(
+            FakeRelay(case, goal, budget=case["budget"]["max_model_usd"], allow_gateway_mock=True)
+        )
         return relays[-1]
 
     def factory(run_dir):
@@ -489,8 +497,12 @@ def test_project_live_receipt_carries_live_identity_and_substituted_mode(runs):
             assert projected["model_observed"] == MODEL
             assert projected["relay_id"] == receipt["relay_id"]
             assert projected["settings"]["temperature"] == 0
+            # B-LR-1: the fake relay is visibly a mock in the projected live identity.
+            assert projected["gateway_mock"] is True
+            assert projected["cost_basis"] == "fake relay (test): zero cost, no model called"
         else:
             assert projected == {"mode": S, "transport": rs.SUBSTITUTE_ID}
+    assert r.roles.allow_gateway_mock is True and r.roles.report()["allow_gateway_mock"] is True
     sparse = {"mode": "live", "transport": relay_roles.TRANSPORT, "usage": None}
     assert live_roles.project_live_receipt(sparse) == sparse  # missing stays missing
     assert live_roles.project_live_receipt({"role": "x"}) == {}
@@ -554,7 +566,7 @@ def combined_for(frozen, short, relay=None):
     made = []
 
     def relay_factory(run_dir):
-        made.append(relay or FakeRelay(case, goal))
+        made.append(relay or FakeRelay(case, goal, allow_gateway_mock=True))
         return made[-1]
 
     return live_roles.live_roles_factory(case, goal, None, relay_factory), made
@@ -605,6 +617,160 @@ def test_dispatch_observation_is_copied_back_on_a_member_exception(frozen):
     }
     assert relay.dispatch_context is None and relay.dispatch_observer is None
     assert roles.receipts == [] and roles.routes[-1]["outcome"] == "RAISED RelayOutcomeUnknown"
+
+
+MISSING_FIELD = object()
+
+
+class ReceiptMember:
+    """Minimal live member: appends one configured receipt per ask and returns a fresh answer
+    object, so a test can see whether the answer ever left CombinedRoles."""
+
+    def __init__(self, receipt, **attrs):
+        self.receipt = receipt
+        self.receipts, self.sessions, self.unknown_outcomes = [], set(), []
+        self.spent, self.budget, self.model = 0.0, 5, MODEL
+        self.answers = []
+        self.__dict__.update(attrs)
+
+    def ask(self, role, payload):
+        if self.receipt is not None:
+            self.receipts.append(copy.deepcopy(self.receipt))
+        self.answers.append(object())
+        return self.answers[-1]
+
+
+def live_receipt(**overrides):
+    receipt = {
+        "role": "compiler",
+        "invocation_id": "inv-1",
+        "mode": L,
+        "transport": relay_roles.TRANSPORT,
+        "cost_basis": "Anthropic list-price estimate; Kong billing not observed",
+        "gateway_mock": False,
+    }
+    receipt.update(overrides)
+    return {k: v for k, v in receipt.items() if v is not MISSING_FIELD}
+
+
+def test_live_member_refuses_a_mock_or_unproven_gateway_receipt_before_the_answer_is_used(
+    frozen,
+):
+    """B-LR-1: without the construction-time opt-out, a live receipt whose gateway_mock is not
+    exactly False (true, missing, null, non-boolean), or an answer with no receipt at all, is
+    refused (AdapterRefusal) and the answer never leaves CombinedRoles."""
+    refused = {
+        "gateway_mock true": live_receipt(gateway_mock=True),
+        "no gateway_mock": live_receipt(gateway_mock=MISSING_FIELD),
+        "gateway_mock None": live_receipt(gateway_mock=None),
+        "gateway_mock 'false'": live_receipt(gateway_mock="false"),
+        "gateway_mock 0": live_receipt(gateway_mock=0),
+        "no receipt": None,
+    }
+    for label, receipt in refused.items():
+        member = ReceiptMember(receipt)
+        roles, _ = combined_for(frozen, "E12-P1-CTL", relay=member)
+        assert roles.allow_gateway_mock is False, label
+        with pytest.raises(AdapterRefusal, match="live compiler answer refused") as caught:
+            roles.ask("compiler", {"messages": []})
+        assert len(member.answers) == 1, label  # the member answered; the answer was not used
+        assert roles.routes[-1]["outcome"] == "REFUSED_GATEWAY_MOCK", label
+        text = str(caught.value)
+        if receipt is None:
+            assert "no receipt" in text
+        elif "gateway_mock" not in receipt:
+            assert "MISSING" in text
+        elif receipt["gateway_mock"] is True:
+            assert "no model was called" in text and receipt["cost_basis"] in text
+        else:
+            assert "not a boolean" in text, label
+    # A real-gateway receipt passes, and its answer is the member's own object.
+    member = ReceiptMember(live_receipt())
+    roles, _ = combined_for(frozen, "E12-P1-CTL", relay=member)
+    assert roles.ask("compiler", {"messages": []}) is member.answers[-1]
+    assert roles.routes[-1]["outcome"] == "RETURNED"
+    assert live_roles.project_live_receipt(roles.receipts[-1])["gateway_mock"] is False
+
+
+def test_the_real_relay_client_path_without_the_opt_out_refuses_the_fake_relay(frozen):
+    """The zero-cost FakeRelay (REAL RelayRoles client, which only checks gateway_mock is
+    present) constructed WITHOUT the opt-out: its gateway_mock-true receipt passes the client
+    and is refused by the combining layer before the answer is used."""
+    case = copy.deepcopy(frozen[PREFIX + "E12-P1-CTL"])
+    relay = FakeRelay(case, DATA_GOAL)
+    roles, _ = combined_for(frozen, "E12-P1-CTL", relay=relay)
+    with pytest.raises(AdapterRefusal, match="gateway_mock true"):
+        roles.ask("compiler", {"messages": []})
+    assert relay.calls == ["compiler"] and relay.receipts[-1]["gateway_mock"] is True
+    assert roles.receipts == relay.receipts  # recorded as it is, never hidden
+
+
+def test_the_gateway_mock_opt_out_is_construction_only_and_absent_from_the_live_path(frozen):
+    # Only exactly True on the member's own instance counts.
+    for attrs, allowed in (
+        ({"allow_gateway_mock": True}, True),
+        ({"allow_gateway_mock": 1}, False),
+        ({"allow_gateway_mock": "true"}, False),
+        ({}, False),
+    ):
+        member = ReceiptMember(live_receipt(gateway_mock=True), **attrs)
+        roles, _ = combined_for(frozen, "E12-P1-CTL", relay=member)
+        assert roles.allow_gateway_mock is allowed, attrs
+        if allowed:
+            assert roles.ask("compiler", {}) is member.answers[-1]
+            assert live_roles.project_live_receipt(roles.receipts[-1])["gateway_mock"] is True
+        else:
+            with pytest.raises(AdapterRefusal, match="gateway_mock true"):
+                roles.ask("compiler", {})
+
+    class ClassLevel(ReceiptMember):
+        allow_gateway_mock = True  # a class attribute is not a construction-time opt-out
+
+    member = ClassLevel(live_receipt(gateway_mock=True))
+    roles, _ = combined_for(frozen, "E12-P1-CTL", relay=member)
+    assert roles.allow_gateway_mock is False
+    # The production live member never carries it, and no live-path module names it.
+    client = relay_roles.RelayRoles("http://127.0.0.1:9", "t" * 43, "run", budget=1, model=MODEL)
+    assert live_roles.GATEWAY_MOCK_OPT_OUT not in vars(client)
+    assert not hasattr(relay_roles.RelayRoles, live_roles.GATEWAY_MOCK_OPT_OUT)
+    for rel in (
+        "container_harness/case_driver.py",
+        "container_harness/launch.py",
+        "adapter_support/weather_adapter.py",
+        "adapter_support/evidence_projection.py",
+        "tools/workflow/relay_roles.py",
+        "tools/workflow/kong_roles.py",
+        "tools/workflow/runner.py",
+    ):
+        assert live_roles.GATEWAY_MOCK_OPT_OUT not in (REPO / rel).read_text(encoding="utf-8")
+    source = (REPO / "adapter_support/live_roles.py").read_text(encoding="utf-8")
+    assert "environ" not in source and "getenv" not in source
+
+
+def test_passthrough_with_no_review_capture_is_missing_not_a_negative_result(tmp_path):
+    """D4 N-BP-1: no capture means no check ran, so confirmed is null with a MISSING reason."""
+    planner = {
+        "receipt": {
+            "role": "planner",
+            "invocation_id": "inv-p",
+            "mode": S,
+            "substitutions": [{"hook": "after_role", "schedule_indexes": [0]}],
+        },
+        "input": {},
+        "output": {"plan": {"steps": [{"tool": "x"}]}, "plan_claims": []},
+    }
+    reviewer = {
+        "receipt": {"role": "reviewer", "invocation_id": "inv-r", "mode": L},
+        "input": {},
+        "output": {"verdict": "APPROVE"},
+    }
+    for name, record in (("role-001-planner.json", planner), ("role-002-reviewer.json", reviewer)):
+        (tmp_path / name).write_text(json.dumps(record), encoding="utf-8")
+    (result,) = live_roles.confirm_binding_passthrough(tmp_path)
+    assert result["confirmed"] is None
+    assert result["reason"].startswith("MISSING: no check ran")
+    assert result["carrier_role"] == "reviewer" and result["reviewed_hash"] is None
+    assert result["delivered_hash"] is not None
 
 
 def test_resume_restore_and_meter_writes_reach_the_live_member(frozen):

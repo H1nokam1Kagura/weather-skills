@@ -65,7 +65,17 @@ LIVE_RECEIPT_FIELDS = (
     "request_id",
     "response_id",
     "relay_id",
+    "gateway_mock",
+    "cost_basis",
 )
+# B-LR-1: a live receipt is a model result only when the gateway says it was not a mock
+# (KongRoles receipt gateway_mock, the kit's is_mock_url). Anything other than exactly False
+# (True, missing, null, non-boolean) is refused before the answer reaches the controller.
+# The ONLY opt-out is an instance attribute of this name, set to exactly True on the live
+# member object itself when it is constructed (the zero-cost fake relays of the tests). No
+# production member carries it: RelayRoles / KongRoles never set it, no env var or case field
+# is read for it, and case_driver / run_case / invoke_live_role pass nothing for it.
+GATEWAY_MOCK_OPT_OUT = "allow_gateway_mock"
 # Reviewer output keys that are the controller's own decision inputs, not a proposal carried
 # on to the next consumer (accept_review_output, runner.py).
 REVIEW_DECISION_KEYS = frozenset({"verdict", "approved_binding"})
@@ -147,6 +157,9 @@ class CombinedRoles:
             _refuse("the case lists substituted roles; this case's substituted double is required")
         if isinstance(double, rs.SubstitutedRoles) and double.case_id != self.case_id:
             _refuse("the substituted double belongs to another case")
+        # Read once, from the member's own instance dict (not a class attribute, not a
+        # __getattr__ fallback): see GATEWAY_MOCK_OPT_OUT.
+        self.allow_gateway_mock = getattr(live, "__dict__", {}).get(GATEWAY_MOCK_OPT_OUT) is True
         self.receipts = []
         self.routes = []
         self.dispatch_context = None
@@ -273,6 +286,11 @@ class CombinedRoles:
             record["outcome"] = f"RAISED {type(exc).__name__}"
             raise
         else:
+            if member_name == LIVE:
+                problem = self.gateway_mock_problem(member.receipts[before:])
+                if problem is not None:
+                    record["outcome"] = "REFUSED_GATEWAY_MOCK"
+                    _refuse(f"live {role} answer refused in case {self.case_id}: {problem}")
             record["outcome"] = "RETURNED"
             return answer
         finally:
@@ -286,10 +304,34 @@ class CombinedRoles:
             self.receipts.extend(added)
             record["receipts"] = [r.get("invocation_id") for r in added]
 
+    def gateway_mock_problem(self, added):
+        """Why the live member's answer is not a model result (B-LR-1), or None.
+
+        Every receipt the live member added for this answer must carry gateway_mock exactly
+        False; an answer with no receipt has nothing showing a real model answered. With the
+        construction-time opt-out (GATEWAY_MOCK_OPT_OUT) a mock receipt is let through, and
+        the projection still shows gateway_mock true."""
+        if not added:
+            return "the live member added no receipt, so nothing shows a real model answered"
+        for receipt in added:
+            ident = receipt.get("invocation_id") if isinstance(receipt, dict) else None
+            if not isinstance(receipt, dict) or "gateway_mock" not in receipt:
+                return f"receipt {ident} carries no gateway_mock (MISSING, never assumed False)"
+            value = receipt["gateway_mock"]
+            if type(value) is not bool:
+                return f"receipt {ident} gateway_mock is {value!r}, not a boolean"
+            if value and not self.allow_gateway_mock:
+                return (
+                    f"receipt {ident} has gateway_mock true: a mock gateway answered "
+                    f"({receipt.get('cost_basis')!r}); no model was called"
+                )
+        return None
+
     def report(self):
         return {
             "capability": CAPABILITY,
             "case_id": self.case_id,
+            "allow_gateway_mock": self.allow_gateway_mock,
             "table": copy.deepcopy(self.table),
             "routes": copy.deepcopy(self.routes),
         }
@@ -457,8 +499,12 @@ def confirm_binding_passthrough(run_dir):
             capture = captures.get(consumer["receipt"].get("invocation_id"))
             evidence = capture[1].get("review_evidence") if capture else None
             if not isinstance(evidence, dict) or "plan_hash" not in evidence:
-                result["confirmed"] = False
-                result["reason"] = "not passed through: the reviewer has no review capture"
+                # No check ran: MISSING evidence, never a negative result (D4 N-BP-1).
+                result["confirmed"] = None
+                result["reason"] = (
+                    "MISSING: no check ran: the reviewer has no review capture presenting a "
+                    "plan_hash"
+                )
                 out.append(result)
                 continue
             result["carrier_record"] = capture[0]

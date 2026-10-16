@@ -32,8 +32,11 @@ CASES = ("E01-P1-INJ", "E07-P1-INJ", "E03-P3-INJ", "E03-P3-CTL")
 # Wave-7 stop-and-resume cases that also need these records (signed since the D4 w7 review);
 # admitted by them, executed by tests/test_resume_family_adapter.py, not here.
 WAVE7_CASES = ("E10-P1-CTL", "E10-P1-INJ", "E11-P1-CTL", "E11-P1-INJ")
+# Live cases that also need these records (live-role records signed, D4-CONFIRM-LW-A); admitted
+# by them, not executed here (live cases run only through the relay, by explicit case list).
+LIVE_CASES = ("E10-P2-CTL", "E10-P2-INJ", "E11-P2-CTL", "E11-P2-INJ", "E15-P2-CTL")
 # Flagged rereview_required by the live-role wave (LIVE-WAVE-BRIEF sub-wave 6).
-LIVE_WAVE_FLAGGED = ("CAP-LEDGER-APPEND", "CAP-OPERATOR-RECORD-SETUP", "CAP-TRANSITION-REQUEST")
+LIVE_WAVE_FLAGGED = ()  # all three re-signed after the live-role wave (D4-REVIEW-LW-B / -C)
 
 
 UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
@@ -102,9 +105,8 @@ def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
         assert record["tests"] and record["producers"] and record["evidence_fields"]
-        # Re-signed after wave 7 (D4 w7 re-review). The live-role wave's weather_adapter.py
-        # change flags CAP-LEDGER-APPEND and CAP-OPERATOR-RECORD-SETUP rereview_required, and its
-        # runner.py change (51089d0) flags CAP-TRANSITION-REQUEST: all undeclared as committed.
+        # Re-signed after the live-role wave (D4-REVIEW-LW-B / -C at d6c2809): declared as
+        # committed. LIVE_WAVE_FLAGGED names any record a later producer change flags again.
         if cap in LIVE_WAVE_FLAGGED:
             assert record["rereview_required"].strip()
             assert cap not in WeatherAdapter().implemented_capabilities()
@@ -121,7 +123,7 @@ def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
         before = set(case["adapter_requirements"]) - stripped.implemented_capabilities()
         if before and not set(case["adapter_requirements"]) - implemented:
             newly.add(case["id"].removeprefix(PREFIX))
-    assert newly == set(CASES) | set(WAVE7_CASES)
+    assert newly == set(CASES) | set(WAVE7_CASES) | set(LIVE_CASES)
 
 
 def test_unsigned_records_keep_the_frozen_cases_refused_before_side_effects(lab, frozen, tmp_path):  # noqa: F811

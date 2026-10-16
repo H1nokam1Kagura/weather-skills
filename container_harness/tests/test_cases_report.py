@@ -574,3 +574,72 @@ def test_workflow_runs_both_execution_gates_after_the_uploads():
     gate = "container_harness/cases_report.py gate results/RESULTS.json"
     assert gate in report_job
     assert report_job.index(gate) > report_job.index("name: simkit-results")
+
+
+def projected(*gateway_mocks):
+    """A projection whose live invocation receipts carry these live.gateway_mock values
+    (MISSING_GW: the key is absent), plus one substituted receipt (no live identity)."""
+    receipts = [{"role": "compiler_1", "invocation_id": "inv-s", "mode": "substituted"}]
+    for i, value in enumerate(gateway_mocks):
+        live = {"mode": "live", "model_observed": "claude-sonnet-4-6"}
+        if value is not MISSING_GW:
+            live["gateway_mock"] = value
+        receipts.append(
+            {"role": "planner", "invocation_id": f"inv-{i}", "mode": "live", "live": live}
+        )
+    return {"status": "PARTIAL", "projection": {"evidence": {"invocation_receipts": receipts}}}
+
+
+MISSING_GW = object()
+
+
+def test_executed_cases_with_mock_gateway_receipts_are_flagged_never_live_results(tmp_path):
+    """B-LR-1: a case whose projected live receipts carry gateway_mock true is flagged in the
+    JSON, in its detail cell and in a prominent RESULTS.md line; missing gateway_mock is flagged
+    as unobserved; only all-false receipts are a live result. A substituted-only case is
+    untouched."""
+    rows = [
+        live_row("G1-CTL", "control"),
+        live_row("G1-INJ", "injection"),
+        live_row("G2-CTL", "control"),
+        row("G2-INJ", "injection"),
+    ]
+    projections = {
+        "G1-CTL": projected(False, True),  # one mock receipt is enough
+        "G1-INJ": projected(False, MISSING_GW),
+        "G2-CTL": projected(False, False),
+        "G2-INJ": {"status": "PARTIAL", "projection": {"evidence": {"invocation_receipts": []}}},
+    }
+    for cid, projection in projections.items():
+        art = artifact(tmp_path, cid, score=scored(cid, CLEAN, "PASS"))
+        (art / "projection.json").write_text(json.dumps(projection), encoding="utf-8")
+    res = cases_report.build(admission(rows, selector="live"), tmp_path / "cases", "RUN-G")
+    got = by_id(res)
+    mock = got["G1-CTL"]["gateway_mock"]
+    assert mock["status"] == cases_report.GATEWAY_MOCK and mock["live_result"] is False
+    assert mock["mock"] == ["inv-1"] and mock["real"] == ["inv-0"] and mock["note"]
+    unseen = got["G1-INJ"]["gateway_mock"]
+    assert unseen["status"] == cases_report.GATEWAY_UNOBSERVED and unseen["live_result"] is False
+    assert unseen["unobserved"] == ["inv-1"]
+    real = got["G2-CTL"]["gateway_mock"]
+    assert (
+        real["status"] is None
+        and real["live_result"] is True
+        and real["real"]
+        == [
+            "inv-0",
+            "inv-1",
+        ]
+    )
+    assert "gateway_mock" not in got["G2-INJ"]  # no live receipt: nothing to flag
+    # The frozen headline is untouched: the flag never rewrites dimensions or terminal.
+    assert got["G1-CTL"]["dimensions"] == CLEAN and got["G1-CTL"]["terminal"] == "PASS"
+    assert res["live"]["gateway_mock_cases"] == ["G1-CTL"]
+    assert res["live"]["gateway_unobserved_cases"] == ["G1-INJ"]
+    md = cases_report.markdown(res)
+    assert "> **GATEWAY MOCK, no model called, NOT a live result: G1-CTL**" in md
+    assert "> **GATEWAY UNOBSERVED (gateway_mock missing), NOT a live result: G1-INJ**" in md
+    line = next(x for x in md.splitlines() if x.startswith("| G1-CTL |"))
+    assert "GATEWAY MOCK: no model called, NOT a live result" in line
+    line = next(x for x in md.splitlines() if x.startswith("| G2-CTL |"))
+    assert "GATEWAY" not in line

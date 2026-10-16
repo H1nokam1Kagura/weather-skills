@@ -520,3 +520,27 @@ def test_credential_file_heuristic_ignores_hongkong_system_files():
         assert not relay_smoke.credential_like_name(benign)
     for bad in ("/home/x/.env", "/tmp/prod.env", "/tmp/kong_key.txt", "/root/KONG-TOKEN"):
         assert relay_smoke.credential_like_name(bad)
+
+
+def test_every_job_that_starts_the_relay_installs_the_pinned_runner_sdk_first():
+    """Run 38951255405: the live case job started the relay (--client runner) without the
+    pinned SDK, so the relay refused to start and the case never ran. Every job with a
+    relay-start step must install relay/runner_kit/requirements.txt in an earlier step that
+    runs under the same condition."""
+    jobs = workflow()["jobs"]
+    starters = 0
+    for name, job in jobs.items():
+        steps = job.get("steps") or []
+        starts = [
+            i for i, s in enumerate(steps) if "relay_ci.sh relay-start" in (s.get("run") or "")
+        ]
+        for i in starts:
+            starters += 1
+            installs = [
+                s
+                for s in steps[:i]
+                if "relay/runner_kit/requirements.txt" in (s.get("run") or "")
+                and s.get("if") in (None, steps[i].get("if"))
+            ]
+            assert installs, (name, steps[i].get("name"))
+    assert starters >= 4  # relay-smoke, relay-dedup-smoke, relay-role-smoke, live case

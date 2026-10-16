@@ -25,6 +25,7 @@ from types import SimpleNamespace
 import pytest
 from test_evidence_projection_v27 import (
     GENERATOR,
+    LIVE_SIGNED_ADMITTED,
     MAP_GOAL,
     TEST_FREE_RAM_GIB,
     ledger,
@@ -144,7 +145,9 @@ def run_lab(lab, case, relay_cls=FakeRelay, producers=None):  # noqa: F811
     relays, built = [], []
 
     def relay_factory(run_dir):
-        relays.append(relay_cls(case, goal, budget=case["budget"]["max_model_usd"]))
+        relays.append(
+            relay_cls(case, goal, budget=case["budget"]["max_model_usd"], allow_gateway_mock=True)
+        )
         return relays[-1]
 
     def factory(run_dir):
@@ -208,7 +211,9 @@ def run_driver(lab, frozen, short, tmp_path_factory, monkeypatch):  # noqa: F811
 
     def fake_relay_roles(**kwargs):
         budgets.append(kwargs.get("budget"))
-        relays.append(FakeRelay(case, goal_of(case), budget=kwargs["budget"]))
+        relays.append(
+            FakeRelay(case, goal_of(case), budget=kwargs["budget"], allow_gateway_mock=True)
+        )
         return relays[-1]
 
     monkeypatch.setattr(cd, "_relay_roles", fake_relay_roles)
@@ -288,9 +293,14 @@ def test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed():
             assert cap not in WeatherAdapter.extension_methods
         else:
             assert WeatherAdapter.extension_methods[cap] == method
+    # Six live records are signed (D4-CONFIRM-LW-A); CAP-OPERATOR-NOTIFY-HOOK stays unsigned until
+    # sub-wave 5 opens the notification boundary in run_case.
+    held = {"CAP-OPERATOR-NOTIFY-HOOK"}
     committed = WeatherAdapter().implemented_capabilities()
-    assert not set(LIVE_WAVE) & committed  # no committed record exists for any of them
-    assert not set(LIVE_WAVE) & WeatherAdapter(producers=resigned()).implemented_capabilities()
+    assert set(LIVE_WAVE) & committed == set(LIVE_WAVE) - held
+    assert set(LIVE_WAVE) & WeatherAdapter(producers=resigned()).implemented_capabilities() == (
+        set(LIVE_WAVE) - held
+    )
     assert set(LIVE_WAVE) <= WeatherAdapter(producers=signed_producers()).implemented_capabilities()
     unsigned = WeatherAdapter(producers=signed_producers(unsigned=LIVE_WAVE))
     assert not set(LIVE_WAVE) & unsigned.implemented_capabilities()
@@ -303,9 +313,17 @@ def test_admission_refuses_every_live_case_while_the_live_records_are_unsigned(f
     cases = list(frozen.values())
     live = {c["id"] for c in cases if "CAP-LIVE-ROLE" in c["adapter_requirements"]}
     assert len(live) == 34
+    # The committed file (six live records signed) admits exactly LIVE_SIGNED_ADMITTED; E14-P3
+    # needs the held CAP-OPERATOR-NOTIFY-HOOK and E12-P2 needs CAP-DECOY.
+    records = simkit_run(cases, WeatherAdapter(enable_run_case=True), profile={})
+    by_id = {r["case_id"]: r for r in records}
+    assert {c for c in live if by_id[c]["status"] != "NOT_IMPLEMENTED"} == LIVE_SIGNED_ADMITTED
+    for short in ("E14-P3-CTL", "E14-P3-INJ"):
+        missing = by_id[PREFIX + short]["missing_capabilities"]
+        assert by_id[PREFIX + short]["status"] == "NOT_IMPLEMENTED"
+        assert "CAP-OPERATOR-NOTIFY-HOOK" in missing, short
+    # Without the live signatures (stripped test-locally) every live case is refused.
     for producers in (
-        None,  # the committed file
-        resigned(),  # every other record re-signed, no live record at all
         signed_producers(unsigned=LIVE_WAVE),  # live records present, unsigned
         signed_producers(unsigned=["CAP-LIVE-ROLE"]),  # only CAP-LIVE-ROLE unsigned
     ):
@@ -327,8 +345,11 @@ def admission_with(monkeypatch, producers, selector="live"):
 
 def test_case_driver_admission_runs_mixed_cases_and_matrix_rows_carry_relay_caps(monkeypatch):
     committed = cd.admission("live")
-    assert committed["selected"] == [] and committed["matrix"] == []
-    assert all(not r["admitted"] for r in committed["cases"] if r["role_mode"] == "live")
+    committed_live = {
+        r["case_id"] for r in committed["cases"] if r["role_mode"] == "live" and r["admitted"]
+    }
+    assert committed_live == LIVE_SIGNED_ADMITTED
+    assert set(committed["selected"]) == LIVE_SIGNED_ADMITTED
     signed = admission_with(monkeypatch, signed_producers())
     rows = {r["case_id"][len(PREFIX) :]: r for r in signed["cases"]}
     # Group A (all live) and group B/C (mixed, through the combining hook) are runnable.
@@ -440,6 +461,10 @@ def test_live_identity_is_projected_per_live_receipt_and_missing_stays_missing(d
                 assert live["model_requested"] == live["model_observed"] == MODEL
                 assert live["settings"]["temperature"] == 0 and live["settings"]["sdk"]
                 assert live["relay_id"] and live["response_id"] == record["session_id"]
+                # B-LR-1: the zero-cost fake relay is a mock gateway and the projection says
+                # so; it is never indistinguishable from a real model call.
+                assert live["gateway_mock"] is True
+                assert live["cost_basis"] == "fake relay (test): zero cost, no model called"
             else:
                 assert "live" not in record  # a substituted receipt carries no live identity
 
