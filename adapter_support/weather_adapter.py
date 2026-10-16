@@ -406,9 +406,10 @@ class WeatherAdapter(Adapter):
             ],
         }
 
-    def plan_case(self, case, profile_document, repo):
+    def plan_case(self, case, profile):
         """run_case's admission checks and static plans, before any side effect (AdapterRefusal
-        otherwise): {variant, shadow, scheduled, fixture, schedule, max_repairs}. Also read by
+        otherwise): {variant, shadow, scheduled, fixture, schedule, max_repairs}. ``profile`` is
+        read only after the capability refusals (profile_document, repo). Also read by
         prepare_before_run_fixture, so fixture preparation plans exactly what run_case runs."""
         if not self.enable_run_case:
             raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
@@ -421,7 +422,7 @@ class WeatherAdapter(Adapter):
         implied = resume_driver.implied_missing(case, self.implemented_capabilities())
         if implied:
             raise AdapterRefusal(f"case schedule implies undeclared capabilities: {implied}")
-        variant = self.select_profile(case, profile_document)
+        variant = self.select_profile(case, profile["profile_document"])
         # CAP-SHADOW: invocation points, vocabulary and the shadow decision entries (delivered
         # by shadow_projection, not InjectionHooks), mapped or refused before any side effect.
         shadow_plan = self.drive_shadow_policy(case)
@@ -436,7 +437,7 @@ class WeatherAdapter(Adapter):
             "variant": variant,
             "shadow": shadow_plan,
             "scheduled": scheduled,
-            "fixture": self.apply_fixture_operation(scheduled, repo),
+            "fixture": self.apply_fixture_operation(scheduled, profile["repo"]),
             "schedule": self.substitute_role_output(scheduled, variant["goal"]),
             "max_repairs": self.configure_repair(case),
         }
@@ -449,7 +450,7 @@ class WeatherAdapter(Adapter):
         (prepared["before_run_fixture"]), or None when the case schedules none or run_case
         would refuse the case (nothing applied; run_case refuses it with the same reason)."""
         try:
-            plans = self.plan_case(case, profile_document, repo)
+            plans = self.plan_case(case, {"profile_document": profile_document, "repo": repo})
         except AdapterRefusal:
             return None
         return fixture_ops.prestage_before_run(
@@ -477,7 +478,7 @@ class WeatherAdapter(Adapter):
 
         Without either (in-process route) everything is staged and written as before.
         """
-        plans = self.plan_case(case, profile["profile_document"], profile["repo"])
+        plans = self.plan_case(case, profile)
         variant, shadow_plan, scheduled = plans["variant"], plans["shadow"], plans["scheduled"]
         fixture_plan, schedule_plan = plans["fixture"], plans["schedule"]
         max_repairs = plans["max_repairs"]
