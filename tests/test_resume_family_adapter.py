@@ -2,8 +2,9 @@
 
 The frozen cases E10-P1 (CTL/INJ), E11-P1 (CTL/INJ), E14-P1 (CTL/INJ) and E14-P2-INJ run
 through WeatherAdapter.run_case with their FROZEN adapter_requirements, admitted by a
-test-local copy of the producer file in which the nine wave-7 records are added and signed
-(the committed file does not carry them: only the coordinator adds and signs them). Roles are
+test-local copy of the producer file in which the nine wave-7 records are signed and the
+records flagged rereview_required are re-signed (the committed file carries the nine unsigned
+and the flags: only the coordinator signs, after the batch D4 review). Roles are
 the substituted doubles the container case driver uses; tools are stand-in scripts whose
 onset-date writes a small real zarr (FX-ONSET-CELL-SHIFT mutates it) after a short delay (so
 the mid-process stop lands while it runs). Frozen assertions are scored with the pinned
@@ -40,7 +41,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from test_evidence_projection_v27 import CATALOG, MAP_GOAL, TOOL_SCRIPT, Lab, score
+from test_evidence_projection_v27 import (
+    CATALOG,
+    MAP_GOAL,
+    SIGNED_ADMITTED,
+    TOOL_SCRIPT,
+    Lab,
+    resigned,
+    score,
+)
 from test_role_substitution_adapter import PREFIX, frozen  # noqa: F401 - shared fixture
 
 from adapter_support import evidence_projection as ep
@@ -49,7 +58,6 @@ from adapter_support.weather_adapter import (
     PROJECTION_INPUTS_FILE,
     AdapterRefusal,
     WeatherAdapter,
-    load_producers,
 )
 from tools.workflow import runner
 from tools.workflow.persistence import read_checkpoint
@@ -144,11 +152,14 @@ def lab(tmp_path_factory):
 
 
 def signed(*caps):
-    """The committed producer file plus test-local signed records for ``caps`` (default: all
-    nine wave-7 records). Never written back: CAPABILITY-PRODUCERS.json is the coordinator's."""
-    producers = load_producers()
+    """resigned() plus test-local signatures on ``caps`` (default: all nine wave-7 records,
+    committed unsigned). Never written back: CAPABILITY-PRODUCERS.json is the coordinator's."""
+    producers = resigned()
     for cap in caps or WAVE7:
-        producers["capabilities"][cap] = {"d4_gated": True, "status": "PRODUCER_MAPPED", **SIGN}
+        record = producers["capabilities"].setdefault(
+            cap, {"d4_gated": True, "status": "PRODUCER_MAPPED"}
+        )
+        record.update(SIGN)
     return producers
 
 
@@ -343,15 +354,21 @@ def e14(lab, frozen):  # noqa: F811
 # --------------------------------------------------------------------------- admission (D21)
 
 
-def test_committed_producers_keep_24_admitted_and_the_signed_records_add_the_seven(frozen):  # noqa: F811
+def test_resigned_producers_keep_24_admitted_and_the_signed_records_add_the_seven(frozen):  # noqa: F811
     cases = list(frozen.values())
     assert len(cases) == 66
     committed = WeatherAdapter()
     assert not set(WAVE7) & committed.implemented_capabilities()
-    before = admitted(committed, cases)
+    # The committed file: the nine wave-7 records unsigned and the flagged records undeclared
+    # until the batch re-review, so it admits exactly SIGNED_ADMITTED (none at this commit).
+    assert {PREFIX + c for c in admitted(committed, cases)} == SIGNED_ADMITTED
+    # Re-signed (flags cleared, test-local): the 24 cases admitted before wave 7.
+    resigned_adapter = WeatherAdapter(producers=resigned())
+    assert not set(WAVE7) & resigned_adapter.implemented_capabilities()
+    before = admitted(resigned_adapter, cases)
     assert len(before) == 24
     # D21 is stricter, never looser: requirements alone admit the same 24 today.
-    implemented = committed.implemented_capabilities()
+    implemented = resigned_adapter.implemented_capabilities()
     assert before == {
         c["id"].removeprefix(PREFIX)
         for c in cases
