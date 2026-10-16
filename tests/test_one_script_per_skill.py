@@ -1,4 +1,4 @@
-"""Each skill directory must expose exactly one scripts/*.py entry point."""
+"""Skills expose one entry point, except the demo's explicit goal-check pair."""
 
 from conftest import SKILLS_ROOT
 
@@ -10,6 +10,13 @@ def test_each_skill_has_exactly_one_script():
         if not (skill_dir / "SKILL.md").is_file():
             continue
         scripts = sorted((skill_dir / "scripts").glob("*.py"))
+        if skill_dir.name == "goal-check":
+            # The demo deliberately exposes deterministic checking and optional
+            # independent model sampling as separate public CLI commands.
+            assert {p.name for p in scripts} == {"goal_check.py", "sample_goals.py"}, (
+                "goal-check must expose exactly its two documented public commands"
+            )
+            continue
         if not scripts:
             missing.append(skill_dir.name)
         elif len(scripts) != 1:

@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cftime",
 #   "dynamical-catalog==1.0.1",
 #   "xarray",
@@ -130,6 +130,12 @@ def _resolve_variables(requested, data_vars, dataset: str):
     return resolved
 
 
+def _written_name(catalog_name: str) -> str:
+    """Output name of a catalog field: `*_Nhpa` fields are stacked to their prefix."""
+    match = _HPA_RE.match(catalog_name)
+    return match.group(1) if match else catalog_name
+
+
 def _stack_pressure_levels(ds):
     """Combine `*_Nhpa` variables into one field with a `vertical` (hPa) dim."""
     import xarray as xr
@@ -214,7 +220,10 @@ def _open_dataset(state, dataset) -> dict:
             raise UsageError(
                 f"unknown dataset {dataset!r}. Available datasets:\n  " + "\n  ".join(catalog)
             )
-        ds = dynamical_catalog.open(dataset)
+        # Match CHIRPS and the pressure-level path: retain lazy backend indexing
+        # without constructing a Dask graph for the archive. Date/bbox/variable
+        # selection below happens before the selected fields are materialized.
+        ds = dynamical_catalog.open(dataset, chunks=None)
 
         if "latitude" not in ds.dims or "longitude" not in ds.dims:
             raise UsageError(
@@ -340,7 +349,13 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, **kwargs):
             raise DataError(f"{dataset} has no data in {start_iso}..{end_iso}.")
         ds = ds.drop_vars([c for c in _DROP_COORDS if c in ds.coords])
 
+    requested_as: dict[str, list[str]] = {}
     if variable:
+        for token in variable:
+            for name in _resolve_variables([token], ds.data_vars, dataset):
+                tokens = requested_as.setdefault(_written_name(name), [])
+                if token != _written_name(name) and token not in tokens:
+                    tokens.append(token)
         ds = ds[_resolve_variables(variable, ds.data_vars, dataset)]
     ds = _stack_pressure_levels(ds)
 
@@ -360,6 +375,13 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, **kwargs):
             out = to_standard_units(out, variables=[name])
         except UsageError:
             continue
+    # Output keeps catalog names; `-v` aliases are input-only. Say on stdout
+    # what was written so a downstream `--variable` uses the real name.
+    order = [n for n in requested_as if n in out.data_vars]
+    for name in order + [n for n in out.data_vars if n not in order]:
+        aliases = requested_as.get(name)
+        suffix = f" (requested as {', '.join(f'-v {a}' for a in aliases)})" if aliases else ""
+        print(f"variable: {name}{suffix}")
     return stamp_data_interval(out)
 
 

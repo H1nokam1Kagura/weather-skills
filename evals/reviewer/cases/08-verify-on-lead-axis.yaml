@@ -1,0 +1,36 @@
+id: verify-on-lead-axis
+defect_class: lead_valid_time_misalignment
+kind: plan
+skills: [dynamical-fetch, chirps-fetch, coarsen, step-to-time, verify]
+task: |
+  Daily rainfall bias (forecast minus CHIRPS, mm/day) over the Kenya box for the first 14 days of
+  the ECMWF 46-day forecast initialised 2026-09-01.
+context: |
+  The area of interest is the Kenya box itself (the bbox resolve-region prints for KEN, used as-is; the country polygon is not wanted): 5.506/33.894/-4.677/41.855.
+  The fetched forecast has a step (lead-time) dim and a scalar time (init) coord.
+premise:
+  - file: skills/verify/SKILL.md
+    quote: "Run `step-to-time` on a classic forecast first."
+  - file: skills/step-to-time/SKILL.md
+    quote: "To compare a forecast against observations: run it on the forecast before"
+  - why: >-
+      The forecast is labelled by lead time (step) and the observations by date (time).
+      verify scores cell by cell on shared coordinates, so the forecast must be put on
+      valid time first; without step-to-time the two axes do not correspond.
+defect:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-01 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. chirps-fetch --start-time 2026-09-01 --end-time 2026-09-14 --bbox 5.506/33.894/-4.677/41.855 --output obs.zarr
+    3. coarsen -i obs.zarr -o obs_on_fc.zarr --reference-grid fc.zarr
+    4. verify --forecast fc.zarr --obs obs_on_fc.zarr --metric bias -o bias.zarr
+  expected_verdict: REJECT
+  expected_step: 4
+  match_any: ["step-to-time", "valid time", "lead", "step"]
+clean:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-01 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. chirps-fetch --start-time 2026-09-01 --end-time 2026-09-14 --bbox 5.506/33.894/-4.677/41.855 --output obs.zarr
+    3. coarsen -i obs.zarr -o obs_on_fc.zarr --reference-grid fc.zarr
+    4. step-to-time -i fc.zarr -o fc_valid.zarr
+    5. verify --forecast fc_valid.zarr --obs obs_on_fc.zarr --metric bias -o bias.zarr
+  expected_verdict: APPROVE

@@ -1,18 +1,14 @@
 {
-  "name": "weather-skills",
-  "description": "Forecasting assistant agent plus weather and climate data skills.",
+  "name": "weather-skills-local",
+  "description": "LOCAL DEMO BUILD: upstream dev + PRs #115/#125/#126/#127 (Neil, 2026-10). Not an official Rhiza release.",
   "owner": {
     "name": "rhiza-research"
   },
   "plugins": [
     {
       "name": "rhiza-forecasting",
-      "source": {
-        "source": "github",
-        "repo": "rhiza-research/forecasting-skills",
-        "ref": "plugin-dist"
-      },
-      "description": "Forecasting assistant agent plus weather and climate data skills."
+      "source": "./",
+      "description": "LOCAL DEMO BUILD: upstream dev + PRs #115/#125/#126/#127 (Neil, 2026-10). Not an official Rhiza release."
     }
   ]
 }

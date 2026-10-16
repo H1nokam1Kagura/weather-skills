@@ -1,0 +1,33 @@
+id: deaccumulate-after-fetcher
+defect_class: deaccumulating_a_rate
+kind: plan
+skills: [dynamical-fetch, deaccumulate, aggregate-temporal, convert-to-totals]
+task: |
+  Weekly rainfall totals (mm) over the Kenya box for every week of the ECMWF 46-day forecast
+  initialised 2026-09-28.
+context: |
+  The area of interest is the Kenya box itself (the bbox resolve-region prints for KEN, used as-is; the country polygon is not wanted): 5.506/33.894/-4.677/41.855.
+premise:
+  - file: skills/deaccumulate/SKILL.md
+    quote: "Fetchers (`ecmwf-fetch`, `dynamical-fetch`, `kenya-forecast-fetch`, `cumulus-fetch`, `neuralgcm-fetch`) already write rates — do not run this after them."
+  - file: skills/dynamical-fetch/SKILL.md
+    quote: "Precip is already a rate — do not deaccumulate."
+  - why: >-
+      dynamical-fetch writes precipitation as a per-step rate. Deaccumulating it again
+      differences consecutive rates, which is meaningless (and negative wherever rain
+      eases), before aggregation and totals.
+defect:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-28 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. deaccumulate -i fc.zarr -o fc_rates.zarr --variable precipitation_surface
+    3. aggregate-temporal -i fc_rates.zarr -o fc_weekly.zarr --period weekly --method mean
+    4. convert-to-totals -i fc_weekly.zarr -o fc_weekly_mm.zarr
+  expected_verdict: REJECT
+  expected_step: 2
+  match_any: ["deaccumulat", "already .*rate", "rate"]
+clean:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-28 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. aggregate-temporal -i fc.zarr -o fc_weekly.zarr --period weekly --method mean
+    3. convert-to-totals -i fc_weekly.zarr -o fc_weekly_mm.zarr
+  expected_verdict: APPROVE

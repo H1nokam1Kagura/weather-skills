@@ -1,0 +1,53 @@
+id: revision-compared-on-lead
+defect_class: lead_valid_time_misalignment
+kind: plan
+skills: [dynamical-fetch, step-to-time, aggregate-temporal, convert-to-totals, summarize-dim, difference, select]
+task: |
+  How did the forecast weekly rainfall total (mm) over the Kenya box for the weeks starting
+  2026-10-05 and 2026-10-12 change between the ECMWF 46-day issues of 2026-09-20 and
+  2026-09-27? Produce the ensemble-mean (Sep 27 issue) minus (Sep 20 issue) for those
+  two weeks.
+context: |
+  The area of interest is the Kenya box itself (the bbox resolve-region prints for KEN, used as-is; the country polygon is not wanted): 5.506/33.894/-4.677/41.855.
+  Each fetched issue has a step (lead-time) dim and a scalar time (init) coord.
+premise:
+  - file: skills/step-to-time/SKILL.md
+    quote: "Whenever a downstream consumer needs the forecast's values labeled by the date they are valid for rather than by lead time."
+  - file: skills/difference/SKILL.md
+    quote: "Shared dims are aligned with an inner join, so only overlapping coordinate"
+  - why: >-
+      On the step axis, lead week k of the Sep 27 issue is a different calendar week from
+      lead week k of the Sep 20 issue, and difference aligns by coordinate label, so it
+      subtracts same-lead (different valid weeks) values. The revision must be compared on
+      valid time. The end-to-end benchmark rejects same-lead comparison of different issue
+      dates.
+defect:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-27 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o i27.zarr
+    2. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-20 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o i20.zarr
+    3. aggregate-temporal -i i27.zarr -o i27_wk.zarr --period weekly --method mean
+    4. aggregate-temporal -i i20.zarr -o i20_wk.zarr --period weekly --method mean
+    5. convert-to-totals -i i27_wk.zarr -o i27_wk_mm.zarr
+    6. convert-to-totals -i i20_wk.zarr -o i20_wk_mm.zarr
+    7. summarize-dim -i i27_wk_mm.zarr -o i27_mean.zarr --dim number --method mean
+    8. summarize-dim -i i20_wk_mm.zarr -o i20_mean.zarr --dim number --method mean
+    9. difference -i i27_mean.zarr -i i20_mean.zarr -o change.zarr
+    10. select -i change.zarr -o change_2wk.zarr --dim step --value 7D --value 14D
+  expected_verdict: REJECT
+  expected_step: 9
+  match_any: ["step-to-time", "valid", "lead", "same-lead", "issue"]
+clean:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-27 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o i27.zarr
+    2. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-09-20 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o i20.zarr
+    3. step-to-time -i i27.zarr -o i27_t.zarr
+    4. step-to-time -i i20.zarr -o i20_t.zarr
+    5. aggregate-temporal -i i27_t.zarr -o i27_wk.zarr --period weekly --method mean --end-time 2026-10-19
+    6. aggregate-temporal -i i20_t.zarr -o i20_wk.zarr --period weekly --method mean --end-time 2026-10-19
+    7. convert-to-totals -i i27_wk.zarr -o i27_wk_mm.zarr
+    8. convert-to-totals -i i20_wk.zarr -o i20_wk_mm.zarr
+    9. summarize-dim -i i27_wk_mm.zarr -o i27_mean.zarr --dim number --method mean
+    10. summarize-dim -i i20_wk_mm.zarr -o i20_mean.zarr --dim number --method mean
+    11. difference -i i27_mean.zarr -i i20_mean.zarr -o change.zarr
+    12. select -i change.zarr -o change_2wk.zarr --dim time --value 2026-10-05 --value 2026-10-12
+  expected_verdict: APPROVE

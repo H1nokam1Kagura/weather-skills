@@ -1,0 +1,39 @@
+{
+  "repo": "convaiinnovations/laya",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+  "revision_note": "Registered by the clm session (D56) as 7b928d828b; full sha resolved from the Hub API 2026-10-04 (lastModified 2026-10-03T18:00:07Z). Laya changed on 2026-10-03, so this is pinned, never main.",
+  "license": "Apache-2.0",
+  "runtime_package": "laya==0.3.26 (PyPI, author Convai Innovations, homepage huggingface.co/convaiinnovations/laya)",
+  "files": {
+    "rl_agent_config.json": {
+      "size": 745,
+      "sha256": "ae287b56bbcf5f8c4f4541ae9dfd00c914c4c48b940b8398c3058af37ba92bbd",
+      "hub_git_oid": "3e4fcbf12cf36164ce18a1398aa9f35f58375ae0"
+    },
+    "config.json": {
+      "size": 160,
+      "sha256": "7add7c041b53f7091e65908553af79ab3f077946e5f2312d510ae13b17c7c134",
+      "hub_git_oid": "7b4305a11f6d6936882e99492abe8e34d8ae6e3a"
+    },
+    "model.safetensors": {
+      "size": 842609210,
+      "sha256": "891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c",
+      "hub_git_oid": "9bef25a12dcb807627a798837cfbb0ea73c0e38d"
+    },
+    "encoder/config.json": {
+      "size": 2083,
+      "sha256": "bf3ab80598fdccf414855a2ce80f22859e4492d06ca8a62ddd1cfb63972f8979",
+      "hub_git_oid": "5881ba831f2db5ce0f606bbaa1f2668e1e6cb706"
+    },
+    "tokenizer/tokenizer.json": {
+      "size": 3583228,
+      "sha256": "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30",
+      "hub_git_oid": "2f4d8583e507b7466d2490e2d6c045647a822698"
+    },
+    "tokenizer/tokenizer_config.json": {
+      "size": 308,
+      "sha256": "50044de60daaa73df97d262e15a40d4faf0160e7d742df64b377877a1320dd12",
+      "hub_git_oid": "9fd800115c5c92353220aa66addfce67a9135f32"
+    }
+  }
+}

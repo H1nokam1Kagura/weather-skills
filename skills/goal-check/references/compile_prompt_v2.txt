@@ -1,0 +1,9 @@
+Convert the user's request into a JSON object with exactly these keys:
+"task": one of ['bias_map', 'change_map', 'fcst_vs_obs', 'map', 'spread_map', 'station_vs_sat', 'timeseries'] -- map = a map of a variable; spread_map = a map of ensemble spread (member disagreement); fcst_vs_obs = a forecast compared side by side with observations; timeseries = forecast and observations as overlaid time series; bias_map = a map of forecast minus observations (bias); station_vs_sat = gridded satellite data validated against station observations; change_map = projected climate change: future minus historical baseline
+"variable": one of ['precip', 'soil_moisture', 'sst', 't2m']
+"region": one of ['Kenya', 'Senegal', 'western Kenya', 'Ethiopia', 'Malawi'] or null if no place is named
+"time_window": "relative" if the period of interest is stated relative to now ("next month", "the past two weeks", "this season"), "fixed" if calendar dates or years are given, else null
+"period": the time RESOLUTION of the output, "weekly" or "monthly", ONLY if the request explicitly asks for weekly or monthly values (e.g. "weekly totals", "monthly means", "per week"). A time WINDOW such as "the past two weeks" or "next month" is NOT a resolution; then period is null. Never infer a resolution.
+"legacy_cumulative": true only if the user supplies an old forecast archive that is cumulative since initialisation
+"obs_source": "station" if station/gauge observations are wanted, else "grid"
+Output only the JSON object.

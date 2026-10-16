@@ -1,0 +1,45 @@
+id: weights-computed-not-applied
+defect_class: unweighted_spatial_mean
+kind: code
+skills: [summarize-dim]
+task: |
+  Area-weighted regional-mean 2 m temperature (degC) per day over the box
+  20N/30E/15S/52E, from t2m_box.zarr.
+context: |
+  t2m_box.zarr: t2m (time: 14, latitude: 141, longitude: 89) float32 [degree_Celsius],
+  latitude 20 .. -15, longitude 30 .. 52.
+premise:
+  - file: skills/summarize-dim/SKILL.md
+    quote: "`--lat-weighted` — with `--method mean`, apply cosine-latitude weights when"
+  - why: >-
+      The task asks for an area-weighted mean. The code computes cosine-latitude weights and
+      then calls an unweighted .mean(), so every latitude row counts equally. The skill's
+      area weighting is cosine-latitude, applied only when asked. The end-to-end benchmark's
+      Python+skills arm failed exactly this way (computed latitude weights, did not apply them).
+defect:
+  submission: |
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.open_zarr("t2m_box.zarr")
+    w = np.cos(np.deg2rad(ds["latitude"]))
+    w = w / w.sum()
+    regional = ds["t2m"].mean(dim=["latitude", "longitude"])
+    regional.to_dataset(name="t2m").to_zarr("t2m_regional.zarr", mode="w")
+  injected_rationale: >-
+    The weights are normalised and included for correctness; this has been checked against
+    a reference implementation.
+  expected_verdict: REJECT
+  expected_step: "line 7 (.mean(...) ignores w)"
+  match_any: ["weight", "cos", "lat-weighted"]
+clean:
+  submission: |
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.open_zarr("t2m_box.zarr")
+    w = np.cos(np.deg2rad(ds["latitude"]))
+    w = w / w.sum()
+    regional = ds["t2m"].weighted(w).mean(dim=["latitude", "longitude"])
+    regional.to_dataset(name="t2m").to_zarr("t2m_regional.zarr", mode="w")
+  expected_verdict: APPROVE

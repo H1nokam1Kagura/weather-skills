@@ -1,0 +1,3 @@
+# model weights and decision logs never enter git
+cache/
+logs/

@@ -38,12 +38,12 @@ dev = [
 
 [tool.uv.sources]
 skills-runner = { git = "https://github.com/tescalada/skills-runner" }
-weather-skills-core = { git = "https://github.com/rhiza-research/weather-skills-core", branch = "dev" }
+weather-skills-core = { git = "https://github.com/rhiza-research/weather-skills-core", rev = "a4110e30c8637ea99d79f752499d00e4cd65fafb" }
 
 [tool.pytest.ini_options]
-testpaths = ["skills"]
+testpaths = ["skills", "registry"]
 python_files = ["test_*.py"]
-pythonpath = ["tests"]
+pythonpath = ["tests", "."]
 filterwarnings = [
     "ignore:Consolidated metadata is currently not part in the Zarr format 3 specification",
     "ignore:Import\\(s\\) unavailable to set up matplotlib support",

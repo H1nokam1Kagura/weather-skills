@@ -1,0 +1,32 @@
+id: omitted-clip
+defect_class: omitted_clip
+kind: plan
+skills: [resolve-region, chirps-fetch, clip-region, summarize-dim]
+task: |
+  Kenya area-mean daily rainfall (mm/day) for 2026-03-01..2026-03-31 from CHIRPS, one
+  value per day.
+context: |
+  The workspace is empty.
+premise:
+  - file: skills/chirps-fetch/SKILL.md
+    quote: "Omit for the full native 0.05° land grid (60°S–60°N). To fetch over a country, get its bbox from `resolve-region`."
+  - file: skills/clip-region/SKILL.md
+    quote: "Narrowing a continental grid down to one country for plotting or per-country reporting."
+  - why: >-
+      Without --bbox on the fetch and without clip-region, the mean is over every land cell
+      between 60S and 60N, not Kenya. The end-to-end benchmark's Python-only arm failed
+      exactly this way (omitted the requested regional clip).
+defect:
+  submission: |
+    1. chirps-fetch --start-time 2026-03-01 --end-time 2026-03-31 --output chirps_mar.zarr
+    2. summarize-dim -i chirps_mar.zarr -o kenya_daily_mean.zarr --dim latitude --dim longitude --method mean --lat-weighted
+  expected_verdict: REJECT
+  expected_step: 1
+  match_any: ["clip", "bbox", "region", "Kenya", "global", "60"]
+clean:
+  submission: |
+    1. resolve-region KEN            (prints the N/W/S/E bbox: 5.506/33.894/-4.677/41.855)
+    2. chirps-fetch --start-time 2026-03-01 --end-time 2026-03-31 --bbox 5.506/33.894/-4.677/41.855 --output chirps_mar.zarr
+    3. clip-region -i chirps_mar.zarr -o chirps_kenya.zarr --region Kenya
+    4. summarize-dim -i chirps_kenya.zarr -o kenya_daily_mean.zarr --dim latitude --dim longitude --method mean --lat-weighted
+  expected_verdict: APPROVE

@@ -1,0 +1,35 @@
+id: raw-onset-dates-averaged
+defect_class: raw_onset_dates_averaged
+kind: plan
+skills: [dynamical-fetch, step-to-time, onset-date, day-of-year, summarize-dim]
+task: |
+  Ensemble-mean ICPAC onset day-of-year per grid cell over the Kenya box from the ECMWF 46-day
+  forecast initialised 2026-10-01, as numbers (no map). State the caveat that members
+  without an onset are excluded from the mean.
+context: |
+  The area of interest is the Kenya box itself (the bbox resolve-region prints for KEN, used as-is; the country polygon is not wanted): 5.506/33.894/-4.677/41.855.
+premise:
+  - file: skills/onset-date/SKILL.md
+    quote: "run the day-of-year skill on it before summarize-dim or exceedance-probability, since neither handles a raw datetime64/timedelta64 value directly."
+  - why: >-
+      onset-date writes a raw datetime64 onset date. The skill says to convert it with
+      day-of-year before summarize-dim; averaging the raw date is the step it rules out.
+defect:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-10-01 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. step-to-time -i fc.zarr -o fc_t.zarr
+    3. onset-date -i fc_t.zarr -o onset.zarr --definition ICPAC --variable precipitation_surface
+    4. summarize-dim -i onset.zarr -o onset_mean.zarr --dim number --method mean
+    5. Report onset_mean per cell, with the caveat that members without an onset are excluded.
+  expected_verdict: REJECT
+  expected_step: 4
+  match_any: ["day-of-year", "datetime", "raw date"]
+clean:
+  submission: |
+    1. dynamical-fetch --dataset ecmwf-ifs-ens-forecast-46-day-daily-1-5-degree --date 2026-10-01 --bbox 5.506/33.894/-4.677/41.855 -v precipitation_surface -o fc.zarr
+    2. step-to-time -i fc.zarr -o fc_t.zarr
+    3. onset-date -i fc_t.zarr -o onset.zarr --definition ICPAC --variable precipitation_surface
+    4. day-of-year -i onset.zarr -o onset_doy.zarr
+    5. summarize-dim -i onset_doy.zarr -o onset_mean.zarr --dim number --method mean
+    6. Report onset_mean per cell, with the caveat that members without an onset are excluded.
+  expected_verdict: APPROVE
