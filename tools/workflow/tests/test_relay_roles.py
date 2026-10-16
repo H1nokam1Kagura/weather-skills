@@ -7,6 +7,7 @@ network beyond loopback). Nothing here reaches Kong.
 
 import ast
 import importlib.util
+import itertools
 import json
 import socket
 import sys
@@ -53,12 +54,15 @@ host = load_host()
 # ------------------------------------------------------------------ fakes
 
 
+RESPONSE_IDS = itertools.count(1)
+
+
 def envelope(**changes):
     value = {
         "sent": True,
         "ok": True,
         "model": "claude-sonnet-4-6",
-        "response_id": "msg_fake",
+        "response_id": f"msg_fake_{next(RESPONSE_IDS)}",  # the provider's id: unique per call
         "stop_reason": "end_turn",
         "usage": {"input_tokens": 1000, "output_tokens": 100},
         "text": json.dumps(ANSWER),
@@ -94,6 +98,7 @@ def kong_roles(tmp_path, process, **kwargs):
     python.write_text("")
     kwargs.setdefault("prices", CITED)
     kwargs.setdefault("budget", 1)
+    kwargs.setdefault("session_source", "response_id")  # as the host relay builds it
     return KongRoles(process, tmp_path / "ctx", data_policy_ack=True, kit_python=python, **kwargs)
 
 
@@ -198,8 +203,13 @@ def success_envelope(payload=PAYLOAD, value=ANSWER, **receipt_changes):
         transport="kong-native-anthropic",
         mode="live",
         relay_id="r-1",
+        transport_encoding=None,  # PAYLOAD repeats nothing: sent plain
+        transport_bytes={},
     )
     receipt.update(receipt_changes)
+    receipt.setdefault("response_id", None)
+    if "response_id" not in receipt_changes:
+        receipt["response_id"] = receipt["session_id"]  # the relay's session is the response id
     return 200, {"outcome": "SUCCESS", "relay_id": "r-1", "value": value, "receipt": receipt}
 
 
@@ -218,7 +228,11 @@ def test_receipt_fields_match_a_real_kongroles_receipt(tmp_path):
     roles = kong_roles(tmp_path, Process(envelope()))
     roles.ask("verifier", PAYLOAD)
     assert set(roles.receipts[0]) == KONG_RECEIPT_FIELDS
-    assert RECEIPT_FIELDS == KONG_RECEIPT_FIELDS | {"relay_id"}
+    assert RECEIPT_FIELDS == KONG_RECEIPT_FIELDS | {
+        "relay_id",
+        "transport_encoding",
+        "transport_bytes",
+    }
 
 
 def test_role_gates_match_the_runner_call_site_mapping():
@@ -249,7 +263,9 @@ def test_success_end_to_end_returns_kong_receipt_plus_relay_id(tmp_path, relay_h
     assert agent.ask("verifier", PAYLOAD) == ANSWER
     (receipt,) = agent.receipts
     host_receipt = relay.roles.receipts[0]
-    assert {k: v for k, v in receipt.items() if k != "relay_id"} == host_receipt
+    relay_fields = relay_roles.RELAY_RECEIPT_FIELDS
+    assert {k: v for k, v in receipt.items() if k not in relay_fields} == host_receipt
+    assert receipt["transport_encoding"] is None  # PAYLOAD repeats nothing: sent plain
     assert receipt["input_hash"] == digest(PAYLOAD) and receipt["output_hash"] == digest(ANSWER)
     assert agent.sessions == {receipt["session_id"]}
     assert agent.spent == pytest.approx(receipt["cost_usd"]) and receipt["cost_usd"] > 0
@@ -263,11 +279,31 @@ def test_success_end_to_end_returns_kong_receipt_plus_relay_id(tmp_path, relay_h
         assert secret_or_content not in raw
 
 
-def test_unpriced_success_keeps_the_reservation(tmp_path, relay_host):
-    url, _, _ = relay_host(envelope(), prices={})
+def test_priced_success_reconciles_the_reservation_so_the_next_call_runs(tmp_path, relay_host):
+    # INTENTIONAL CHANGE (LIVE-WAVE-BRIEF headline finding 1). This test used to pin "an
+    # unpriced success keeps the whole reservation", which is exactly why only one model call
+    # per run could work: the host had an empty price table, so the next call was refused on
+    # budget. The host now prices every call from the pinned list price, so the client
+    # reconciles each reservation to the receipt's cost and a second call goes through.
+    url, _, process = relay_host(envelope(), envelope(), prices=host.PINNED_PRICES)
+    agent = client(url)
+    assert agent.ask("verifier", PAYLOAD) == ANSWER
+    assert agent.ask("verifier", PAYLOAD) == ANSWER
+    costs = [r["cost_usd"] for r in agent.receipts]
+    assert costs == [pytest.approx((1000 * 3 + 100 * 15) / 1e6)] * 2
+    assert agent.spent == pytest.approx(sum(costs)) and len(process.calls) == 2
+    assert {r["cost_basis"] for r in agent.receipts} == {
+        "Anthropic list-price estimate; Kong billing not observed"
+    }
+
+
+def test_unpriced_success_still_keeps_the_reservation(tmp_path, relay_host):
+    # The fail-closed rule itself is unchanged: with no price, nothing is reconciled.
+    url, relay, _ = relay_host(envelope(), prices={})
     agent = client(url)
     assert agent.ask("verifier", PAYLOAD) == ANSWER
     assert agent.receipts[0]["cost_usd"] is None and agent.spent == agent.budget
+    assert relay.guard.snapshot()["estimated_usd"] == pytest.approx(relay.guard.budget_usd)
 
 
 def test_bad_token_or_run_is_refused_without_forwarding(tmp_path, relay_host):
@@ -594,7 +630,10 @@ def test_relay_through_real_worker_to_the_kit_mock_gateway(tmp_path):
         server.server_close()
         gateway.shutdown()
     (ask,) = [x for x in audit_lines(tmp_path) if x["event"] == "ask"]
-    assert ask["sent_to_gateway"] is True and agent.spent == agent.budget
+    # Priced by default now (pinned list price): the client is charged the billed estimate,
+    # not the whole reservation.
+    assert ask["sent_to_gateway"] is True and ask["billed_usd"] > 0
+    assert agent.spent == pytest.approx(ask["billed_usd"])
     assert "test-key" not in (tmp_path / "audit.jsonl").read_text()
 
 

@@ -40,12 +40,26 @@ route accepts, a probe, and a held-out comparison on the cases named above.
 
 Budget (D16; spend is untracked by owner ruling):
 - ``budget_guard="on"`` (default): a cited price table prices the OBSERVED model; the remaining
-  ceiling is reserved before launch and an unpriced or unknown outcome keeps it (fail closed).
-  Without a price this allows one call per run, by design.
+  ceiling is reserved before launch and reconciled to the priced cost of the observed usage, so
+  a priced run makes as many calls as its budget allows. An unpriced or unknown outcome keeps
+  the reservation (fail closed): without a price only one call per run is possible.
+  ``PINNED_PRICES`` carries the Anthropic list price for ``claude-sonnet-4-6``; every receipt
+  priced from it says ``cost_basis: "Anthropic list-price estimate; Kong billing not observed"``.
 - ``budget_guard="off"``: no price table may be given; nothing is reserved; every receipt
   records ``cost_usd: null`` with ``cost_basis: "untracked"``. ``spent`` therefore stays at its
   checkpointed value and is NOT a measure of Kong spend; run provenance says so
   (``provenance()``). The workflow CLI selects this for ``--roles kong``.
+
+Settings the live relay sets (``relay/kong_relay_host.py``; the defaults here are unchanged):
+- ``role_max_tokens``: per-role output ceilings (``LIVE_ROLE_MAX_TOKENS``: planner and repairer
+  4096, every other role ``max_tokens``); the receipt's ``settings.max_tokens`` is the role's.
+- ``temperature``: sent when not null. The pinned SDK has no typed ``temperature`` argument,
+  so the worker sends it through the SDK's ``extra_body`` and ``settings_sent`` echoes exactly
+  that. Temperature 0 lowers variance; it does not make a model deterministic.
+- ``session_source="response_id"``: the receipt's ``session_id`` is the provider's response id
+  (observed after the call), and a response without one is refused.
+- ``ask(..., model_input=...)``: the relay's model-facing rendering of a deduplicated
+  (``dedup-sha256/1``) request replaces the user message; nothing else changes.
 
 Outcome semantics (mirrors ``Roles``; UNKNOWN never becomes success):
 - ``Refused``: nothing was sent (unknown role, budget, policy, worker failed pre-send), or a
@@ -64,7 +78,9 @@ import json
 import math
 import os
 import sys
+import time
 import uuid
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from .agents import OUTPUT_NORMALIZATION, PROMPTS, parse_role_object, role_prompt
@@ -99,12 +115,34 @@ NATIVE_REJECTED = {
 ROLE_MODELS = {role: DEFAULT_MODEL for role in PROMPTS}
 BUDGET_GUARDS = ("on", "off")
 
-# USD per million tokens, keyed by the OBSERVED model id. Deliberately empty: no price table
-# with a citable source is pinned in this repo or the Kong kit, and Kong exposes no per-call
-# cost. Callers may pass ``prices={model: {"input_per_mtok", "output_per_mtok", "source"}}``;
-# an entry without a ``source`` citation is rejected. Without a price, cost_usd is null with a
-# reason, and (guard on) the pre-call reservation of the remaining ceiling is kept.
-PINNED_PRICES = {}
+# USD per million tokens, keyed by the OBSERVED model id. Kong exposes no per-call cost, so
+# this is an ESTIMATE at the provider's public list price, never an observed bill: ``source``
+# is what every priced receipt records as ``cost_basis``. Callers may pass their own
+# ``prices={model: {"input_per_mtok", "output_per_mtok", "source"}}``; an entry without a
+# ``source`` is rejected. Without a price, cost_usd is null with a reason, and (guard on) the
+# pre-call reservation of the remaining ceiling is kept. Rates: LIVE-WAVE-BRIEF.md (frozen
+# v2.7 plan, "Receipts > Pricing", 2026-10-15): claude-sonnet-4-6 at $3 input / $15 output per
+# million tokens, Anthropic list price. Cache-token rates are not pinned (price_usage refuses).
+COST_BASIS = "Anthropic list-price estimate; Kong billing not observed"
+PINNED_PRICES = {
+    "claude-sonnet-4-6": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "source": COST_BASIS,
+        "citation": "Anthropic public list price for claude-sonnet-4-6 ($3 / $15 per MTok), "
+        "pinned by LIVE-WAVE-BRIEF.md (completion-20261012) on 2026-10-15",
+    },
+}
+# The smallest remaining budget a call may start with (the Roles guard's floor).
+MIN_HEADROOM_USD = 0.05
+# Per-role output ceilings for live runs (LIVE-WAVE-BRIEF.md, sub-wave 1): the planner and the
+# repairer write whole plans; every other role answers a short verdict object.
+DEFAULT_MAX_TOKENS = 2048
+LIVE_ROLE_MAX_TOKENS = {"planner": 4096, "repairer": 4096}
+# Where the session id comes from. "uuid": minted here before the call (the historical
+# default, kept for the direct ``--roles kong`` path). "response_id": the provider's own
+# response id, OBSERVED after the call; a response without one is refused (live relay).
+SESSION_SOURCES = ("uuid", "response_id")
 
 # Runs under the kit interpreter. Stdlib + kit only; prints exactly one JSON object.
 # "sent" is False only while no request can have left the process. "sent_settings" echoes
@@ -122,10 +160,15 @@ try:
     body = {"model": request["model"], "max_tokens": request["max_tokens"],
             "system": request["system"],
             "messages": [{"role": "user", "content": request["user"]}]}
-    if request.get("temperature") is not None:
-        body["temperature"] = request["temperature"]
-    kong_client.check_body_size(body)
     import inspect
+    if request.get("temperature") is not None:
+        if "temperature" in inspect.signature(client.messages.create).parameters:
+            body["temperature"] = request["temperature"]
+        else:
+            # The pinned SDK (anthropic-python 1.13) has no typed temperature parameter; the
+            # Messages API field goes through the SDK's own extra_body passthrough.
+            body["extra_body"] = {"temperature": request["temperature"]}
+    kong_client.check_body_size(body)
     inspect.signature(client.messages.create).bind(**body)  # SDK argument check, pre-send
     out["sdk"] = "anthropic-python " + version("anthropic")
     out["mock"] = kong_client.is_mock_url(cfg.gateway_url)
@@ -139,6 +182,11 @@ try:
         out["latency_ms"] = round((time.monotonic() - started) * 1000)
         out["error"] = kong_client.describe_error(err, (cfg.anthropic_key, cfg.unified_key))
         out["error_type"] = type(err).__name__
+        try:  # a header value (seconds or a date), never content: the rerun ruling's wait
+            headers = getattr(getattr(err, "response", None), "headers", None)
+            out["retry_after"] = kong_client.rate_info(headers).get("retry_after")
+        except Exception:
+            out["retry_after"] = None
     else:
         out["latency_ms"] = round((time.monotonic() - started) * 1000)
         usage = message.usage.model_dump() if message.usage is not None else None
@@ -168,6 +216,24 @@ class KongOutcomeUnknown(RuntimeError):
 
 def _finite(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def retry_after_seconds(value, now=None):
+    """A Retry-After header value as non-negative seconds (float), or None. The header is
+    either delta-seconds or an HTTP date (RFC 9110 10.2.3); anything else is not observed."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        seconds = float(value.strip())
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value.strip())
+        except (TypeError, ValueError):
+            return None
+        if when is None or when.tzinfo is None:
+            return None
+        seconds = when.timestamp() - (time.time() if now is None else now)
+    return max(0.0, seconds) if math.isfinite(seconds) else None
 
 
 def price_usage(model, usage, prices):
@@ -212,11 +278,13 @@ class KongRoles:
         workspace,
         budget=5,
         model=DEFAULT_MODEL,
-        max_tokens=2048,
+        max_tokens=DEFAULT_MAX_TOKENS,
         temperature=None,
         prices=None,
         *,
         models=None,
+        role_max_tokens=None,
+        session_source="uuid",
         budget_guard="on",
         data_policy_ack=False,
         kit_root=KIT_ROOT,
@@ -225,7 +293,11 @@ class KongRoles:
     ):
         if data_policy_ack is not True:
             raise Refused("Kong transport requires acknowledging the Not Sensitive data policy")
-        prices = dict(PINNED_PRICES if prices is None else prices)
+        if budget_guard not in BUDGET_GUARDS:
+            raise ValueError("budget_guard must be 'on' or 'off'")
+        if prices is None:  # the pinned table prices a guarded run; an untracked one has none
+            prices = PINNED_PRICES if budget_guard == "on" else {}
+        prices = dict(prices)
         for name, entry in prices.items():
             if (
                 not isinstance(entry, dict)
@@ -234,14 +306,20 @@ class KongRoles:
                 or not all(_finite(entry.get(k)) for k in ("input_per_mtok", "output_per_mtok"))
             ):
                 raise Refused(f"price for {name!r} needs finite rates and a cited source")
-        if budget_guard not in BUDGET_GUARDS:
-            raise ValueError("budget_guard must be 'on' or 'off'")
         if budget_guard == "off" and prices:
             raise ValueError("budget_guard 'off' means untracked spend; give no price table")
         if type(max_tokens) is not int or not 1 <= max_tokens <= 64000:
             raise Refused("max_tokens must be an integer in 1..64000")
         if temperature is not None and not (_finite(temperature) and temperature <= 1):
             raise Refused("temperature must be null or in 0..1")
+        if session_source not in SESSION_SOURCES:
+            raise ValueError(f"session_source must be one of {SESSION_SOURCES}")
+        per_role = dict(role_max_tokens or {})
+        for role, tokens in per_role.items():
+            if role not in PROMPTS:
+                raise ValueError(f"unknown role {role!r} in max_tokens map")
+            if type(tokens) is not int or not 1 <= tokens <= 64000:
+                raise ValueError(f"max_tokens for {role} must be an integer in 1..64000")
         self.processes = processes
         self.workspace = workspace
         self.budget = budget
@@ -249,7 +327,9 @@ class KongRoles:
         self.model = model  # default id; Controller checkpoints and restores this field
         self.models = role_models(models, model)
         self.budget_guard = budget_guard
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens  # every role without its own entry below
+        self.role_max_tokens = per_role
+        self.session_source = session_source
         self.temperature = temperature
         self.prices = prices
         self.kit_root = Path(kit_root)
@@ -260,6 +340,12 @@ class KongRoles:
         self.receipts = []
         self.sessions = set()
         self.unknown_outcomes = []
+        # Spend view of the latest ask, read by the host relay's spend guard: whether a request
+        # can have left (True / False / None = unknown), the observed usage and priced cost.
+        self.last_call = None
+
+    def max_tokens_for(self, role):
+        return self.role_max_tokens.get(role, self.max_tokens)
 
     def provenance(self):
         """Run-level transport configuration, recorded once per run by the workflow CLI."""
@@ -272,7 +358,9 @@ class KongRoles:
             "models": dict(self.models),
             "model_evidence": {m: NATIVE_ROSTER[m] for m in sorted(set(self.models.values()))},
             "max_tokens": self.max_tokens,
+            "role_max_tokens": dict(self.role_max_tokens),
             "temperature": self.temperature,
+            "session_source": self.session_source,
             "thinking": None,
             "retries": 0,
             "output_normalization": OUTPUT_NORMALIZATION,
@@ -291,15 +379,26 @@ class KongRoles:
         env.update(self.worker_env)
         return env
 
-    def ask(self, role, payload):
-        if role not in PROMPTS or self.budget - self.spent < 0.05:
+    def ask(self, role, payload, *, model_input=None):
+        """``model_input``: the live relay's model-facing rendering of a ``dedup-sha256/1``
+        request (``relay/kong_relay_host.py``), sent as the user message instead of
+        ``json.dumps(payload)``. The relay has verified it is a lossless encoding of
+        ``payload``; ``input_hash`` and ``stdin_hash`` stay those of the logical payload text
+        (the controller binds them), and the relay records the model-facing hash and size."""
+        self.last_call = {"role": role, "sent": False, "usage": None, "cost_usd": None}
+        if model_input is not None and (not isinstance(model_input, str) or not model_input):
+            # A relay wiring fault, refused before anything is launched or sent.
+            raise Refused("model_input must be a non-empty string", gate="transition")
+        if role not in PROMPTS or self.budget - self.spent < MIN_HEADROOM_USD:
             raise Refused("role unavailable or aggregate model budget exhausted")
         if not self.kit_python.is_file():
             raise Refused("Kong kit interpreter unavailable")
         guarded = self.budget_guard == "on"
         model = self.models.get(role, self.model)
+        max_tokens = self.max_tokens_for(role)
         invocation = str(uuid.uuid4())
-        session = str(uuid.uuid4())
+        session = str(uuid.uuid4()) if self.session_source == "uuid" else None
+        self.last_call.update(invocation_id=invocation, model_requested=model)
         dispatch_context = getattr(self, "dispatch_context", None)
         if dispatch_context is not None:
             self.dispatch_observation = {
@@ -311,10 +410,10 @@ class KongRoles:
         user = json.dumps(payload)  # same serializer as Roles.ask and review_evidence.capture
         request = {
             "model": model,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens,
             "temperature": self.temperature,
             "system": prompt,
-            "user": user,
+            "user": user if model_input is None else model_input,
         }
         command = [str(self.kit_python), "-I", "-c", WORKER_SOURCE, str(self.kit_root / "scripts")]
         spent_before = self.spent
@@ -326,6 +425,7 @@ class KongRoles:
             self.dispatch_observer(dict(self.dispatch_observation))
             self.dispatch_observation["process_boundary"] = "ENTERED"
         serial_before = getattr(self.processes, "serial", None)
+        self.last_call["sent"] = None  # from here a request may leave the worker
         try:
             # CAP-TRANSPORT-RETRY: a classified pre-write fault (nothing launched, so nothing
             # sent) is retried once inside this attempt; anything else stays UNKNOWN.
@@ -358,11 +458,18 @@ class KongRoles:
             "request_id": error.get("request_id"),
             "error_type": envelope.get("error_type"),
             "hint": error.get("hint"),
+            "retry_after": retry_after_seconds(envelope.get("retry_after")),
             "model_requested": model,
         }
+        # What the worker echoed it sent (temperature included), for the relay audit line.
+        self.last_call.update(
+            settings_sent=envelope.get("sent_settings"), sent_keys=envelope.get("sent_keys")
+        )
         if not envelope["sent"]:
+            self.last_call["sent"] = False
             self.spent = spent_before  # provably nothing left the worker
             raise Refused(f"{role} Kong worker failed before sending: {evidence['error_type']}")
+        self.last_call.update(sent=True, status=evidence["status"])  # the worker says it sent
         if envelope.get("ok") is not True or result["exit_code"] != 0:
             self._unknown(role, invocation, "gateway call did not return a message", evidence)
 
@@ -374,11 +481,19 @@ class KongRoles:
                 self.spent = spent_before + cost
         else:
             cost, cost_basis = None, "untracked"
+        self.last_call.update(
+            sent=True, usage=usage, cost_usd=cost, response_id=envelope.get("response_id")
+        )
         try:
             if self.spent > self.budget:
                 raise ValueError("aggregate budget exhausted")
             if not isinstance(observed, str) or not observed:
                 raise ValueError("response carries no model identity")
+            if self.session_source == "response_id":
+                # The session is the provider's own response id, observed, never minted here.
+                session = envelope.get("response_id")
+                if not isinstance(session, str) or not session:
+                    raise ValueError("response carries no response id for the session")
             if session in self.sessions:
                 raise ValueError("repeated independent session identity")
             value, output_form = parse_role_object(envelope.get("text"))
@@ -399,7 +514,7 @@ class KongRoles:
                 "model_observed": observed,
                 "model_match": observed == model,
                 "settings": {
-                    "max_tokens": self.max_tokens,
+                    "max_tokens": max_tokens,
                     "temperature": self.temperature,  # None: not sent, provider default
                     "system_prompt_hash": text_hash(prompt),
                     "thinking": None,  # not requested; no reasoning setting is claimed
@@ -442,6 +557,7 @@ class KongRoles:
             getattr(self.processes, "serial", None) != serial_before
         )
         if not launched:
+            self.last_call["sent"] = False
             self.spent = spent_before
             raise exc
         self.unknown_outcomes.append(
