@@ -29,6 +29,7 @@ blocked by contract.
 
 import copy
 import json
+import os
 
 from .catalog import build_manifest, tree_hash
 from .contracts import GATE_REASONS, INCOMPLETE_GATES, Refused, digest, request_goal, tag
@@ -552,6 +553,7 @@ def record_refused(root, value, decision, refusal, request=None):
         event = _payload_event(root, value, "transition_request", transition_request=dict(record))
         record["event_seq"] = event["sequence"] if event else None
         requests.append(record)
+        save_transition_request(root, value["evidence"], record)
     terminal = refusal_terminal(refusal)
     mapping = {"source": "resume_refusal", "resume_index": decision["index"]}
     value["context"]["terminal"] = {**terminal, "mapping": mapping}
@@ -593,6 +595,7 @@ def record_accepted(controller, decision, request=None):
         event = controller.dispatch_event("transition_request", transition_request=dict(record))
         record["event_seq"] = event["sequence"] if event else None
         requests.append(record)
+        controller.save(transition_request_name(record), record)
     controller.checkpoint()
     return decision
 
@@ -791,3 +794,186 @@ def transport_call(roles, role, call, invocation_id=None):
         if recorder is None or not recorder(role, exc, invocation_id):
             raise
     return call()
+
+
+# ------------------------------------------------------------------ resume family (wave 7)
+#
+# Interfaces other sub-waves call (documented again in tests/test_resume_family_v27.py):
+# - Controller.request_resume(root, processes, roles, request, hooks=, admission=) is the
+#   fresh-process resume: it reads ONLY the durable checkpoint under ``root``. Every decision
+#   it records (accepted or refused) carries ``checkpoint_counters`` and ``controller_pid``.
+# - open_decision() records the observed stop (``controller_killed``) before the decision.
+
+# EVIDENCE_CONTRACT.json v2_4.interruptions failure_class vocabulary ("connection_reset |
+# timeout | controller_killed | lock_stale | write_denied | ..."). An INFERENCE: a durable
+# checkpoint with no terminal record and no unanswered interruption means the controller that
+# wrote it stopped without recording why (it was killed). Disclosed via ``observed``.
+OBSERVED_STOP_CLASS = "controller_killed"
+OBSERVED_STOP_BASIS = "checkpoint_without_terminal"
+CHECKPOINT_COUNTER_KEYS = (
+    "state",
+    "spent",
+    "elapsed_s",
+    "repairs_used",
+    "resumes",
+    "budget",
+    "total_seconds",
+    "max_repairs",
+)
+
+
+def checkpoint_counters(value):
+    """The consumed checkpoint's counters and limits, captured before anything is changed.
+
+    budget_ledger.at_checkpoint is "{same counters, captured at the durable checkpoint}"
+    plus "a snapshot of limits" (EVIDENCE_CONTRACT.json budget_ledger). Native controller
+    names, mapped by the adapter:
+      spent -> consumed_model_usd, elapsed_s -> elapsed_seconds,
+      repairs_used -> repair_attempts_used,
+      recovery_counters.resume_attempts_used -> resume_attempts_used,
+      budget -> limits.max_model_usd, total_seconds -> limits.max_total_seconds,
+      max_repairs -> limits.max_repair_attempts,
+      recovery_limits.max_automatic_resumes -> limits.max_resume_attempts (UC-15-resume-r2).
+    ``resumes`` is the legacy all-initiator resume count. A key the checkpoint lacks is null.
+    """
+    book = ledger(value["context"])
+    snapshot = {key: value.get(key) for key in CHECKPOINT_COUNTER_KEYS}
+    snapshot["recovery_counters"] = book["counters"]
+    snapshot["recovery_limits"] = book["limits"]
+    return detached(snapshot)
+
+
+def run_started(value):
+    """Positive evidence that the checkpointing controller had started its run: a committed
+    transition, a role receipt or a dispatch event. A checkpoint written only by the
+    constructor records no run that could have been stopped."""
+    dispatch = value["context"].get("dispatch_evidence") or {}
+    return bool(value.get("events") or value.get("role_receipts") or dispatch.get("sequence"))
+
+
+def record_observed_stop(root, value):
+    """Record the stop a resume observes, exactly once, durably, before the decision.
+
+    Only when the checkpoint has no terminal record (a terminal means the controller itself
+    recorded why it stopped) and no unanswered interruption (an unanswered one already IS the
+    stop record, e.g. a crash between the interruption and its resume). Returns the record or
+    None. Limitation (disclosed): a terminal recorded before an earlier ACCEPTED resume stays
+    in the checkpoint, so a kill of that resumed incarnation is not inferred (missed, never
+    invented).
+    """
+    context = value["context"]
+    if context.get("terminal") is not None or latest_unanswered(context) is not None:
+        return None
+    if not run_started(value):
+        return None
+    book = ledger(context)
+    record = {
+        "index": len(book["interruptions"]),
+        "failure_class": OBSERVED_STOP_CLASS,
+        "at_state": value["state"],
+        "pending_operation": pending_name(value["pending"]),
+        "pending_record": detached(value["pending"]),
+        "transient": False,
+        "error_type": None,  # no exception was observed: the stopped process recorded none
+        "observed": OBSERVED_STOP_BASIS,
+        "observed_by_pid": os.getpid(),
+    }
+    event = _payload_event(root, value, "interruption", record=detached(record))
+    record["sequence"] = event["sequence"] if event else None
+    book["interruptions"].append(record)
+    write_checkpoint(root, value)
+    return record
+
+
+def open_decision(root, value, request, attribution, override):
+    """Start one resume decision: snapshot the checkpoint counters, record an observed stop,
+    then bind the decision to the latest unanswered interruption.
+
+    Returns (decision, interruption). Added decision fields:
+      checkpoint_counters  checkpoint_counters(value), taken before anything is written
+      controller_pid       os.getpid() of the process deciding (one per incarnation)
+    """
+    counters = checkpoint_counters(value)
+    adopt_unrecorded_events(root, value)
+    record_observed_stop(root, value)
+    interruption = latest_unanswered(value["context"])
+    decision = new_decision(request, attribution, override, interruption)
+    decision["checkpoint_counters"] = counters
+    decision["controller_pid"] = os.getpid()
+    return decision, interruption
+
+
+# ------------------------------------------------------------------ resume evidence (wave 7f)
+#
+# Two controller defects found by sub-wave C, fixed here so producer line pins above stay put.
+
+DISPATCH_EVENT_FILE = "dispatch-event-{:06}.json"
+
+
+def transition_request_name(record):
+    """The per-record evidence file every transition request is written to (the same name
+    operator_ledger.submit_transition_request uses), numbered by its stream ``sequence``."""
+    return f"transition-request-{record['sequence']:03}.json"
+
+
+def save_transition_request(root, evidence, record):
+    """Controller.save on a checkpoint payload (no live controller: refused resume)."""
+    name = transition_request_name(record)
+    atomic_json(root / name, record)
+    evidence[name] = tree_hash(root / name)
+    return name
+
+
+def _on_disk_event_numbers(root):
+    numbers = []
+    for path in root.glob("dispatch-event-*.json"):
+        stem = path.name[len("dispatch-event-") : -len(".json")]
+        if stem.isdigit() and path.name == DISPATCH_EVENT_FILE.format(int(stem)):
+            numbers.append(int(stem))
+    return sorted(numbers)
+
+
+def adopt_unrecorded_events(root, value):
+    """Keep the dispatch events a killed incarnation wrote after its last checkpoint.
+
+    A controller killed mid-run (e.g. between process_launch and process_exit) has durable
+    dispatch-event files beyond the checkpoint's recorded ``sequence``: dispatch_event writes
+    each file at once and the checkpoint only follows at the next durable step. Evidence is
+    never overwritten: the resumed sequence continues after the HIGHEST event on disk.
+
+    Each contiguous event after the checkpoint whose identity (schema, run_id, sequence) is the
+    controller's own is adopted into the checkpoint evidence as written (hash of the bytes on
+    disk). An event that is not (unreadable, foreign identity, or past a gap) is left as is and
+    unrecorded, so the projection refuses it rather than this resume vouching for it.
+    Returns the adopted file names. Mutates ``value`` (persisted by the decision's checkpoint).
+    """
+    context = value["context"].get("dispatch_evidence")
+    if context is None:
+        return []
+    numbers = _on_disk_event_numbers(root)
+    adopted = []
+    expected = context["sequence"] + 1
+    for number in numbers:
+        if number < expected:
+            continue
+        if number != expected:
+            break
+        name = DISPATCH_EVENT_FILE.format(number)
+        try:
+            record = json.loads((root / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            break
+        if not (
+            isinstance(record, dict)
+            and record.get("sequence") == number
+            and record.get("run_id") == context["run_id"]
+            and record.get("schema") == context["schema"]
+        ):
+            break
+        value["evidence"][name] = tree_hash(root / name)
+        adopted.append(name)
+        expected += 1
+    context["sequence"] = max([context["sequence"], *numbers])
+    if adopted:
+        context["adopted_after_checkpoint"] = context.get("adopted_after_checkpoint", []) + adopted
+    return adopted

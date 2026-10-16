@@ -29,7 +29,7 @@ from test_evidence_projection_v27 import (
     MAP_GOAL,
     Lab,
     native_checkpoint,
-    producers_with,
+    resigned,
     rewrite_run,
     score,
     simkit_run,
@@ -63,7 +63,9 @@ PROFILE_STATES = list(runner.TRANSITIONS) + ["RELEASED"]
 
 
 def signed_producers():
-    return producers_with(**{"CAP-FIXTURE-OP": SIGN, "CAP-REREVIEW": SIGN})
+    """resigned() (the committed file, rereview flags cleared test-locally) with the two
+    records signed test-locally. Never written back."""
+    return resigned(**{"CAP-FIXTURE-OP": SIGN, "CAP-REREVIEW": SIGN})
 
 
 @pytest.fixture(scope="module")
@@ -402,15 +404,19 @@ def test_repo_copy_is_refused_in_prestaged_mode_and_reverified_when_adopted(lab,
 
 
 def test_unsigned_records_keep_the_cases_not_implemented(frozen):
-    # The committed records are signed (D4 review at 0f264d2); stripping the signatures must
-    # make them undeclared again and the cases NOT_IMPLEMENTED.
+    # The committed records are signed (D4 review at 0f264d2) but flagged rereview_required
+    # by wave 7, so the committed file leaves them undeclared; the test-local re-signed copy
+    # declares them, and stripping the signatures from THAT copy must make them undeclared
+    # again and the cases NOT_IMPLEMENTED (the signature alone, not the flag, is the cause).
     unsign = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
-    stripped = producers_with(**{"CAP-FIXTURE-OP": unsign, "CAP-REREVIEW": unsign})
+    stripped = resigned(**{"CAP-FIXTURE-OP": unsign, "CAP-REREVIEW": unsign})
     for capability in ("CAP-FIXTURE-OP", "CAP-REREVIEW"):
         record = WeatherAdapter().producers["capabilities"][capability]
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
-        assert capability in WeatherAdapter().implemented_capabilities()
+        assert record["rereview_required"].strip()
+        assert capability not in WeatherAdapter().implemented_capabilities()
+        assert capability in WeatherAdapter(producers=resigned()).implemented_capabilities()
         assert capability not in WeatherAdapter(producers=stripped).implemented_capabilities()
         assert capability in WeatherAdapter(producers=signed_producers()).implemented_capabilities()
     cases = [frozen[PREFIX + s] for s in FIXTURE_ONLY + WITH_REREVIEW]

@@ -10,6 +10,12 @@ PermissionError there is a terminal BLOCKED stop with failed_gate ``write_denial
 {..., denial_source?}). Host ACLs are never changed to produce a denial, an armed fault fires
 exactly once, and nothing retries or redirects the write.
 
+CAP-DENY-WRITE, pre-launch form (frozen E14-P2-INJ, OI-06). A denial of the run directory
+itself hits the controller's durable pending-operation checkpoint in Controller.tool(), before
+the producing process is launched (Boundary.inject_run_dir_denial, pending_checkpoint). It is
+an interruption (PermissionError, failure_class write_denied), not a WriteDenied terminal: the
+run loop diagnoses it (fix_widens_authority), never repairs it, notifies and waits.
+
 CAP-METRIC (CP-E18, budget half). An external meter may report consumption the controller
 cannot observe itself (consumed_model_usd, elapsed_seconds). A reading is a monotone floor: it
 can raise the controller's accounting, never lower it, so no reading can reset a budget. Repair
@@ -40,6 +46,7 @@ class Boundary:
 
     def __init__(self):
         self.armed = {}
+        self.run_dir_armed = {}  # pre-launch run-directory denials (inject_run_dir_denial)
 
     def inject_denial(self, artifact, errno=errno_codes.EACCES, message="Permission denied"):
         """Trusted harness channel only (Python hooks); never an agent or CLI capability."""
@@ -48,6 +55,25 @@ class Boundary:
         if errno != errno_codes.EACCES or not isinstance(message, str):
             raise ValueError("injected denial must be PermissionError(errno 13, message)")
         self.armed[artifact] = {"errno": errno, "message": message}
+
+    def inject_run_dir_denial(
+        self, artifact, errno=errno_codes.EACCES, message="Permission denied"
+    ):
+        """Arm a one-shot denial of the run directory for the tool that writes ``artifact``.
+
+        Trusted harness channel only (frozen E14-P2-INJ deny_write naming HARNESS_RUN_DIR;
+        OI-06: distinguished from the commit-time denial by hook point). It fires on the
+        controller's durable pending-operation checkpoint write in Controller.tool(), i.e.
+        BEFORE the producing process is launched, as PermissionError(errno, message) carrying
+        ``injected_fault = True``. That PermissionError is an interruption (failure_class
+        write_denied), never a WriteDenied: nothing was launched and nothing committed.
+        Independent of inject_denial (the commit-time boundary); one per named artifact.
+        """
+        if not isinstance(artifact, str) or not artifact or artifact in self.run_dir_armed:
+            raise ValueError("one armed run-directory denial per named artifact")
+        if errno != errno_codes.EACCES or not isinstance(message, str):
+            raise ValueError("injected denial must be PermissionError(errno 13, message)")
+        self.run_dir_armed[artifact] = {"errno": errno, "message": message}
 
     def write(self, controller, artifact, name, record):
         fault = self.armed.pop(artifact, None)
@@ -114,6 +140,59 @@ def commit(controller, artifact, skill):
     return content_hash
 
 
+# ------------------------------------------------- run-directory denial (pre-launch, wave 7)
+
+
+def _written_artifact(controller, argv):
+    """artifact_for_output without its refusal: an out-of-namespace output is refused later,
+    exactly where it always was, so arming a run-directory denial changes no other path."""
+    try:
+        return artifact_for_output(controller, argv)
+    except Refused:
+        return None
+
+
+def pending_checkpoint(controller, skill, argv):
+    """Controller.tool()'s durable pending-operation checkpoint, through the run directory.
+
+    Unarmed, this is exactly ``controller.checkpoint()``. An armed inject_run_dir_denial for
+    the artifact this argv writes fires here, before any launch, as PermissionError. On ANY
+    PermissionError from this write (armed or host) the in-memory pending operation is
+    cleared (it was never durably recorded and nothing was started), the denial is recorded
+    under context.run_dir_denials with a ``run_dir_denial`` dispatch event, and the
+    PermissionError is re-raised unchanged, so the run loop classifies it as a write_denied
+    interruption (diagnosis -> no widening repair -> operator notification).
+    """
+    try:
+        armed = getattr(getattr(controller, "write_boundary", None), "run_dir_armed", None)
+        if armed:
+            artifact = _written_artifact(controller, argv)
+            fault = armed.pop(artifact, None) if artifact is not None else None
+            if fault is not None:
+                target = str(Path(controller.root) / "checkpoint.json")
+                error = PermissionError(fault["errno"], fault["message"], target)
+                error.injected_fault = True
+                raise error
+        controller.checkpoint()
+    except PermissionError as exc:
+        controller.pending = None
+        denial = {
+            "boundary": "pending_checkpoint",
+            "tool": skill,
+            "artifact": _written_artifact(controller, argv),
+            "state": controller.state,
+            "errno": exc.errno,
+            "message": str(exc),
+            "denial_source": INJECTED if getattr(exc, "injected_fault", False) else HOST,
+        }
+        controller.context.setdefault("run_dir_denials", []).append(denial)
+        try:
+            controller.dispatch_event("run_dir_denial", denial=denial)
+        except OSError as evidence_error:
+            exc.add_note("Run-directory denial event not written: " + type(evidence_error).__name__)
+        raise
+
+
 # ---------------------------------------------------------------- budget meter (CAP-METRIC)
 
 METERED = ("consumed_model_usd", "elapsed_seconds", "repair_attempts_used")
@@ -164,3 +243,12 @@ def meter_reading(controller, metric, value):
     controller.dispatch_event("budget_reading", reading=record)
     controller.checkpoint()
     return record
+
+
+def inject_run_dir_denial(
+    controller, *, artifact, errno=errno_codes.EACCES, message="Permission denied"
+):
+    """Module-level entry for the injection hooks (e2e_injections._deny_run_dir): arm the
+    controller's one-shot pre-launch run-directory denial for ``artifact``. Delegates to
+    Boundary.inject_run_dir_denial, which validates (ValueError on a bad artifact/errno/message)."""
+    return boundary_for(controller).inject_run_dir_denial(artifact, errno=errno, message=message)
