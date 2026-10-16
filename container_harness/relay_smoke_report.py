@@ -109,18 +109,42 @@ def main(argv):
         {k: scan.get(k) for k in ("key_supplied_to_scanner", "key_length_ok", "key_absent")},
     )
     asks = [a for a in audit if a.get("event") == "ask"]
+    # Exactly one ask may reach the gateway, and it succeeded; the only other ask allowed is
+    # the request-cap probe, refused before forwarding.
+    capped = [
+        a
+        for a in asks[1:]
+        if a.get("outcome") == "REFUSED"
+        and a.get("sent_to_gateway") is False
+        and a.get("reason_code") == "relay_spend_cap"
+    ]
     check(
         "audit_one_successful_ask",
-        len(asks) == 1 and asks[0].get("outcome") == "SUCCESS",
-        [a.get("outcome") for a in asks],
+        bool(asks) and asks[0].get("outcome") == "SUCCESS" and len(capped) == len(asks) - 1,
+        [(a.get("outcome"), a.get("sent_to_gateway"), a.get("reason_code")) for a in asks],
+    )
+    # Past the request cap the relay answers with a spend-cap refusal (client gate "budget"),
+    # never by having already stopped; that refusal exhausts the guard.
+    probe = smoke.get("cap_probe") or {}
+    caps_reached = [a.get("cap") for a in audit if a.get("event") == "spend_cap_reached"]
+    check(
+        "request_cap_refused_before_forwarding",
+        probe.get("outcome") == "REFUSED"
+        and probe.get("gate") == "budget"
+        and "relay spend cap" in str(probe.get("reason"))
+        and len(capped) == 1
+        and caps_reached == ["max_requests"],
+        {
+            "probe": {k: probe.get(k) for k in ("outcome", "gate", "requests", "max_requests")},
+            "spend_cap_reached": caps_reached,
+        },
     )
     leaked = sorted({k for a in audit for k in a if k in AUDIT_FORBIDDEN_KEYS})
     check("audit_redacted_fields_only", not leaked, leaked)
-    check(
-        "relay_stopped_itself",
-        any(a.get("event") == "relay_stop" for a in audit),
-        [a.get("reason") for a in audit if a.get("event") == "relay_stop"],
-    )
+    # The relay stops itself only once EXHAUSTED or after --run-seconds; here the cap probe
+    # exhausted it, so the stop must name the request cap (teardown's kill writes no stop line).
+    stops = [a.get("reason") for a in audit if a.get("event") == "relay_stop"]
+    check("relay_stopped_itself", stops == ["spend cap reached: max_requests"], stops)
 
     ok = all(c["passed"] for c in checks.values())
     call = {

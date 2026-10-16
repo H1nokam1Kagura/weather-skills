@@ -150,6 +150,22 @@ def test_cap_states():
     assert ru.usage_from_events([START, ask(), cap])["cap_state"] == "SPEND_CAP_REACHED"
 
 
+def test_a_call_past_the_request_cap_is_a_guard_abort():
+    # The relay keeps serving past max_requests and refuses the next call before forwarding.
+    events = [
+        START,
+        ask(),
+        {"event": "spend_cap_reached", "cap": "max_requests", "ts": TS},
+        refused(
+            402, "spend cap max_requests reached; nothing forwarded", reason_code="relay_spend_cap"
+        ),
+        {"event": "relay_stop", "reason": "spend cap reached: max_requests"},
+    ]
+    u = ru.usage_from_events(events)
+    assert u["label"] == ru.RELAY_GUARD_ABORT and u["cap_state"] == "SPEND_CAP_REACHED"
+    assert (u["requests"], u["refused_before_send"]) == (1, 1)
+
+
 def test_relay_dir_reading_keeps_unparsed_lines(tmp_path):
     lines = [json.dumps(START), "{not json", json.dumps(ask())]
     (tmp_path / "relay-audit.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")

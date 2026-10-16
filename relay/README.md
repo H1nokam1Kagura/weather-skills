@@ -198,9 +198,21 @@ The host reads the same env names as argument defaults; flags win.
   remaining budget (fail closed). A pre-send refusal is not charged or counted.
 - **First cap hit.** The guard goes `EXHAUSTED` and stays so: one `spend_cap_reached` event
   (with the cap and the totals), every later call refused the same way, and the relay stops
-  after writing the response. `relay_stop` records requests, input/output tokens, estimated
-  USD and the cap state. The relay also stops itself once `--max-requests` asks were answered
-  (as before), so a request after that finds no relay and is refused before sending.
+  after writing the response (`relay_stop` reason `spend cap reached: <cap>`). `relay_stop`
+  records requests, input/output tokens, estimated USD and the cap state.
+- **Request cap.** Reaching `--max-requests` does NOT stop the relay: it keeps serving, so the
+  next call is answered with the `relay_spend_cap` refusal (`Refused(gate="budget")`, nothing
+  forwarded), which exhausts the guard (`spend_cap_reached` with `cap: max_requests`) and then
+  stops the relay. Before 2026-10-15 the relay stopped right after the last allowed call, so the
+  next call failed as "unreachable before sending" with the role's gate and the report could
+  not label it `RELAY_GUARD_ABORT`. The relay stops itself only when EXHAUSTED (after writing
+  that refusal) or after `--run-seconds`; a run that ends exactly at the cap is stopped by
+  teardown. The `relay-smoke` job keeps its "relay stopped itself" check meaningful this way:
+  after its one live call `relay_smoke.py` reads the relay's health, and only when the request
+  cap is full (`--max-requests 1`) sends one probe ask, which the relay must refuse before
+  forwarding; the report requires that refusal, `spend_cap_reached` with `cap: max_requests`,
+  exactly one call that reached the gateway, and `relay_stop` reason
+  `spend cap reached: max_requests` (teardown's kill writes no `relay_stop` line).
 - **Sessions.** The relay's KongRoles uses `session_source="response_id"`: the receipt's
   `session_id` is the provider's response id, observed after the call, and the client refuses
   a receipt whose `session_id` differs from its `response_id`.
