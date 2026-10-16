@@ -276,7 +276,8 @@ class NativeRun:
 
     def _verify_evidence_hashes(self):
         for name, expected in self.checkpoint["evidence"].items():
-            if "/" in name or "\\" in name:
+            # One nested form is run-local: the controller's notification outbox (rsp).
+            if ("/" in name or "\\" in name) and not rsp.outbox_record(name):
                 raise EvidenceMappingError("native evidence path must be run-local")
             try:
                 observed = catalog.tree_hash(self.root / name)
@@ -422,9 +423,8 @@ class Projection:
             if native_role == "compiler":
                 # Contract: compiler_N is the N-th compiler invocation, each occurrence 1
                 # (EC:event_seq_keys 'invocation_receipts[role=compiler_3][occurrence=1]').
-                if ordinal > 3:
-                    raise EvidenceMappingError("more than three compiler invocations")
-                role, occurrence = f"compiler_{ordinal}", 1
+                # A compile re-asked after a resume is that slot's next occurrence (rsp).
+                role, occurrence = rsp.compiler_role(self, index, ordinal)
             else:
                 role, occurrence = native_role, ordinal
             record = {
@@ -1032,15 +1032,16 @@ class Projection:
                 "the automatic-resume limit is not recorded in the checkpoint",
             )
         interrupted = not isinstance(book, dict) or book.get("interruptions") or cp["resumes"]
+        ledger = {"final": final, "launch_checks": launch_checks}
         if interrupted:
             # EC:budget_ledger.at_checkpoint exists "when a checkpoint exists": the durable
-            # interruption checkpoint. Its counter snapshot belongs to the resume package.
-            self.gap(
-                "budget_ledger.at_checkpoint",
-                "CAP-RESUME",
-                "no snapshot is captured at an interruption checkpoint",
-            )
-        return {"final": final, "launch_checks": launch_checks}
+            # interruption checkpoint consumed by resume[0] (resume_projection, disclosed).
+            snapshot, reason = rsp.at_checkpoint(self)
+            if snapshot is not None:
+                ledger["at_checkpoint"] = snapshot
+            else:
+                self.gap("budget_ledger.at_checkpoint", "CAP-RESUME", reason)
+        return ledger
 
     # ---- signals and harness (CAP-SIGNAL-CAPTURE, CAP-HARNESS-OBS)
     def signal_capture(self, receipts, trace, harness):
@@ -1064,10 +1065,11 @@ class Projection:
             harness["signal_capture_exhaustive"] = projected["signal_capture_exhaustive"]
             for pid, parent in projected["process_tree"].items():
                 tree.setdefault(pid, parent)
-        parents = {r["parent_pid"] for r in receipts}
-        controller = parents.pop() if len(parents) == 1 else None
-        if not receipts:
-            controller = self.initial_controller_pid()
+        # One incarnation: the sole launch parent (else the initial_state pid); several: the
+        # traced root, checked against the controller's incarnation pids (OI-05, rsp).
+        controller, incarnations = rsp.native_controller(self, receipts)
+        for pid, parent in incarnations.items():
+            tree.setdefault(pid, parent)
         return tree, controller
 
     def initial_controller_pid(self):
@@ -1081,10 +1083,7 @@ class Projection:
         against what the controller itself recorded. The native signal_stop projection is kept
         in notes (owner reading parent_at_signal: creating parent in process_tree, both kept).
         Returns (tree or None, controller pid or None)."""
-        parents = {r["parent_pid"] for r in receipts}
-        native_controller = parents.pop() if len(parents) == 1 else None
-        if not receipts:
-            native_controller = self.initial_controller_pid()
+        native_controller, _ = rsp.native_controller(self, receipts)  # incarnation-aware
         controller = self.observed("symbols.HARNESS_CONTROLLER_PID", None)
         if controller is _ABSENT:
             controller = native_controller
@@ -1234,6 +1233,7 @@ class Projection:
             owner = "CAP-FIXTURE-OP" if "CAP-FIXTURE-OP" in reason else "CAP-SYMBOLS"
             self.gap("symbols.HARNESS_HASH:source_expected_after", owner, reason)
         frx.project_fixture_symbols(self, out)  # CAP-FIXTURE-OP: onset_after_mutation
+        rsp.project_symbols(self, out)  # CAP-MIDPROCESS: onset_partial_at_interrupt
         try:
             out["HARNESS_HASH:source"] = catalog.tree_hash(cp["source"])
         except Exception as exc:  # declared, never swallowed
@@ -1301,8 +1301,10 @@ class Projection:
         self.pending_lists(trace)
         frx.rereview_lists(self, trace)
         processes, transport = self.process_receipts(approval)
+        rsp.killed_output_bytes(self, processes)  # OI-04: harness-observed, labelled
         launch_checks = self.launch_checks()
         harness = self.harness_observations()
+        rsp.harness_fields(self, harness)  # onset_partial, controller incarnations
         snapshots, failures = self.review_snapshots(receipts)
         if snapshots is not None:
             harness["review_snapshots"] = snapshots
@@ -1677,3 +1679,4 @@ def run_provenance(run_dir, harness_dir, markers, tags=None):
 from adapter_support import fixture_rereview_projection as frx  # noqa: E402
 from adapter_support import operator_ledger_projection as olp  # noqa: E402
 from adapter_support import pre_review_projection as prp  # noqa: E402
+from adapter_support import resume_projection as rsp  # noqa: E402

@@ -23,10 +23,12 @@ from test_evidence_projection_v27 import (
     TEST_FREE_RAM_GIB,
     Lab,
     ledger,
+    producers_with,
     profile_document,
     write_source,
 )
 
+from adapter_support import resume_driver
 from adapter_support import role_substitution as rs
 from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter
 from tools.workflow import runner
@@ -560,8 +562,23 @@ def test_unmappable_entries_are_refused_never_skipped(frozen):
         adapter.substituted_roles_factory(base, {**MAP_GOAL, "end_date": "2025-12-30"}, None)
 
 
-def test_run_case_refuses_unsupported_schedules_before_side_effects(lab, frozen, tmp_path):
-    adapter = WeatherAdapter(enable_run_case=True)
+def test_run_case_refuses_unsupported_schedules_before_side_effects(
+    lab, frozen, tmp_path, monkeypatch
+):
+    # Wave 7: E11-P1-INJ's interrupt implies CAP-INTERRUPT and its mid-process form
+    # CAP-MIDPROCESS (D21), so both are signed test-locally here; without a stopper (no
+    # os.fork: no forked stop route) the mid-process stop stays refused as before.
+    producers = producers_with()
+    for cap in ("CAP-INTERRUPT", "CAP-MIDPROCESS"):
+        producers["capabilities"][cap] = {
+            "d4_gated": True,
+            "status": "PRODUCER_MAPPED",
+            "reviewer": "test-local",
+            "reviewed_at": "2026-10-15T00:00:00Z",
+            "reviewed_commit": "0",
+        }
+    monkeypatch.setattr(resume_driver, "fork_available", lambda: False)
+    adapter = WeatherAdapter(enable_run_case=True, producers=producers)
     shaped = bad_repairer_replacement(frozen, {"plan": "not a step list"})
     shaped["id"] += "-LOCAL-BAD-SHAPE"  # a local variant; the e07 fixture ran E07-P1-CTL
     for short, message in (
@@ -574,6 +591,9 @@ def test_run_case_refuses_unsupported_schedules_before_side_effects(lab, frozen,
         with pytest.raises(AdapterRefusal, match=message):
             adapter.run_case(case, profile)
         assert not profile["case_root"].exists()
+    # Without the two records the same case is refused earlier, by D21.
+    with pytest.raises(AdapterRefusal, match="implies undeclared capabilities"):
+        WeatherAdapter(enable_run_case=True).run_case(local_case(frozen, "E11-P1-INJ"), profile)
     plan = adapter.substitute_role_output(local_case(frozen, "E02-P1-INJ"), MAP_GOAL)
     with pytest.raises(AdapterRefusal, match="substituted roles factory"):
         rs.case_hooks(plan, SimpleNamespace(receipts=[]), tmp_path)
