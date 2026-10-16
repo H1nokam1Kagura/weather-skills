@@ -8,6 +8,7 @@
   "tests_file": "tests/test_evidence_projection_v27.py",
   "capabilities": {
     "CAP-RECEIPTS": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/fixture_rereview_projection.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "capture_evidence",
       "status": "PRODUCER_MAPPED",
@@ -96,6 +97,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-SYMBOLS": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/fixture_rereview_projection.py, adapter_support/weather_adapter.py, tools/workflow/claim_gates.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "resolve_symbol",
       "status": "PRODUCER_MAPPED",
@@ -160,6 +162,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-REASON-MAP": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "map_terminal_reason",
       "status": "PRODUCER_MAPPED",
@@ -190,6 +193,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-ROLE-OUTPUT-SCHEMA": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "map_role_output",
       "status": "PRODUCER_MAPPED",
@@ -210,6 +214,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-BOUND-SOURCES": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/claim_gates.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "capture_bound_sources",
       "status": "PRODUCER_MAPPED",
@@ -245,6 +250,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-RUN-PROVENANCE": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "tag_run_provenance",
       "status": "PRODUCER_MAPPED",
@@ -281,6 +287,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w5/D4-CONFIRM.md"
     },
     "CAP-LEDGER-SEED": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/fixture_rereview_projection.py, adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "seed_ledger",
       "status": "PRODUCER_MAPPED",
@@ -389,6 +396,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-EXHAUSTIVE-WRITES": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "assert_exhaustive_write_capture",
       "status": "PRODUCER_MAPPED",
@@ -418,6 +426,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-EVIDENCE-CHECKER": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/claim_gates.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "invoke_evidence_checker",
       "status": "PRODUCER_MAPPED",
@@ -450,6 +459,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-PRE-REVIEW-GATES": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/claim_gates.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "record_claim_checks",
       "status": "PRODUCER_MAPPED",
@@ -486,6 +496,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-OPERATOR-ACTIONS": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "record_operator_actions",
       "status": "PRODUCER_MAPPED",
@@ -607,6 +618,7 @@
       "reviewed_at": null
     },
     "CAP-ROLE-SUBSTITUTE": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "substitute_role_output",
       "status": "PRODUCER_MAPPED",
@@ -713,6 +725,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-SHADOW": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "drive_shadow_policy",
       "status": "PRODUCER_MAPPED",
@@ -820,6 +833,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-FIXTURE-OP": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/fixture_rereview_projection.py, adapter_support/weather_adapter.py, container_harness/case_driver.py, tools/workflow/e2e_injections.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "apply_fixture_operation",
       "status": "PRODUCER_MAPPED",
@@ -884,6 +898,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-REREVIEW": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/fixture_rereview_projection.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "record_material_changes",
       "status": "PRODUCER_MAPPED",
@@ -931,6 +946,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-TRANSITION-REQUEST": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "submit_transition_request",
       "status": "PRODUCER_MAPPED",
@@ -984,6 +1000,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-LEDGER-APPEND": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "append_ledger_record",
       "status": "PRODUCER_MAPPED",
@@ -1031,6 +1048,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-OPERATOR-RECORD-SETUP": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "append_attributed_operator_record",
       "status": "PRODUCER_MAPPED",
@@ -1075,6 +1093,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-INTERRUPT": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, container_harness/case_driver.py, tools/workflow/e2e_injections.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "interrupt_controller",
       "status": "PRODUCER_MAPPED",
@@ -1167,6 +1186,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-RESUME": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "request_resume",
       "status": "PRODUCER_MAPPED",
@@ -1235,6 +1255,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-RESUME-ATTRIBUTION": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "attribute_resumes",
       "status": "PRODUCER_MAPPED",
@@ -1292,6 +1313,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-MIDPROCESS": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "arm_midprocess_trigger",
       "status": "PRODUCER_MAPPED",
@@ -1361,6 +1383,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-AUTO-RESUME": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "inject_intermittent_interruption",
       "status": "PRODUCER_MAPPED",
@@ -1406,6 +1429,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-DIAGNOSIS": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "record_diagnosis",
       "status": "PRODUCER_MAPPED",
@@ -1444,6 +1468,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-OPERATOR-NOTIFY": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "record_operator_notification",
       "status": "PRODUCER_MAPPED",
@@ -1483,6 +1508,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-MECHANICAL-REPAIR": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "record_mechanical_repair",
       "status": "PRODUCER_MAPPED",
@@ -1521,6 +1547,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-DENY-WRITE": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "deny_write",
       "status": "PRODUCER_MAPPED",
@@ -1574,6 +1601,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-LIVE-ROLE": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, container_harness/case_driver.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "invoke_live_role",
       "status": "PRODUCER_MAPPED",
@@ -1692,6 +1720,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-BINDING-PASSTHROUGH": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "confirm_binding_passthrough",
       "status": "PRODUCER_MAPPED",
@@ -1732,6 +1761,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-ROLE-INPUT-PATCH": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "patch_role_input",
       "status": "PRODUCER_MAPPED",
@@ -1773,6 +1803,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-METRIC": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "inject_metric",
       "status": "PRODUCER_MAPPED",
@@ -1820,6 +1851,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-TRANSPORT-RETRY": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/runner.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "record_transport_retry",
       "status": "PRODUCER_MAPPED",
@@ -1866,6 +1898,7 @@
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-TRANSPORT-RETRY-SETUP": {
+      "rereview_required": "Local integration of owner claim-facts/setup-timing fixes at 2fb9dda changed signed producers: adapter_support/weather_adapter.py, tools/workflow/e2e_injections.py. Withheld pending independent re-review and re-signing; live execution paused.",
       "d4_gated": true,
       "method": "setup_planner_transport_retry",
       "status": "PRODUCER_MAPPED",

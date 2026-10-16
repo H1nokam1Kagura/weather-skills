@@ -251,9 +251,9 @@ def test_cap_shadow_is_declared_only_by_a_signed_record(frozen, lab, tmp_path):
     assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
     assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
     assert record["missing_fields"] and record["tests"]
-    # Re-signed after the live-role wave (D4-REVIEW-LW-C at d6c2809): declared as committed.
-    assert "rereview_required" not in record
-    assert "CAP-SHADOW" in WeatherAdapter().implemented_capabilities()
+    # Producer changes require fresh review before the committed capability is declared.
+    assert record["rereview_required"].strip()
+    assert "CAP-SHADOW" not in WeatherAdapter().implemented_capabilities()
     assert "CAP-SHADOW" in WeatherAdapter(producers=resigned()).implemented_capabilities()
     unsigned = resigned(
         **{"CAP-SHADOW": {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}}

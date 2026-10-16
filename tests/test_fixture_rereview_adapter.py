@@ -589,17 +589,16 @@ def test_prestaged_delivery_is_adopted_once_in_schedule_order(lab, frozen, tmp_p
 
 
 def test_unsigned_records_keep_the_cases_not_implemented(frozen):
-    # The committed records are signed and declared (re-signed after the live-role wave, D4-
-    # REVIEW-LW-C at d6c2809). Stripping the signatures from the copy must make them undeclared
-    # again and the cases NOT_IMPLEMENTED (the signature alone is the cause).
+    # The committed records are withheld after producer changes. A test-local re-signed
+    # copy isolates signature admission; stripping those signatures must refuse the cases.
     unsign = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
     stripped = resigned(**{"CAP-FIXTURE-OP": unsign, "CAP-REREVIEW": unsign})
     for capability in ("CAP-FIXTURE-OP", "CAP-REREVIEW"):
         record = WeatherAdapter().producers["capabilities"][capability]
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
-        assert "rereview_required" not in record
-        assert capability in WeatherAdapter().implemented_capabilities()
+        assert record["rereview_required"].strip()
+        assert capability not in WeatherAdapter().implemented_capabilities()
         assert capability in WeatherAdapter(producers=resigned()).implemented_capabilities()
         assert capability not in WeatherAdapter(producers=stripped).implemented_capabilities()
         assert capability in WeatherAdapter(producers=signed_producers()).implemented_capabilities()
