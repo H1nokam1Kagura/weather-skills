@@ -131,8 +131,11 @@ def validate_dependencies(schedule):
         seen.add(name)
 
 
-def unsupported_requirements(case):
-    """Static capability findings, not oracle judgments or execution results."""
+def unsupported_requirements(case, stop_delivery=False):
+    """Static capability findings, not oracle judgments or execution results.
+
+    stop_delivery=True: the caller runs the hooks with a stopper (real kill), so the frozen
+    CAP-MIDPROCESS stop form (E11-P1-INJ) is deliverable. Without one it stays refused."""
     findings = []
     for i, spec in enumerate(case.get("injection_schedule", [])):
         op, payload, hook = spec["operation"], spec.get("payload", {}), spec["hook"]
@@ -151,6 +154,7 @@ def unsupported_requirements(case):
                 and payload["pending_operation"] is None
                 and payload.get("mode") == "harness_drop_model_connection"
             )
+            or (stop_delivery and midprocess_stop_form(spec))
         ):
             reason = "midprocess crash adapter unavailable"
         elif op == "mutate_fixture" and payload["fixture_operation"] not in FIXTURE_OPERATIONS:
@@ -232,7 +236,10 @@ def replace_in_place(target, value):
 
 
 class InjectionHooks:
-    def __init__(self, case, symbols=None, disposable_root=None, notification_boundary=False):
+    def __init__(
+        self, case, symbols=None, disposable_root=None, notification_boundary=False, stopper=None
+    ):
+        self._init_stop_delivery(stopper)
         self.case = copy.deepcopy(case)
         self.schedule = self.case.get("injection_schedule", [])
         self.symbols = dict(symbols or {})
@@ -287,6 +294,7 @@ class InjectionHooks:
             decided = self.dispositions.get(index)
             if decided is None:
                 reason = "dispatch_stopped" if self.stopped else "boundary_not_reached"
+                reason = "deferred_after_stop" if self._is_deferred(index) else reason
                 decided = {"disposition": "INACTIVE", "reason": reason}
             entries.append({"index": index, "id": spec["id"], "hook": spec["hook"], **decided})
         found = {e["disposition"] for e in entries}
@@ -403,6 +411,8 @@ class InjectionHooks:
             occurrence = self._occurrence(selector, point, identity)
             if occurrence != selector.get("occurrence", 1):
                 continue
+            if self._defer(index, spec, point, event, occurrence):
+                continue
             record = {
                 "index": index,
                 "hook": point,
@@ -436,6 +446,8 @@ class InjectionHooks:
         fault, self.fault = self.fault, None
         if fault is not None:
             raise fault
+        if self.stop_ready is not None:
+            self._deliver_stop(self.stop_ready)  # never returns
         raise InjectedInterruption(
             "injected quiescent checkpoint interruption; resume requested="
             + str(self.resume_requested)
@@ -589,6 +601,8 @@ class InjectionHooks:
                 continue
             if not self._in_plan_scope(selector, event):
                 continue
+            if self._defer(index, spec, point, event, occurrence):
+                continue
             missing = [r for r in spec["requires"] if not self._delivered(r)]
             if missing:
                 self._decide(
@@ -706,7 +720,7 @@ class InjectionHooks:
             record["controller_sequence"] = observed.get("sequence")
             return False
         if operation == "deny_write":
-            return self._deny_write(payload, point, event, controller, record)
+            return self._deny_write_routed(payload, point, event, controller, record)
         if operation == "inject_metric":
             return self._inject_metric(payload, controller, record)
         if operation == "mutate_fixture":
@@ -724,7 +738,11 @@ class InjectionHooks:
 
         The legacy E10/E11 literal 'none' and the schedule contract's null both mean the same
         observed condition; null additionally requires reading the durable checkpoint.
+        With a stopper, harness_stop_controller is a real stop (_arm_stop / the CAP-MIDPROCESS
+        before_tool form armed on the tool's own process_launch, _arm_midprocess_stop).
         """
+        if point == "before_tool" and self.stopper is not None and midprocess_payload(payload):
+            return self._arm_midprocess_stop(event, controller, record)
         if point not in {"after_transition", "after_role_committed"}:
             raise UnsupportedInjection(
                 "midprocess hard-crash injection needs a process-start adapter"
@@ -760,6 +778,8 @@ class InjectionHooks:
             code = errno.ECONNRESET if fault is InjectedConnectionDrop else errno.ETIMEDOUT
             self.fault = fault(code, "harness dropped the model connection")
             return True
+        if self.stopper is not None and payload.get("mode") == STOP_MODE:
+            return self._arm_stop(event, record)
         record["effect"] = "known quiescent interruption after durable transition"
         return True
 
@@ -1116,3 +1136,369 @@ class InjectionHooks:
         )
         record["after_hash"] = tree_hash(path)
         record["build_id_to"] = value
+
+    # ------------------------------------------------------------ wave 7: stop and resume
+    # Interfaces (documented for the adapter's resume driver; see module STOP_SCHEMA /
+    # STATE_SCHEMA and tools/workflow/tests/test_interrupt_delivery_v27.py):
+    #
+    # stopper(packet) -> NoReturn. Called once, at the stop boundary, by the hook itself. In the
+    #   real route it sends ``packet`` to the parent, requests the kill and blocks forever (the
+    #   process is killed). If it ever returns, the hook raises HarnessDispatchError: nothing
+    #   may run past a harness stop. With stopper=None the old InjectedInterruption stays the
+    #   unit-level double (and the mid-process form is refused).
+    # packet = {"schema": STOP_SCHEMA, "stop": <the stop entry's hook record>,
+    #           "deferred": [<deferred entry>...], "state": export_state()}
+    # deferred entry = {"index", "id" (None without `requires`), "hook", "selector",
+    #   "operation", "occurrence", "boundary_state", "stop_index"}: a schedule entry matched at
+    #   the SAME boundary after the stop, NOT applied. The payload is not carried: it is read
+    #   from the (digest-checked) schedule and resolved when apply_deferred delivers it.
+
+    def _init_stop_delivery(self, stopper):
+        if stopper is not None and not callable(stopper):
+            raise TypeError("stopper must be callable")
+        self.stopper = stopper
+        self.deferred = []  # deferred entries, in schedule order; removed once applied
+        self.stop_record = None  # the stop entry's record once a stop was armed or requested
+        self.stop_ready = None  # an immediate stop awaiting the end of the boundary scan
+        self.midprocess = None  # an armed CAP-MIDPROCESS trigger (transient, never exported)
+        self.rebinds = []  # wrapper-owned rebinds round-tripped by export/import_state
+        self._defer_boundary = None  # the event object of the boundary being deferred
+
+    def _is_deferred(self, index):
+        return any(entry["index"] == index for entry in self.deferred)
+
+    def _defer(self, index, spec, point, event, occurrence):
+        """Entries after a stop at the SAME boundary are deferred (returned), never dropped."""
+        if self._is_deferred(index):
+            return True
+        if self._defer_boundary is None or self._defer_boundary is not event:
+            return False
+        self.deferred.append(
+            {
+                "index": index,
+                "id": spec.get("id"),
+                "hook": point,
+                "selector": copy.deepcopy(spec["selector"]),
+                "operation": spec["operation"],
+                "occurrence": occurrence,
+                "boundary_state": event.get("state"),
+                "stop_index": self.stop_record["index"],
+            }
+        )
+        return True
+
+    def _arm_stop(self, event, record):
+        """harness_stop_controller at a durable nothing-pending boundary, with a stopper.
+
+        The preconditions were already checked by _interrupt; the stopper is called once the
+        boundary scan has deferred the later entries (_raise_interruption)."""
+        if self.stop_record is not None:
+            raise UnsupportedInjection("one harness stop per controller incarnation")
+        record.update(
+            effect="harness stop requested after durable transition",
+            mode=STOP_MODE,
+            delivery="STOP_REQUESTED",
+        )
+        self.stop_record = self.stop_ready = record
+        self._defer_boundary = event
+        return True
+
+    def _arm_midprocess_stop(self, event, controller, record):
+        """CAP-MIDPROCESS (E11-P1-INJ): arm at before_tool, fire on that tool's own
+        process_launch, after the start receipt is durable and before any exit receipt.
+
+        The trigger wraps the controller's own process-event binding (runner
+        bind_process_events): the controller's durable dispatch record, and every observer it
+        chains, runs first; the stop follows. Pending work is left exactly as the controller
+        recorded it. Only the first process_launch after arming is considered."""
+        if self.stop_record is not None or self.midprocess is not None:
+            raise UnsupportedInjection("one harness stop per controller incarnation")
+        processes = getattr(controller, "processes", None)
+        bound = getattr(processes, "on_event", None)
+        if getattr(bound, "controller_owner", None) is not controller:
+            raise UnsupportedInjection(
+                "mid-process stop needs the controller's durable process-event record"
+            )
+        skill = event.get("skill")
+        argv = [str(a) for a in event.get("argv", [])]
+        armed = {"processes": processes, "bound": bound}
+
+        def on_event(kind, details):
+            bound(kind, details)  # the controller's durable record (and its chain) first
+            if kind != "process_launch" or self.midprocess is not armed:
+                return
+            self._disarm_midprocess()
+            launched = [str(a) for a in details.get("argv", [])]
+            if details.get("tool") != skill or (argv and launched[-len(argv) :] != argv):
+                record.update(delivery="UNDELIVERED", reason="first launch was another process")
+                return
+            receipt = Path(processes.root) / f"process-{int(details['serial']):03}.start.json"
+            if not receipt.is_file():
+                record.update(delivery="UNDELIVERED", reason="start receipt is not durable")
+                return
+            durable = self._durable(controller)
+            record.update(
+                delivery="STOP_REQUESTED",
+                start_receipt={
+                    "path": receipt.name,
+                    "serial": details["serial"],
+                    "pid": details.get("pid"),
+                    "tool": skill,
+                },
+                observed_checkpoint=None
+                if durable is None
+                else {"state": durable["state"], "pending": durable["pending"]},
+            )
+            self._deliver_stop(record)
+
+        armed["wrapper"] = on_event
+        processes.on_event = on_event
+        self.midprocess = armed
+        record.update(
+            effect="mid-process harness stop armed on the tool's own process_launch",
+            mode=STOP_MODE,
+            trigger="process_launch",
+            tool=skill,
+            delivery="ARMED",
+        )
+        self.stop_record = record
+        self._defer_boundary = event
+        return False
+
+    def _disarm_midprocess(self):
+        armed, self.midprocess = self.midprocess, None
+        if armed is not None and armed["processes"].on_event is armed["wrapper"]:
+            armed["processes"].on_event = armed["bound"]
+
+    def _deliver_stop(self, record):
+        """Hand the state packet to the stopper; nothing may run past this point."""
+        self.stop_ready = None
+        self._defer_boundary = None
+        packet = {
+            "schema": STOP_SCHEMA,
+            "stop": copy.deepcopy(record),
+            "deferred": copy.deepcopy(self.deferred),
+            "state": self.export_state(),
+        }
+        self.stopper(packet)
+        self.harness_error = "stopper returned; a harness stop must not return"
+        raise HarnessDispatchError(self.harness_error)
+
+    def export_state(self, rebinds=None):
+        """JSON-serialisable hook state so a fresh process can continue the schedule.
+
+        Format (STATE_SCHEMA): {"schema", "schedule_digest", "records", "done": [index...],
+        "counts": [[key list, n]...], "dispositions": [[index, disposition dict]...],
+        "deferred": [deferred entry...], "stop": stop record | None, "resume_requested",
+        "prepared", "accepted_approvals", "initial_plan", "stopped", "harness_error",
+        "notifications", "seen_notifications": [...], "rebinds": [...]}. ``rebinds`` defaults to
+        self.rebinds (a wrapper such as role_substitution.CaseScheduleHooks passes its own).
+        Refused while a transient fault or trigger is armed: those are closures, not state."""
+        if self.fault is not None or self.transport_fault is not None or self.midprocess:
+            raise HarnessDispatchError("cannot export hook state while a fault is armed")
+        state = {
+            "schema": STATE_SCHEMA,
+            "schedule_digest": digest(self.schedule),
+            "records": self.records,
+            "done": sorted(self.done),
+            "counts": sorted(([list(k), n] for k, n in self.counts.items()), key=_json_order),
+            "dispositions": sorted([i, d] for i, d in self.dispositions.items()),
+            "deferred": self.deferred,
+            "stop": self.stop_record,
+            "resume_requested": self.resume_requested,
+            "prepared": self.prepared,
+            "accepted_approvals": self.accepted_approvals,
+            "initial_plan": self.initial_plan,
+            "stopped": self.stopped,
+            "harness_error": self.harness_error,
+            "notifications": self.notifications,
+            "seen_notifications": sorted(self.seen_notifications, key=_json_order),
+            "rebinds": self.rebinds if rebinds is None else rebinds,
+        }
+        return json.loads(json.dumps(state, allow_nan=False))  # a TypeError is a harness bug
+
+    def import_state(self, state):
+        """Continue a schedule exported by export_state, in a fresh hooks object over the same
+        case. Returns the rebinds list (a copy) for a wrapper to restore."""
+        if not isinstance(state, dict) or state.get("schema") != STATE_SCHEMA:
+            raise HarnessDispatchError("not an exported hook state")
+        if state.get("schedule_digest") != digest(self.schedule):
+            raise HarnessDispatchError("exported hook state belongs to another schedule")
+        # Dispositions decided at construction (unknown hooks) are schedule facts, not state.
+        if self.records or self.counts or self.done or self.prepared or self.deferred:
+            raise HarnessDispatchError("hook state can only be imported into fresh hooks")
+        state = json.loads(json.dumps(state))
+        self.records = state["records"]
+        self.done = set(state["done"])
+        self.counts = Counter({tuple(k): n for k, n in state["counts"]})
+        self.dispositions = {int(i): d for i, d in state["dispositions"]}
+        self.deferred = state["deferred"]
+        self.stop_record = state["stop"]
+        self.resume_requested = state["resume_requested"]
+        self.prepared = state["prepared"]
+        self.accepted_approvals = state["accepted_approvals"]
+        self.initial_plan = state["initial_plan"]
+        self.stopped = state["stopped"]
+        self.harness_error = state["harness_error"]
+        self.notifications = state["notifications"]
+        self.seen_notifications = set(state["seen_notifications"])
+        self.rebinds = state["rebinds"]
+        return copy.deepcopy(self.rebinds)
+
+    def apply_deferred(self, controller, entries=None):
+        """Deliver deferred entries (default: all, in schedule order) after the stop.
+
+        ``controller`` is whatever exposes what the operation needs (the parent has no
+        Controller yet: e.g. SimpleNamespace(paths=..., root=...) for FX-ONSET-CELL-SHIFT).
+        Each entry is recorded like a dispatched one (plus ``deferred_after_stop``) and leaves
+        self.deferred once decided. Returns copies of the new records. Delivery confers no
+        acceptance: a resume request is still decided by the controller."""
+        wanted = list(self.deferred) if entries is None else list(entries)
+        for entry in wanted:
+            if entry not in self.deferred:
+                raise HarnessDispatchError(f"not a deferred entry: {entry.get('index')}")
+        applied = []
+        for entry in wanted:
+            index = entry["index"]
+            spec = self.schedule[index]
+            self.deferred.remove(entry)
+            if self.dependent:
+                missing = [r for r in spec["requires"] if not self._delivered(r)]
+                if missing:
+                    reason = "dependency_undelivered"
+                    occurrence = entry["occurrence"]
+                    self._decide(
+                        index, "INACTIVE", reason=reason, missing=missing, occurrence=occurrence
+                    )
+                    continue
+            record = {
+                "index": index,
+                "hook": entry["hook"],
+                "selector": copy.deepcopy(entry["selector"]),
+                "operation": spec["operation"],
+                "state": entry["boundary_state"],
+                "occurrence": entry["occurrence"],
+                "deferred_after_stop": entry["stop_index"],
+                "status": "ERROR",
+            }
+            if self.dependent:
+                record["id"] = spec["id"]
+            self.records.append(record)
+            self.done.add(index)
+            applied.append(record)
+            try:
+                if spec["operation"] == "interrupt":
+                    raise UnsupportedInjection("a second interrupt at a stop boundary")
+                payload = self.resolve(spec.get("payload"), controller)
+                event = {"state": entry["boundary_state"]}
+                self._apply(spec["operation"], payload, entry["hook"], event, controller, record)
+                record["status"] = "APPLIED"
+                if self.dependent:
+                    self._decide(index, "DELIVERED", occurrence=entry["occurrence"])
+            except UnsupportedInjection as exc:
+                record.update(status="UNSUPPORTED", error=str(exc))
+                if self.dependent:
+                    self._decide(index, "NOT_IMPLEMENTED", reason=str(exc))
+                raise
+            except Exception as exc:
+                record["error"] = str(exc)
+                if self.dependent:
+                    self._decide(index, "HARNESS_ERROR", reason=str(exc))
+                raise
+        return copy.deepcopy(applied)
+
+    def _deny_write_routed(self, payload, point, event, controller, record):
+        """E14-P2-INJ (OI-06, by hook point): an after-AUTHORIZED denial whose frozen message
+        names HARNESS_RUN_DIR hits the controller's pre-launch run-directory write; every other
+        denial (E12-P1-INJ) keeps the commit-time path of _deny_write unchanged."""
+        index = record.get("index")
+        spec = self.schedule[index] if isinstance(index, int) else {}
+        args = ((spec.get("payload") or {}).get("args") or {}) if spec else {}
+        message = args.get("message") if spec.get("operation") == "deny_write" else None
+        if (
+            point == "after_transition"
+            and event.get("state") == "AUTHORIZED"
+            and isinstance(message, str)
+            and RUN_DIR_SYMBOL.search(message)
+        ):
+            return self._deny_run_dir(payload, controller, record)
+        return self._deny_write(payload, point, event, controller, record)
+
+    @staticmethod
+    def _deny_run_dir(payload, controller, record):
+        """Arm the controller's pre-launch run-directory denial (sub-wave A API).
+
+        Called as write_boundary.inject_run_dir_denial(controller, artifact=, errno=, message=)
+        through a module attribute looked up at call time; refused when absent."""
+        if not isinstance(payload, dict) or payload.get("fixture_operation") not in (
+            None,
+            "FX-INJECT-PERMISSION-ERROR",
+        ):
+            raise UnsupportedInjection("unsupported denial payload")
+        args = payload.get("args") or {}
+        artifact, root = args.get("artifact"), getattr(controller, "root", None)
+        if (
+            args.get("denial_source") != "injected_fault"
+            or args.get("errno", 13) != 13
+            or not isinstance(args.get("message"), str)
+            or root is None
+            or str(root) not in args["message"]
+            or artifact not in getattr(controller, "paths", {})
+            or artifact == "source"
+            or not hasattr(controller, "context")
+        ):
+            raise UnsupportedInjection("unsupported run-directory denial boundary")
+        inject = getattr(write_boundary, "inject_run_dir_denial", None)
+        if inject is None:
+            raise UnsupportedInjection(
+                "controller exposes no pre-launch run-directory denial "
+                "(write_boundary.inject_run_dir_denial)"
+            )
+        try:
+            inject(
+                controller, artifact=artifact, errno=args.get("errno", 13), message=args["message"]
+            )
+        except ValueError as exc:
+            raise UnsupportedInjection(str(exc)) from exc
+        record.update(
+            effect="armed controller pre-launch run-directory denial",
+            target="run_dir",
+            artifact=artifact,
+            denial_source="injected_fault",
+            adapter_mapping="Permission denied: HARNESS_RUN_DIR -> pre-launch pending checkpoint",
+        )
+        return False
+
+
+STOP_MODE = "harness_stop_controller"
+STOP_SCHEMA = "e2e-injections.stop/1"
+STATE_SCHEMA = "e2e-injections.state/1"
+RUN_DIR_SYMBOL = re.compile(r"HARNESS_RUN_DIR(?![A-Za-z0-9_:])")
+
+
+def _json_order(value):
+    return json.dumps(value, sort_keys=True)
+
+
+def midprocess_payload(payload):
+    """The frozen CAP-MIDPROCESS stop (E11-P1-INJ): after the tool's start receipt is recorded
+    and before any exit receipt. Other deferred forms (E12-P2's metric) are not this."""
+    if not isinstance(payload, dict):
+        return False
+    when = payload.get("when")
+    return (
+        payload.get("mode") == STOP_MODE
+        and isinstance(when, str)
+        and "start receipt is recorded" in when
+        and "before any exit receipt" in when
+        and "CAP-MIDPROCESS" in when
+    )
+
+
+def midprocess_stop_form(spec):
+    """Static: a before_tool interrupt in the frozen mid-process form."""
+    return (
+        spec.get("hook") == "before_tool"
+        and spec.get("operation") == "interrupt"
+        and midprocess_payload(spec.get("payload"))
+    )

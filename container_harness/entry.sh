@@ -148,6 +148,42 @@ while [ $i -lt 200 ]; do
   [ "${n:-0}" -ge 1 ] && break
   sleep 0.05; i=$((i+1))
 done
+# Interrupt broker (traced case mode, only for a case whose injection_schedule carries
+# harness_stop_controller; interrupt_broker.py documents the protocol): root and UNTRACED (a
+# child of this shell, never of strace), it SIGKILLs a controller incarnation from outside the
+# traced tree. Its FIFOs live in $OUT/interrupt-broker (made by the broker before the trace,
+# never a traced path); they are opened here AFTER the RAM sampler started, so only strace and
+# the traced tree inherit them: fd 5 = requests, fd 6 = acks (SIMKIT_INTERRUPT_BROKER).
+BPID=""
+if [ "$MODE" = case ] && [ "$TRACE" = 1 ]; then
+  (cd /opt/ctl && $AS_RUNNER python -m container_harness.interrupt_broker needs "$CASE_ID" \
+     > "$OUT/broker_needs.stdout" 2> "$OUT/broker_needs.stderr")
+  NEED=$?
+  if [ "$NEED" = 0 ]; then
+    status interrupt_broker_needed 1
+    python -I -B /opt/ctl/container_harness/interrupt_broker.py serve \
+      --dir "$OUT/interrupt-broker" --record "$OUT/interrupt_broker.json" --entry-pid "$$" \
+      --status-file "$OUT/harness_status.txt" \
+      > "$OUT/interrupt_broker.stdout" 2> "$OUT/interrupt_broker.stderr" &
+    BPID=$!
+    status interrupt_broker_pid "$BPID"
+    status interrupt_broker_pgid "$(cut -d' ' -f5 /proc/$BPID/stat 2>/dev/null)"
+    i=0
+    while [ ! -e "$OUT/interrupt-broker/ready" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done
+    if [ -e "$OUT/interrupt-broker/ready" ] && [ -p "$OUT/interrupt-broker/request.fifo" ] \
+       && [ -p "$OUT/interrupt-broker/ack.fifo" ]; then
+      exec 5<>"$OUT/interrupt-broker/request.fifo" 6<>"$OUT/interrupt-broker/ack.fifo"
+      export SIMKIT_INTERRUPT_BROKER="request_fd=5,ack_fd=6"
+      status interrupt_broker_ready 1
+    else
+      status interrupt_broker_ready 0
+    fi
+  elif [ "$NEED" = 1 ]; then
+    status interrupt_broker_needed 0
+  else
+    status interrupt_broker_needed error
+  fi
+fi
 status run_start "$(date +%s.%N)"
 
 # 4. the traced run. strace stays root; the tree runs as uid 1000 (-u). Default seccomp applies.
@@ -184,6 +220,20 @@ status run_end "$(date +%s.%N)"
 kill -TERM "$RPID" 2>/dev/null
 wait "$RPID"
 status ram_sampler_exit "$?"
+if [ -n "$BPID" ]; then
+  # The traced tree has exited: drop the channel (post-processing never inherits it), then stop
+  # the broker (it finishes a request in flight, writes its final record, exits 0). Bounded.
+  if [ -n "${SIMKIT_INTERRUPT_BROKER:-}" ]; then
+    exec 5>&- 6>&-
+    unset SIMKIT_INTERRUPT_BROKER
+  fi
+  kill -TERM "$BPID" 2>/dev/null
+  (sleep 30; kill -KILL "$BPID" 2>/dev/null) &
+  BWPID=$!
+  wait "$BPID"
+  status interrupt_broker_exit "$?"
+  kill "$BWPID" 2>/dev/null
+fi
 status complete 1
 
 # 5. untraced, in-container post-processing (the traced tree has exited): analyzer, then the

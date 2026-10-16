@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from test_evidence_projection_v27 import MAP_GOAL, producers_with, rewrite_run, score
+from test_evidence_projection_v27 import MAP_GOAL, resigned, rewrite_run, score
 from test_role_substitution_adapter import PREFIX, frozen, lab  # noqa: F401 - shared fixtures
 
 from adapter_support import evidence_projection as ep
@@ -29,19 +29,23 @@ from tools.workflow.tests.test_operator_channel_v27 import RUN_ID, make, user
 CAPS = ("CAP-TRANSITION-REQUEST", "CAP-LEDGER-APPEND", "CAP-OPERATOR-RECORD-SETUP")
 SIGN = {"reviewer": "test-local", "reviewed_at": "2026-10-14T00:00:00Z", "reviewed_commit": "0"}
 CASES = ("E01-P1-INJ", "E07-P1-INJ", "E03-P3-INJ", "E03-P3-CTL")
+# Wave-7 stop-and-resume cases that also need these records (signed since the D4 w7 review);
+# admitted by them, executed by tests/test_resume_family_adapter.py, not here.
+WAVE7_CASES = ("E10-P1-CTL", "E10-P1-INJ", "E11-P1-CTL", "E11-P1-INJ")
 
 
 UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
 
 
 def signed():
-    """The committed producer file with this task's three records signed (test-local)."""
-    return producers_with(**{cap: SIGN for cap in CAPS})
+    """resigned() (the committed file, rereview flags cleared test-locally) with this task's
+    three records signed (test-local)."""
+    return resigned(**{cap: SIGN for cap in CAPS})
 
 
 def unsigned():
-    """The committed producer file with only this task's three records' signatures stripped."""
-    return producers_with(**{cap: UNSIGN for cap in CAPS})
+    """resigned() with only this task's three records' signatures stripped."""
+    return resigned(**{cap: UNSIGN for cap in CAPS})
 
 
 def execute(lab, case):  # noqa: F811 - lab is the shared module fixture
@@ -96,7 +100,10 @@ def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
         assert record["tests"] and record["producers"] and record["evidence_fields"]
+        # Re-signed after wave 7 (D4 w7 re-review): no rereview flag, declared as committed.
+        assert "rereview_required" not in record
         assert cap in WeatherAdapter().implemented_capabilities()
+        assert cap in WeatherAdapter(producers=resigned()).implemented_capabilities()
     stripped = WeatherAdapter(producers=unsigned())
     assert not set(CAPS) & stripped.implemented_capabilities()
     implemented = WeatherAdapter(producers=signed()).implemented_capabilities()
@@ -106,7 +113,7 @@ def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
         before = set(case["adapter_requirements"]) - stripped.implemented_capabilities()
         if before and not set(case["adapter_requirements"]) - implemented:
             newly.add(case["id"].removeprefix(PREFIX))
-    assert newly == set(CASES)
+    assert newly == set(CASES) | set(WAVE7_CASES)
 
 
 def test_unsigned_records_keep_the_frozen_cases_refused_before_side_effects(lab, frozen, tmp_path):  # noqa: F811

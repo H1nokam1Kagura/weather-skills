@@ -1386,9 +1386,11 @@ def test_run_case_persists_projection_inputs_for_the_post_trace_projection(relea
     inputs = json.loads(inputs_path.read_text(encoding="utf-8"))
     assert inputs["schema"] == "weather-adapter.evidence-projection-inputs/1"
     assert inputs["case_id"] == "RELEASED-MAP" and inputs["run_dir"] == str(released.run)
-    # fixture_operations is carried only for a case that schedules a fixture operation.
-    assert set(project_in_container.INPUT_KEYS) - {"fixture_operations"} <= set(inputs)
-    assert "fixture_operations" not in inputs
+    # fixture_operations is carried only for a case that schedules a fixture operation, and
+    # resume_route only for a harness_stop_controller case (resume_driver's route record).
+    only_some = {"fixture_operations", "resume_route"}
+    assert set(project_in_container.INPUT_KEYS) - only_some <= set(inputs)
+    assert not only_some & set(inputs)
     adapter = WeatherAdapter()
     observations = write_observations(
         tmp_path, harness_observations(adapter.capture_evidence(released.run))
@@ -1633,8 +1635,11 @@ def test_every_frozen_case_stays_not_implemented_unsigned_under_the_real_runner(
     assert all(r["evidence"] is None for r in records)
 
 
-# The frozen cases the signed producer file admits (2026-10-14 D4 sign-off). A change to this
-# set is a change to what is runnable and must be made here deliberately.
+# The frozen cases the committed producer file admits. A change to this set is a change to what
+# is runnable and must be made here deliberately. 31 since the wave-7 signing (D4 w7 reviews,
+# confirm reviews D4-CONFIRM-W7 / -W7B at b524c40): the 24 offline cases admitted before plus
+# E10-P1, E11-P1 and E14-P1 (CTL and INJ each) and E14-P2-INJ. E14-P2-CTL stays refused
+# (CAP-OWNED-STALE-LOCK-SETUP is not built, OWNER-RULINGS scope / D31).
 SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E01-P1-CTL",
     "DEV-E2E-V2_7-E01-P1-INJ",
@@ -1654,18 +1659,30 @@ SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E08-P1-INJ",
     "DEV-E2E-V2_7-E09-P1-CTL",
     "DEV-E2E-V2_7-E09-P1-INJ",
+    "DEV-E2E-V2_7-E10-P1-CTL",
+    "DEV-E2E-V2_7-E10-P1-INJ",
+    "DEV-E2E-V2_7-E11-P1-CTL",
+    "DEV-E2E-V2_7-E11-P1-INJ",
     "DEV-E2E-V2_7-E13-P1-CTL",
     "DEV-E2E-V2_7-E13-P1-INJ",
     "DEV-E2E-V2_7-E13-P3-CTL",
     "DEV-E2E-V2_7-E13-P3-INJ",
+    "DEV-E2E-V2_7-E14-P1-CTL",
+    "DEV-E2E-V2_7-E14-P1-INJ",
+    "DEV-E2E-V2_7-E14-P2-INJ",
     "DEV-E2E-V2_7-E15-P1-CTL",
     "DEV-E2E-V2_7-E15-P1-INJ",
 }
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
 # it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Empty since
-# the wave-5 records were signed from d4-review-w5/D4-CONFIRM.md at 0f264d2.
+# the wave-7 signing.
 PENDING_D4_REVIEW = set()
+# Signed records whose producer files changed after their reviewed_commit, flagged
+# rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
+# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty
+# since the wave-7 re-signing.
+REREVIEW_REQUIRED = set()
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
@@ -1673,6 +1690,7 @@ def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
     implemented = adapter.implemented_capabilities()
     gated = {c for c, r in adapter.producers["capabilities"].items() if r.get("d4_gated")}
     gated -= PENDING_D4_REVIEW  # undeclared by design until signed
+    gated -= REREVIEW_REQUIRED  # undeclared by design until re-signed
     admitted = set()
     for case in frozen["cases"]:
         missing = set(case["adapter_requirements"]) - implemented
@@ -1690,12 +1708,28 @@ def producers_with(**changes):
     return producers
 
 
+def resigned(**changes):
+    """The committed producer file with every rereview_required flag cleared (then ``changes``
+    applied, as producers_with): a test-local stand-in for the batch D4 re-review of the
+    records wave 7's code changes flagged (sub-wave E). Never written back:
+    CAPABILITY-PRODUCERS.json is the coordinator's, and the committed flags keep those records
+    undeclared (test_committed_d4_signatures_are_complete_and_pinned)."""
+    producers = producers_with()
+    for record in producers["capabilities"].values():
+        record.pop("rereview_required", None)
+    for capability, fields in changes.items():
+        producers["capabilities"][capability].update(fields)
+    return producers
+
+
 def unsigned_producers(load_producers):
-    """The committed producer records with every D4 signature removed (review fields null)."""
+    """The committed producer records with every D4 signature removed (review fields null,
+    and any rereview_required flag with them: an unsigned record has nothing to re-review)."""
     producers = load_producers()
     for record in producers["capabilities"].values():
         if record.get("d4_gated") is True:
             record.update(reviewer=None, reviewed_at=None, reviewed_commit=None)
+            record.pop("rereview_required", None)
     return producers
 
 
@@ -1747,10 +1781,15 @@ def test_d4_gate_declares_only_reviewed_producer_mapped_records():
 
 def test_committed_d4_signatures_are_complete_and_pinned():
     """Every d4_gated record in the committed file carries a full signature (reviewer, time,
-    reviewed commit, an APPROVE verdict and its report) and is therefore declared."""
+    reviewed commit, an APPROVE verdict and its report) and is therefore declared, unless it is
+    pending its first review (wholly unsigned) or flagged for re-review (signed, flagged with a
+    non-blank reason, undeclared)."""
     adapter = WeatherAdapter()
     records = adapter.producers["capabilities"]
-    assert all(records[c].get("d4_gated") is True for c in PENDING_D4_REVIEW)
+    assert all(records[c].get("d4_gated") is True for c in PENDING_D4_REVIEW | REREVIEW_REQUIRED)
+    assert not PENDING_D4_REVIEW & REREVIEW_REQUIRED
+    flagged = {c for c, r in records.items() if "rereview_required" in r}
+    assert flagged == REREVIEW_REQUIRED
     for capability, record in records.items():
         if record.get("d4_gated") is not True:
             continue
@@ -1764,6 +1803,12 @@ def test_committed_d4_signatures_are_complete_and_pinned():
         assert record["reviewed_at"].endswith("Z") and record["reviewer"].strip(), capability
         assert record["review_verdict"].startswith("APPROVE"), capability
         assert record["review_report"].endswith(".md"), capability
+        if capability in REREVIEW_REQUIRED:
+            # Signed at an older commit, flagged with a reason, and therefore not declared.
+            reason = record["rereview_required"]
+            assert isinstance(reason, str) and reason.strip(), capability
+            assert capability not in adapter.implemented_capabilities(), capability
+            continue
         assert capability in adapter.implemented_capabilities(), capability
 
 
