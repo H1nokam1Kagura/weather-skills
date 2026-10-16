@@ -1040,6 +1040,37 @@ def test_all_derivable_claim_set_with_no_repair_budget_never_reaches_reviewer(
     assert record["decision"] == "ROUTE_TO_REPAIR" and record["evidence_checker_occurrence"] is None
 
 
+def test_checker_ruling_on_an_unsent_derivable_claim_blocks_presentation(tmp_path, monkeypatch):
+    """D4 LW3 N-PRG-6: the receipt is the worst of all rulings, so a non-SUPPORTED ruling on a
+    derivable claim the checker was not sent would present a plan with a failing receipt
+    (V24-PRE-REVIEW-GATES). It routes to repair; the claim's own verdict stays computed."""
+
+    def checker(payload, n):
+        value = default_checker(payload, n)
+        if n == 1:
+            value["verdicts"].append(
+                {"claim_id": "C-LAST-ELIGIBLE", "verdict": "INSUFFICIENT", "reasoning": "x"}
+            )
+        return value
+
+    stub = Stub(checker=checker)
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    first, second = records(c)
+    by_id = {x["claim_id"]: x for x in first["claims"]}
+    assert by_id["C-LAST-ELIGIBLE"]["verdict"] == "SUPPORTED"
+    assert by_id["C-LAST-ELIGIBLE"]["checker_verdict"] == "INSUFFICIENT"
+    assert first["decision"] == "ROUTE_TO_REPAIR" and first["evidence_checker_occurrence"] == 1
+    receipts = [r for r in c.roles.receipts if r["role"] == "evidence_checker"]
+    assert [r["verdict"] for r in receipts] == ["INSUFFICIENT", "SUPPORTED"]
+    assert second["decision"] == "PRESENT_FOR_REVIEW" and second["evidence_checker_occurrence"] == 2
+    (repaired,) = [call for call in stub.calls if call["role"] == "repairer"]
+    failure = json.loads(repaired["payload"]["failure"])
+    assert failure["checker_ruled_derivable_claims"] == ["C-LAST-ELIGIBLE"]
+    assert failure["failed_claims"] == []
+
+
 def test_record_without_a_checker_occurrence_is_never_presented():
     contract, goal, plan = controller_state()
     claims = [c for c in reference_claims() if c["derivable"]]

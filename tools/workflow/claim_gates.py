@@ -346,10 +346,13 @@ def build_record(
         )
     # A plan is presented only after an evidence-checker pass (V24-PRE-REVIEW-GATES requires a
     # checker occurrence and a SUPPORTED checker receipt for every presented plan): a claim set
-    # with no checker-judged claim routes to repair, however well its computed facts match.
+    # with no checker-judged claim routes to repair, however well its computed facts match. The
+    # receipt is the worst of ALL rulings, so a ruling on a derivable claim the checker was not
+    # sent also blocks presentation; it never makes that claim's own verdict.
     present = (
         gate == "PASS"
         and checker_occurrence is not None
+        and all(v == "SUPPORTED" for v in checker_verdicts.values())
         and all(c["verdict"] == "SUPPORTED" for c in per_claim)
     )
     return {
@@ -390,6 +393,18 @@ def repair_failure(record):
         finding["instruction"] += (
             " Every claim is derivable, so no evidence checker ran and the plan cannot be "
             "presented: add at least one derivable false claim whose cited quotes state its fact."
+        )
+    overruled = [
+        c["claim_id"]
+        for c in record["claims"]
+        if c["derivable"] and c["checker_verdict"] not in (None, "SUPPORTED")
+    ]
+    if overruled:
+        # Only on this route, likewise: the checker ruled a derivable claim it was not sent.
+        finding["checker_ruled_derivable_claims"] = overruled
+        finding["instruction"] += (
+            " The evidence checker ruled derivable claims it was not asked to judge, and its "
+            "receipt must be SUPPORTED before the plan is presented: restate or remove them."
         )
     return json.dumps(finding, sort_keys=True)
 
