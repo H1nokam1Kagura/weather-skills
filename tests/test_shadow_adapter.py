@@ -22,7 +22,7 @@ from test_evidence_projection_v27 import (
     Lab,
     fails,
     findings,
-    producers_with,
+    resigned,
     score,
 )
 
@@ -70,7 +70,9 @@ def run_input(frozen, short):
 
 
 def signed():
-    return producers_with(**{"CAP-SHADOW": SIGN})
+    """resigned() (the committed file, rereview flags cleared test-locally) with CAP-SHADOW
+    signed test-locally. Never written back."""
+    return resigned(**{"CAP-SHADOW": SIGN})
 
 
 @pytest.fixture(scope="module")
@@ -249,8 +251,11 @@ def test_cap_shadow_is_declared_only_by_a_signed_record(frozen, lab, tmp_path):
     assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
     assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
     assert record["missing_fields"] and record["tests"]
-    assert "CAP-SHADOW" in WeatherAdapter().implemented_capabilities()  # signed at 0f264d2
-    unsigned = producers_with(
+    # Re-signed after wave 7 (D4 w7 re-review): no rereview flag, declared as committed.
+    assert "rereview_required" not in record
+    assert "CAP-SHADOW" in WeatherAdapter().implemented_capabilities()
+    assert "CAP-SHADOW" in WeatherAdapter(producers=resigned()).implemented_capabilities()
+    unsigned = resigned(
         **{"CAP-SHADOW": {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}}
     )
     assert "CAP-SHADOW" not in WeatherAdapter(producers=unsigned).implemented_capabilities()
