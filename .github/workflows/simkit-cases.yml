@@ -21,7 +21,9 @@ name: simkit-cases
 # conservative defaults until case_driver fills them) to relay-start, keeps its exited container
 # for the docker-export key scan, then always removes it. The report carries per-case relay
 # usage, LIVE_TRANSPORT_FAULT / RELAY_GUARD_ABORT and the rerun-eligible list; a rerun dispatch
-# names the original run in rerun_of_run_id so both attempts are reported.
+# names the original run in rerun_of_run_id so both attempts are reported. Admission refuses a
+# rerun (relay_usage.py rerun-gate, before any case job) unless every selected case is on the
+# original's rerun-eligible list, has not been rerun already, and is past its earliest rerun time.
 on:
   workflow_dispatch:
     inputs:
@@ -139,6 +141,9 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.selector != 'relay-smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read  # rerun_of_run_id: download the ORIGINAL run's simkit-results for the rerun gate
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
@@ -150,6 +155,7 @@ jobs:
       SELECTOR: ${{ github.event_name == 'push' && 'smoke' || github.event.inputs.selector }}
       LIVE_MAX_CASES: ${{ github.event.inputs.live_max_cases }}
       MAX_PARALLEL_INPUT: ${{ github.event.inputs.max_parallel }}
+      RERUN_OF_RUN_ID: ${{ github.event.inputs.rerun_of_run_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -218,6 +224,24 @@ jobs:
               print(f"- {cap}: {n} ({a['missing_capability_reasons'].get(cap)})")
           EOF
 
+      - name: Original run's results for the rerun gate (rerun dispatch only)
+        if: github.event.inputs.rerun_of_run_id != ''
+        # No continue-on-error: a rerun whose original cannot be read is refused at admission.
+        uses: actions/download-artifact@v4
+        with:
+          name: simkit-results
+          path: rerun-prior
+          run-id: ${{ github.event.inputs.rerun_of_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Rerun gate record (rerun dispatch only; uploaded with the admission evidence)
+        # Recorded even when the download failed, so RERUN-GATE.json names the refusal.
+        if: always() && github.event.inputs.rerun_of_run_id != ''
+        run: |
+          python -I container_harness/relay_usage.py rerun-gate "$OUT/ADMISSION.json" \
+            --prior-results rerun-prior/RESULTS.json --rerun-of-run-id "$RERUN_OF_RUN_ID" \
+            --out "$OUT/RERUN-GATE.json" | tee -a "$GITHUB_STEP_SUMMARY" || true  # enforced after the upload
+
       - name: Save image for the case jobs
         if: steps.matrix.outputs.count != '0'
         run: |
@@ -256,6 +280,17 @@ jobs:
         # more live cases than that, or per-case token caps summing above 5M, fail the run here,
         # so no case job (and no Kong call) starts.
         run: python -I container_harness/relay_usage.py live-gate "$OUT/ADMISSION.json" --live-max-cases "$LIVE_MAX_CASES" --out "$RUNNER_TEMP/live-gate.json"
+
+      - name: Rerun gate (rerun dispatch only; after the admission upload)
+        # Owner ruling live_spend_authorization_2026-10-15.rerun_on_gateway_fault, enforced
+        # before any case job: every selected case must be on the original run's rerun_eligible
+        # list, have no rerun there yet, and be past its earliest rerun time. The report job
+        # keeps its own flags for the same conditions (defence in depth).
+        if: github.event.inputs.rerun_of_run_id != ''
+        run: |
+          python -I container_harness/relay_usage.py rerun-gate "$OUT/ADMISSION.json" \
+            --prior-results rerun-prior/RESULTS.json --rerun-of-run-id "$RERUN_OF_RUN_ID" \
+            --out "$RUNNER_TEMP/rerun-gate.json"
 
   case:
     needs: admission

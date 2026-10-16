@@ -263,3 +263,81 @@ def test_live_gate_cli_exit_status(tmp_path, capsys):
     assert ru.main(["live-gate", str(p), "--live-max-cases", "", "--out", str(out)]) == 1
     assert json.loads(out.read_text())["status"] == "FAIL"
     assert ru.main(["live-gate", str(p), "--live-max-cases", "1", "--out", str(out)]) == 0
+
+
+# ------------------------------------------------------------------ rerun gate (admission)
+
+EARLIEST = "2026-10-15T12:01:00+00:00"
+AFTER = ru.parse_ts("2026-10-15T12:05:00+00:00")
+BEFORE = ru.parse_ts("2026-10-15T12:00:30+00:00")
+
+
+def prior(eligible=("L0",), attempts=None, earliest=EARLIEST):
+    attempts = attempts or {}
+    return {
+        "run_url": "https://example.invalid/runs/1",
+        "cases": [
+            {"case_id": cid, "attempt": n, "attempts": [{"attempt": i + 1} for i in range(n)]}
+            for cid, n in attempts.items()
+        ],
+        "live": {
+            "rerun_eligible": [
+                {"case_id": cid, "attempt": 1, "earliest_rerun_utc": earliest} for cid in eligible
+            ],
+        },
+    }
+
+
+def test_rerun_gate_passes_an_eligible_case_after_its_earliest_time():
+    g = ru.rerun_gate(adm("L0", live=1, offline=0), prior(attempts={"L0": 1}), "1", AFTER)
+    assert g["status"] == "OK" and g["problems"] == [] and g["selected"] == ["L0"]
+    assert g["cases"][0]["prior_attempts"] == 1 and g["original_results_present"] is True
+
+
+@pytest.mark.parametrize(
+    ("admission", "prior_results", "now", "reason"),
+    [
+        (adm("L0,L1", live=2, offline=0), prior(), AFTER, "L1: not on the original run's"),
+        (
+            adm("L0", live=1, offline=0),
+            prior(attempts={"L0": 2}),
+            AFTER,
+            "L0: already re-dispatched in the original (2 attempts",
+        ),
+        (adm("L0", live=1, offline=0), prior(), BEFORE, "L0: too early: earliest rerun"),
+        (adm("L0", live=1, offline=0), prior(earliest=None), AFTER, "no earliest rerun time"),
+        (adm("L0", live=1, offline=0), None, AFTER, "no readable simkit-results RESULTS.json"),
+        (adm("L0", live=0, offline=0), prior(), AFTER, "selects no case"),
+    ],
+    ids=["not-eligible", "second-rerun", "too-early", "no-earliest", "missing-original", "none"],
+)
+def test_rerun_gate_refuses(admission, prior_results, now, reason):
+    g = ru.rerun_gate(admission, prior_results, "1", now)
+    assert g["status"] == "FAIL"
+    assert any(reason in p for p in g["problems"]), g["problems"]
+
+
+def test_rerun_gate_counts_attempts_from_the_live_section_too():
+    p = prior()
+    p["live"]["attempts_by_case"] = {"L0": [{"attempt": 1}, {"attempt": 2}]}
+    g = ru.rerun_gate(adm("L0", live=1, offline=0), p, "1", AFTER)
+    assert g["status"] == "FAIL" and g["cases"][0]["prior_attempts"] == 2
+
+
+def test_rerun_gate_cli(tmp_path, capsys):
+    a = tmp_path / "ADMISSION.json"
+    a.write_text(json.dumps(adm("L0", live=1, offline=0)), encoding="utf-8")
+    r = tmp_path / "prior" / "RESULTS.json"
+    out = tmp_path / "out" / "RERUN-GATE.json"
+    base = ["rerun-gate", str(a), "--prior-results", str(r), "--rerun-of-run-id", "77"]
+    # the original's results are missing: refused, with the reason recorded and printed
+    assert ru.main([*base, "--out", str(out), "--now", AFTER.isoformat()]) == 1
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    assert rec["status"] == "FAIL" and rec["original_results_present"] is False
+    assert rec["rerun_of_run_id"] == "77" and "Refused" in capsys.readouterr().out
+    r.parent.mkdir()
+    r.write_text(json.dumps(prior()), encoding="utf-8")
+    assert ru.main([*base, "--out", str(out), "--now", BEFORE.isoformat()]) == 1
+    assert ru.main([*base, "--out", str(out), "--now", AFTER.isoformat()]) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["status"] == "OK"
+    assert "Rerun gate: OK" in capsys.readouterr().out
