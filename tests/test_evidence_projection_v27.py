@@ -1636,11 +1636,17 @@ def test_every_frozen_case_stays_not_implemented_unsigned_under_the_real_runner(
 
 
 # The frozen cases the committed producer file admits. A change to this set is a change to what
-# is runnable and must be made here deliberately. 31 since the wave-7 signing (D4 w7 reviews,
-# confirm reviews D4-CONFIRM-W7 / -W7B at b524c40): the 24 offline cases admitted before plus
-# E10-P1, E11-P1 and E14-P1 (CTL and INJ each) and E14-P2-INJ. E14-P2-CTL stays refused
-# (CAP-OWNED-STALE-LOCK-SETUP is not built, OWNER-RULINGS scope / D31).
-SIGNED_ADMITTED = {
+# is runnable and must be made here deliberately. Empty since the live-role wave records (LIVE-
+# WAVE-BRIEF sub-wave 6): the live wave changed producer files of 24 signed records (CAP-RECEIPTS
+# among them, which every frozen case requires), so they are flagged rereview_required below and
+# undeclared, and nothing is admitted until the batch D4 re-review re-signs them. The 31 cases
+# admitted before (RESIGNED_ADMITTED) return when the flags are cleared.
+SIGNED_ADMITTED = set()
+# What the committed file admits with every rereview flag cleared (resigned()): the 31 since the
+# wave-7 signing (D4 w7 reviews, confirm reviews D4-CONFIRM-W7 / -W7B at b524c40): the 24 offline
+# cases admitted before plus E10-P1, E11-P1 and E14-P1 (CTL and INJ each) and E14-P2-INJ.
+# E14-P2-CTL stays refused (CAP-OWNED-STALE-LOCK-SETUP is not built, OWNER-RULINGS scope / D31).
+RESIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E01-P1-CTL",
     "DEV-E2E-V2_7-E01-P1-INJ",
     "DEV-E2E-V2_7-E02-P1-CTL",
@@ -1675,14 +1681,55 @@ SIGNED_ADMITTED = {
 }
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
-# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Empty since
-# the wave-7 signing.
-PENDING_D4_REVIEW = set()
+# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. The seven
+# live-role wave records (LIVE-WAVE-BRIEF sub-wave 6). CAP-OPERATOR-NOTIFY-HOOK must stay here
+# until sub-wave 5 opens the notification boundary in run_case (its record's notes).
+PENDING_D4_REVIEW = {
+    "CAP-LIVE-ROLE",
+    "CAP-BINDING-PASSTHROUGH",
+    "CAP-ROLE-INPUT-PATCH",
+    "CAP-METRIC",
+    "CAP-TRANSPORT-RETRY",
+    "CAP-TRANSPORT-RETRY-SETUP",
+    "CAP-OPERATOR-NOTIFY-HOOK",
+}
 # Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
-# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty
-# since the wave-7 re-signing.
-REREVIEW_REQUIRED = set()
+# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. The 24
+# signed records whose producer files the live-role wave changed (sub-waves 1-4b and 8, integrated
+# at 8654227); only CAP-ROLE-OUTPUT-SCHEMA, CAP-BOUND-SOURCES, CAP-PROFILE, CAP-PRE-REVIEW-GATES,
+# CAP-REREVIEW and CAP-TRANSITION-REQUEST kept their signatures valid.
+REREVIEW_REQUIRED = {
+    "CAP-AUTO-RESUME",
+    "CAP-BOUND-SOURCES",
+    "CAP-DENY-WRITE",
+    "CAP-DIAGNOSIS",
+    "CAP-EVIDENCE-CHECKER",
+    "CAP-EXHAUSTIVE-WRITES",
+    "CAP-FIXTURE-OP",
+    "CAP-HARNESS-OBS",
+    "CAP-INTERRUPT",
+    "CAP-LEDGER-APPEND",
+    "CAP-LEDGER-SEED",
+    "CAP-MECHANICAL-REPAIR",
+    "CAP-MIDPROCESS",
+    "CAP-OPERATOR-ACTIONS",
+    "CAP-OPERATOR-NOTIFY",
+    "CAP-OPERATOR-RECORD-SETUP",
+    "CAP-PRE-REVIEW-GATES",
+    "CAP-REASON-MAP",
+    "CAP-RECEIPTS",
+    "CAP-REREVIEW",
+    "CAP-RESUME",
+    "CAP-RESUME-ATTRIBUTION",
+    "CAP-ROLE-OUTPUT-SCHEMA",
+    "CAP-ROLE-SUBSTITUTE",
+    "CAP-RUN-PROVENANCE",
+    "CAP-SHADOW",
+    "CAP-SIGNAL-CAPTURE",
+    "CAP-SYMBOLS",
+    "CAP-TRANSITION-REQUEST",
+}
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):

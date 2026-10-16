@@ -32,6 +32,8 @@ CASES = ("E01-P1-INJ", "E07-P1-INJ", "E03-P3-INJ", "E03-P3-CTL")
 # Wave-7 stop-and-resume cases that also need these records (signed since the D4 w7 review);
 # admitted by them, executed by tests/test_resume_family_adapter.py, not here.
 WAVE7_CASES = ("E10-P1-CTL", "E10-P1-INJ", "E11-P1-CTL", "E11-P1-INJ")
+# Flagged rereview_required by the live-role wave (LIVE-WAVE-BRIEF sub-wave 6).
+LIVE_WAVE_FLAGGED = ("CAP-LEDGER-APPEND", "CAP-OPERATOR-RECORD-SETUP", "CAP-TRANSITION-REQUEST")
 
 
 UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
@@ -100,9 +102,15 @@ def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
         assert record["tests"] and record["producers"] and record["evidence_fields"]
-        # Re-signed after wave 7 (D4 w7 re-review): no rereview flag, declared as committed.
-        assert "rereview_required" not in record
-        assert cap in WeatherAdapter().implemented_capabilities()
+        # Re-signed after wave 7 (D4 w7 re-review). The live-role wave's weather_adapter.py
+        # change flags CAP-LEDGER-APPEND and CAP-OPERATOR-RECORD-SETUP rereview_required, and its
+        # runner.py change (51089d0) flags CAP-TRANSITION-REQUEST: all undeclared as committed.
+        if cap in LIVE_WAVE_FLAGGED:
+            assert record["rereview_required"].strip()
+            assert cap not in WeatherAdapter().implemented_capabilities()
+        else:
+            assert "rereview_required" not in record
+            assert cap in WeatherAdapter().implemented_capabilities()
         assert cap in WeatherAdapter(producers=resigned()).implemented_capabilities()
     stripped = WeatherAdapter(producers=unsigned())
     assert not set(CAPS) & stripped.implemented_capabilities()
