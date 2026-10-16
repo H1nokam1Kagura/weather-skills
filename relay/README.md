@@ -39,7 +39,9 @@ RelayRoles.ask(role, payload)  --HTTP-->   relay/kong_relay_host.py  (kit interp
   relay `--max-body`), under the relay's hard max of 90,000 (`HARD_MAX_BODY` in
   `kong_relay_host.py`), which sits under the Kong kit's `KNOWN_GOOD_BODY_BYTES` 97,600 (the
   largest body observed to pass; larger ones have failed with a bodiless 500 at the edge).
-  Oversized bodies are refused from `Content-Length` and never read. The host adds the system
+  Oversized bodies are refused from `Content-Length` and never read. Both caps apply to the
+  body actually sent, which is the ENCODED body when the `dedup-sha256/1` transport encoding
+  applies (below). The host adds the system
   prompt and the payload is re-serialised as message text, so the gateway body is larger than
   the relay body: the kit worker re-checks it against 97,600 and refuses before sending
   (`sent_to_gateway: false`, nothing billed) when it does not fit.
@@ -56,9 +58,117 @@ RelayRoles.ask(role, payload)  --HTTP-->   relay/kong_relay_host.py  (kit interp
   `os.environ`, so tool children (`catalog.child_environment` copies the environment) never
   see the run token.
 - **Audit.** Append-only JSONL, one line per event (`relay_start`, `ask`, `auth_rejected`,
-  `spend_cap_reached`, `relay_stop`) with status, via, request id, model, usage, hashes,
-  sizes, spend totals, outcome and fault labels only. Never the payload, answer text, run
-  token or any key.
+  `spend_cap_reached`, `relay_stop`) with status, via, request id, model, usage, sent
+  settings, hashes, sizes, spend totals, outcome and fault labels only. Never the payload,
+  answer text, run token or any key. Per-call fields: see "Per-call audit fields" below.
+
+## Transport encoding `dedup-sha256/1`
+
+Why: live sub-wave 2 measured the planner, repairer and reviewer request bodies at 113.9 to
+122.7 KB, over the 88,000-byte cap, because the same ~55 KB of skill documentation is sent
+twice (`documentation` and `review_evidence(_request).sources`). The LIVE TRANSPORT now
+deduplicates it losslessly. The controller payload, its recorded role input files and
+`input_hash` are untouched. Source of truth: the docstrings and code of
+`tools/workflow/relay_roles.py` (`dedup_encode`, `dedup_decode`) and
+`relay/kong_relay_host.py` (`render_model_input`, `wire_view`).
+
+**What is shared, and when (client, `dedup_encode`).**
+
+- Candidates are JSON values (strings, objects and arrays; never numbers, booleans or null)
+  whose `json.dumps` text is at least `DEDUP_MIN_BYTES` = 2,048 UTF-8 bytes. A candidate is
+  shared only if the same text occurs **two or more times** in the payload. The payload root is
+  never itself a reference.
+- Each shared value is written once in a top-level `shared` table keyed by the sha256 (hex) of
+  its exact `json.dumps` text (key order included), in first-appearance order, outer value
+  before inner. Every place it occurred holds the reference object `{"$shared": "<sha256>"}`.
+  Table entries are encoded the same way, so a shared value may itself contain references.
+- Encoding is deterministic: the same payload always yields the same body.
+- **Skipped entirely** when no value of at least 2,048 bytes repeats, or when the payload
+  already holds a reference-shaped object (a one-key object with key `$shared`, which could not
+  be told apart). The body is then exactly `{"role", "payload"}` as before and the receipt says
+  `transport_encoding: null`.
+
+An encoded body has exactly these keys: `role`, `payload` (with references), `transport_encoding`
+(`"dedup-sha256/1"`), `shared`, `original_sha256` (`contracts.digest` of the original payload,
+which is the receipt `input_hash`) and `original_text_sha256` (sha256 of
+`json.dumps(payload)`, which also pins key order). Any other key set is refused as `malformed`
+(HTTP 400).
+
+**Host decode and verification (`dedup_decode`).** After the role allow-list check and before
+the in-flight lock and the spend guard, the relay decodes the body and verifies that the
+`transport_encoding` is `dedup-sha256/1`; the `shared` table is a non-empty object; every
+reference resolves to a table entry, with no cycle; every table entry hashes to its key; every
+entry is referenced; and the decoded payload matches both `original_sha256` and
+`original_text_sha256`. Any failure is refused before anything is forwarded:
+
+| Field | Value |
+|---|---|
+| HTTP status | 400 |
+| `outcome` | `REFUSED` |
+| `sent_to_gateway` | `false` (`billed_usd: null`) |
+| `reason_code` | `dedup_mismatch` |
+| `fault_class` / `fault_kind` (audit line) | `DETERMINISTIC` / `dedup_mismatch` |
+| `reason` | `transport encoding does not verify: <which check failed>` |
+
+The client raises `Refused` with the role's gate and releases its budget reservation (the relay
+proved nothing was forwarded). A dedup mismatch is never rerun: it is deterministic.
+
+**What the model sees (`render_model_input`).** KongRoles receives the DECODED payload, so
+`input_hash`, `stdin_hash`, the system prompt and the reviewer `dispatch` binding are those of
+the controller payload. The system prompt is NOT changed, so the controller's review binding
+still holds. Only the user message differs: instead of `json.dumps(payload)` it is this
+deterministic rendering, lines joined with `\n`:
+
+```
+TRANSPORT ENCODING dedup-sha256/1. This message is your complete role input. ...  (preamble)
+
+=== ROLE INPUT (JSON) ===
+<json.dumps of the encoded payload, references kept>
+=== END ROLE INPUT ===
+
+=== SHARED DOCUMENTS (referenced by $shared sha256; <N> blocks) ===
+--- $shared <sha256> ---
+<json.dumps of the shared value, as stored: a JSON string literal for text; may hold references>
+--- end $shared <sha256> ---
+...                                                    (one block per table entry, table order)
+=== END SHARED DOCUMENTS ===
+```
+
+The preamble (`MODEL_INPUT_PREAMBLE`) tells the model that each large value that occurred more
+than once is written once in SHARED DOCUMENTS, that every reference is to be read exactly as if
+the referenced value were written in full at that position, that nothing was removed, shortened
+or summarised, and that its answer rules are unchanged. The spend guard bounds the call's worst
+case on this model-facing text, not on the decoded payload.
+
+**Receipts.** The relay adds two fields to the KongRoles receipt (besides `relay_id`):
+
+- `transport_encoding`: `null` (sent plain) or `"dedup-sha256/1"`;
+- `transport_bytes`: `request_body_bytes` (the body as received), `payload_bytes`
+  (`json.dumps` of the decoded payload), `model_facing_bytes` and `model_facing_hash`
+  (`sha256:<hex>` of the user message actually sent), `shared_blocks` and `shared_bytes`
+  (0 for a plain request, whose model-facing text is `json.dumps(payload)`).
+
+`input_hash` stays the controller payload's (`contracts.digest` of the decoded payload). The
+client refuses a receipt whose `input_hash` is not its own payload's, whose
+`transport_encoding` differs from the encoding it sent, whose `transport_bytes` is not an
+object, or (when encoded) whose `request_body_bytes` is not the length of the body it sent.
+
+## Per-call audit fields
+
+Every `ask` audit line for a call that reached KongRoles (`SUCCESS`, `UNKNOWN`, the 422
+`REFUSED` from KongRoles, and the 500 relay internal error) carries:
+
+| Field | Meaning |
+|---|---|
+| `transport_encoding`, `transport_bytes` | as in the receipt (above) |
+| `temperature_requested` | the relay's configured `--temperature` (`null` when `none`) |
+| `settings_sent` | the non-content settings the worker echoed from the request body it built: every body key except `system` and `messages` (`model`, `max_tokens`, and the temperature, which the pinned SDK sends as `{"extra_body": {"temperature": 0}}`) |
+| `sent_keys` | the sorted top-level keys of that request body |
+
+`settings_sent` and `sent_keys` are `null` when no worker envelope echoed them (no request
+body was built), so a
+temperature-0 run is provable per call rather than inferred from a smoke. Refusals made before
+forwarding (auth, role, size, malformed, `dedup_mismatch`, busy, spend cap) do not carry them.
 
 ## Spend guard and pricing
 
@@ -119,7 +229,7 @@ These are labels; the report decides rerun eligibility.
 |---|---|---|---|
 | `SUCCESS` + value + receipt (KongRoles receipt + `relay_id`) | 200 | returns value | cost if priced, else kept |
 | `REFUSED`, `sent_to_gateway: false`, `reason_code: relay_spend_cap` | 402 | `Refused(gate="budget")` | released |
-| `REFUSED`, `sent_to_gateway: false` (auth, role, size, busy, Kong pre-send) | 401/403/409/411/413/415/422 | `Refused` | released |
+| `REFUSED`, `sent_to_gateway: false` (malformed, `dedup_mismatch`, auth, role, size, busy, Kong pre-send) | 400/401/403/409/411/413/415/422 | `Refused` | released |
 | `REFUSED`, `sent_to_gateway: true` (answer came back invalid) | 422 | `Refused` | `billed_usd` if known, else kept |
 | `UNKNOWN` (KongRoles `KongOutcomeUnknown`, relay internal error) | 502/500 | `RelayOutcomeUnknown` | kept |
 | transport failure after bytes were written; unparseable/oversized reply | any | `RelayOutcomeUnknown` | kept |
