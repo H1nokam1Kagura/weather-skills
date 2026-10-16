@@ -1672,25 +1672,52 @@ RESIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E15-P1-CTL",
     "DEV-E2E-V2_7-E15-P1-INJ",
 }
+# The live cases the committed producer file admits since six live-role records were signed
+# (D4-CONFIRM-LW-A at dd19936): every live case except E12-P2 x2 (CAP-DECOY is not built) and
+# E14-P3 x2 (CAP-OPERATOR-NOTIFY-HOOK stays unsigned until sub-wave 5). Admission is by
+# requirements: E10-P2 x2 depend on unbuilt sub-wave 5 mechanics and E11-P2-INJ is refused at
+# run_case entry, so live batches are dispatched only by explicit case list.
+LIVE_SIGNED_ADMITTED = {
+    "DEV-E2E-V2_7-E01-P2-CTL",
+    "DEV-E2E-V2_7-E01-P2-INJ",
+    "DEV-E2E-V2_7-E02-P2-CTL",
+    "DEV-E2E-V2_7-E02-P2-INJ",
+    "DEV-E2E-V2_7-E03-P2-CTL",
+    "DEV-E2E-V2_7-E03-P2-INJ",
+    "DEV-E2E-V2_7-E04-P2-CTL",
+    "DEV-E2E-V2_7-E04-P2-INJ",
+    "DEV-E2E-V2_7-E05-P2-CTL",
+    "DEV-E2E-V2_7-E05-P2-INJ",
+    "DEV-E2E-V2_7-E06-P1-CTL",
+    "DEV-E2E-V2_7-E06-P1-INJ",
+    "DEV-E2E-V2_7-E06-P2-CTL",
+    "DEV-E2E-V2_7-E06-P2-INJ",
+    "DEV-E2E-V2_7-E07-P2-CTL",
+    "DEV-E2E-V2_7-E07-P2-INJ",
+    "DEV-E2E-V2_7-E08-P2-CTL",
+    "DEV-E2E-V2_7-E08-P2-INJ",
+    "DEV-E2E-V2_7-E09-P2-CTL",
+    "DEV-E2E-V2_7-E09-P2-INJ",
+    "DEV-E2E-V2_7-E10-P2-CTL",
+    "DEV-E2E-V2_7-E10-P2-INJ",
+    "DEV-E2E-V2_7-E11-P2-CTL",
+    "DEV-E2E-V2_7-E11-P2-INJ",
+    "DEV-E2E-V2_7-E12-P1-CTL",
+    "DEV-E2E-V2_7-E12-P1-INJ",
+    "DEV-E2E-V2_7-E13-P2-CTL",
+    "DEV-E2E-V2_7-E13-P2-INJ",
+    "DEV-E2E-V2_7-E15-P2-CTL",
+    "DEV-E2E-V2_7-E15-P2-INJ",
+}
 # The frozen cases the committed producer file admits. A change to this set is a change to what
-# is runnable and must be made here deliberately. The 31 again since the live-wave re-signing
-# (D4-REVIEW-LW-B / -C at d6c2809 re-signed the 29 records the live wave had flagged); the seven
-# live-role records are still unsigned (PENDING_D4_REVIEW), so no live case is admitted.
-SIGNED_ADMITTED = set(RESIGNED_ADMITTED)
+# is runnable and must be made here deliberately: the 31 offline cases plus the 30 live ones.
+SIGNED_ADMITTED = set(RESIGNED_ADMITTED) | LIVE_SIGNED_ADMITTED
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
-# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. The seven
-# live-role wave records (LIVE-WAVE-BRIEF sub-wave 6). CAP-OPERATOR-NOTIFY-HOOK must stay here
+# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Six of the
+# seven live-role records were signed (D4-CONFIRM-LW-A); CAP-OPERATOR-NOTIFY-HOOK must stay here
 # until sub-wave 5 opens the notification boundary in run_case (its record's notes).
-PENDING_D4_REVIEW = {
-    "CAP-LIVE-ROLE",
-    "CAP-BINDING-PASSTHROUGH",
-    "CAP-ROLE-INPUT-PATCH",
-    "CAP-METRIC",
-    "CAP-TRANSPORT-RETRY",
-    "CAP-TRANSPORT-RETRY-SETUP",
-    "CAP-OPERATOR-NOTIFY-HOOK",
-}
+PENDING_D4_REVIEW = {"CAP-OPERATOR-NOTIFY-HOOK"}
 # Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
 # by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. The 24

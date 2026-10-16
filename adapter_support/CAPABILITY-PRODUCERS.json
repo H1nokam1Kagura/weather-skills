@@ -1603,7 +1603,7 @@
       ],
       "evidence_fields": [
         "invocation_receipts[*].mode = live for an invocation the live member answered (substituted for one the double answered)",
-        "invocation_receipts[*].live {mode, transport, model_requested, model_observed, settings {max_tokens, temperature, system_prompt_hash, thinking, retries, sdk, structured_output, answer_tool, answer_tool_hash, answer_source}, usage, request_id, response_id, relay_id, gateway_mock, cost_basis} per live receipt, as recorded. Without the construction-time opt-out, a live answer reaches the controller only when every receipt the live member added for it carries gateway_mock false; any other value refuses the answer (AdapterRefusal). The refused answer's receipt stays on the shared receipts list, recorded as it is; whether such a receipt can reach a projection after the refusal is [UNVERIFIED] (not tested). An accepted answer projecting gateway_mock true comes only from a member constructed with allow_gateway_mock True (the zero-cost test fakes)",
+        "invocation_receipts[*].live {mode, transport, model_requested, model_observed, settings {max_tokens, temperature, system_prompt_hash, thinking, retries, sdk, structured_output, answer_tool, answer_tool_hash, answer_source}, usage, request_id, response_id, relay_id, gateway_mock, cost_basis} per live receipt, as recorded. Without the construction-time opt-out, a live answer reaches the controller only when every receipt the live member added for it carries gateway_mock false; any other value refuses the answer (AdapterRefusal). The refused answer's receipt stays on the shared receipts list, recorded as it is; it cannot reach a projection as a live result: it is checkpointed without a role file or a completed dispatch event, so the case's projection fails closed with an evidence-mapping error (a generic role-file mismatch, not a gateway-named refusal) - static reading by D4-CONFIRM-LW-A, not tested. An accepted answer projecting gateway_mock true comes only from a member constructed with allow_gateway_mock True (the zero-cost test fakes)",
         "invocation_receipts[*].session_id of a live receipt = the provider's response_id",
         "budget_ledger.final.consumed_model_usd of a live run = the live member's reconciled spend: a sum of list-price estimates, never a Kong bill",
         "outside the scored evidence: the case report's gateway_mock record per EXECUTED case (cases_report.gateway_mock_record: GATEWAY_MOCK / GATEWAY_UNOBSERVED, live.gateway_mock_cases / live.gateway_unobserved_cases, RESULTS.md flag lines)",
@@ -1631,9 +1631,9 @@
         "relay caps (LIVE-WAVE-BRIEF 'Spend guard'; computed in case_driver, not observed): expected_calls is an upper estimate from the frozen roles, budget.max_repair_attempts and the schedule (review rounds R = max(1 + repairs + material fixture changes, the highest reviewer occurrence a schedule entry selects); compilers 3, planner 1, repairer = repairs, evidence_checker R, reviewer R minus the split occurrences routed to the double, verifier 1, shadow_policy one per shadow state plus R - 1, router 1, plus one per scheduled interrupt); a transport retry adds no request (its fault raises before any byte is sent)",
         "token cap: the per-call bound (call_token_bound) is one token per byte of the longest system prompt plus the largest user message the client can send (the 88,000-byte body cap plus the dedup preamble and marker lines, at most 256 bytes per shared block), framing, forced-tool overhead and the role's max_tokens; max_total_tokens = 1.5 x the sum over expected calls. One token per byte overcounts real tokenisation, so the cap is loose by design: for E12-P1-CTL the bound is about 104,000 tokens per call and max_total_tokens 1,095,813 (computed locally at this commit). That the bound covers the relay's own worst case is argued in call_token_bound's docstring and checked against the fake-relay bodies of two cases (test_relay_caps_bound_the_observed_live_calls), not proven for every encoding. The bound assumes the relay runs with the default per-role max_tokens (RELAY_MAX_TOKENS 2048 in the workflow, planner and repairer 4096)",
         "consumed_model_usd: the controller's spent for a live run is the live member's reconciled list-price estimate; CAP-METRIC readings can raise it as a floor",
-        "frozen 'invoke the real model' (D4-REVIEW-LW-A B-LR-1, fixed at 13a640f): a live answer is a model result only when the gateway says it was not a mock. The KongRoles receipt's gateway_mock (kong_roles.py:669, the envelope's mock flag from the kit) must be exactly False on every receipt the live member added for the answer, or CombinedRoles.ask refuses the answer before the controller sees it; MISSING and non-boolean values are refused, never read as False. The one opt-out (GATEWAY_MOCK_OPT_OUT allow_gateway_mock) is construction-only: CombinedRoles reads it once from the live member's own instance __dict__ and accepts only True. The live path cannot reach it, read statically and asserted by test_the_gateway_mock_opt_out_is_construction_only_and_absent_from_the_live_path: RelayRoles neither carries nor defines it, live_roles.py reads no environment variable, and the name does not occur in case_driver.py, launch.py, weather_adapter.py, evidence_projection.py, relay_roles.py, kong_roles.py or runner.py. Only the zero-cost test fakes set it, explicitly, and their receipts still project gateway_mock true. That real Kong envelopes carry mock as the boolean False is evidenced by the relay smokes' receipt_live_gateway check (relay_role_smoke_report.py:102, gateway_mock is False; run 38927191517 passed), not by any frozen-case run"
+        "frozen 'invoke the real model' (D4-REVIEW-LW-A B-LR-1, fixed at 13a640f): a live answer is a model result only when the relay worker's own check says its configured gateway was not a mock (gateway_mock is computed by the worker from its gateway URL - the production URL or a loopback mock - not asserted by the gateway). The KongRoles receipt's gateway_mock (kong_roles.py:669, the envelope's mock flag from the kit) must be exactly False on every receipt the live member added for the answer, or CombinedRoles.ask refuses the answer before the controller sees it; MISSING and non-boolean values are refused, never read as False. The one opt-out (GATEWAY_MOCK_OPT_OUT allow_gateway_mock) is construction-only: CombinedRoles reads it once from the live member's own instance __dict__ and accepts only True. The live path cannot reach it, read statically and asserted by test_the_gateway_mock_opt_out_is_construction_only_and_absent_from_the_live_path: RelayRoles neither carries nor defines it, live_roles.py reads no environment variable, and the name does not occur in case_driver.py, launch.py, weather_adapter.py, evidence_projection.py, relay_roles.py, kong_roles.py or runner.py. Only the zero-cost test fakes set it, explicitly, and their receipts still project gateway_mock true. That real Kong envelopes carry mock as the boolean False is evidenced by the relay smokes' receipt_live_gateway check (relay_role_smoke_report.py:102, gateway_mock is False; run 38927191517 passed), not by any frozen-case run"
       ],
-      "notes": "Data classification: every live payload is the controller's role input for a frozen DEV-ONLY synthetic case (case texts, the repository's own skill documentation, the staged test fixture's metadata and hashes): synthetic texts only, Not Sensitive under the Kong kit's data policy (LIVE-WAVE-BRIEF sub-wave 6; OWNER-RULINGS live_call_authorization, kong_secret_ruling_2026-10-13: synthetic / Not Sensitive payloads only). Enforced by acknowledgement and route only (KongRoles refuses without data_policy_ack, the relay CLI requires --ack-not-sensitive, and the controller is the only sender); no content classifier runs. Key isolation: the Kong key is in the environment of the host relay process itself (relay_ci.sh passes KONG_ANTHROPIC_KEY to the step that starts kong_relay_host.py, line 106) and of the KongRoles worker it starts, which inherits it; it never enters the container (key-absence scan), and the container client holds a per-run relay token, removed from its environment at from_env. Relay audit log vs the secret ruling: kong_secret_ruling_2026-10-13 constrains logs to 'status, via, request-id, model, usage only'. The relay's audit ask line (kong_relay_host.py, e.g. the SUCCESS line at 708-719) carries those and also non-content fields outside that literal list: run_id, relay_id, remote, role, transport_encoding, transport_bytes, body_bytes, temperature_requested, settings_sent, sent_keys, structured_output, answer_source, http_status, outcome, wall_ms, the RECEIPT_AUDIT fields (invocation_id, session_id, input_hash, output_hash, cost_usd, cost_basis, model_match, stop_reason, response_id, latency_ms, gateway_mock, beside model_requested / model_observed / usage / request_id / via), charge and the spend snapshot. By its docstring and as read, no payload, answer text, run token or key is written. The audit therefore does NOT conform to the ruling's literal list; whether these extra non-content fields are within the ruling's intent has no owner confirmation on record and is left for the owner. Spend: owner-authorized (OWNER-RULINGS live_spend_authorization_2026-10-15), enforced per run by the relay SpendGuard and per dispatch by live_gate. LIVE-WAVE-BRIEF: do not sign before sub-waves 2 and 4b land; both are in this commit (64b8279, aeeb8af). Live per-role format evidence: relay-role-smoke run 38922536742 found the live planner and repairer citing with the key verbatim_quote instead of quote, which the controller refuses (review_evidence.py:86); ff9cfad types claims/citations exactly in role_schemas.py. Run 38925383658 (at ff9cfad) then found a second fault: the repairer marked every claim derivable with no computable fact (all INSUFFICIENT) and dropped markdown backticks from a quote, so repair was exhausted; 51089d0 rewrites the controller's evidence-request instruction in runner.py to state its own rules (exact keys, character-for-character quotes including markdown, derivable only with computes for a registered fact), fixing both faults. Relay-role-smoke run 38927191517 (at 51089d0) then passed 142/142: 7 live roles in 8 calls accepted by the real controller (compiler, planner, repairer, evidence_checker, reviewer plus its rationale variant, verifier, shadow_policy). The router is not called (relay_role_smoke.py:26: no live case asks it), nor is rubric_grader (SIMKIT simkit/handoffs/completion-20261012/relay-role-smoke-3/, NOTE.md covers runs 1-3). One sample per role proves format and acceptance, not reliability. Those two commits are after this record's base (8654227). The role_schemas.py and runner.py pins, and every live_roles.py pin moved by 13a640f, were re-read at 46e8cfe.",
+      "notes": "Data classification: every live payload is the controller's role input for a frozen DEV-ONLY synthetic case (case texts, the repository's own skill documentation, the staged test fixture's metadata and hashes): synthetic texts only, Not Sensitive under the Kong kit's data policy (LIVE-WAVE-BRIEF sub-wave 6; OWNER-RULINGS live_call_authorization, kong_secret_ruling_2026-10-13: synthetic / Not Sensitive payloads only). Enforced by acknowledgement and route only (KongRoles refuses without data_policy_ack, the relay CLI requires --ack-not-sensitive, and the controller is the only sender); no content classifier runs. Key isolation: the Kong key is in the environment of the host relay process itself (relay_ci.sh passes KONG_ANTHROPIC_KEY to the step that starts kong_relay_host.py, line 106) and of the KongRoles worker it starts, which inherits it; it never enters the container (key-absence scan), and the container client holds a per-run relay token, removed from its environment at from_env. Relay audit log vs the secret ruling: kong_secret_ruling_2026-10-13 constrains logs to 'status, via, request-id, model, usage only'. The relay's audit ask line (kong_relay_host.py, e.g. the SUCCESS line at 708-719) carries those and also non-content fields outside that literal list: run_id, relay_id, remote, role, transport_encoding, transport_bytes, body_bytes, temperature_requested, settings_sent, sent_keys, structured_output, answer_source, http_status, outcome, wall_ms, the RECEIPT_AUDIT fields (invocation_id, session_id, input_hash, output_hash, cost_usd, cost_basis, model_match, stop_reason, response_id, latency_ms, gateway_mock, beside model_requested / model_observed / usage / request_id / via), charge and the spend snapshot. By its docstring and as read, no payload, answer text, run token or key is written. These extra fields go beyond kong_secret_ruling_2026-10-13's literal list; the owner widened that list on 2026-10-16 (OWNER-RULINGS relay_audit_log_scope_2026-10-16: non-content metadata allowed, never prompt or answer text, keys or tokens), so the audit conforms. Spend: owner-authorized (OWNER-RULINGS live_spend_authorization_2026-10-15), enforced per run by the relay SpendGuard and per dispatch by live_gate. LIVE-WAVE-BRIEF: do not sign before sub-waves 2 and 4b land; both are in this commit (64b8279, aeeb8af). Live per-role format evidence: relay-role-smoke run 38922536742 found the live planner and repairer citing with the key verbatim_quote instead of quote, which the controller refuses (review_evidence.py:86); ff9cfad types claims/citations exactly in role_schemas.py. Run 38925383658 (at ff9cfad) then found a second fault: the repairer marked every claim derivable with no computable fact (all INSUFFICIENT) and dropped markdown backticks from a quote, so repair was exhausted; 51089d0 rewrites the controller's evidence-request instruction in runner.py to state its own rules (exact keys, character-for-character quotes including markdown, derivable only with computes for a registered fact), fixing both faults. Relay-role-smoke run 38927191517 (at 51089d0) then passed 142/142: 7 live roles in 8 calls accepted by the real controller (compiler, planner, repairer, evidence_checker, reviewer plus its rationale variant, verifier, shadow_policy). The router is not called (relay_role_smoke.py:26: no live case asks it), nor is rubric_grader (SIMKIT simkit/handoffs/completion-20261012/relay-role-smoke-3/, NOTE.md covers runs 1-3). One sample per role proves format and acceptance, not reliability. Those two commits are after this record's base (8654227). The role_schemas.py and runner.py pins, and every live_roles.py pin moved by 13a640f, were re-read at 46e8cfe.",
       "tests": [
         "tests/test_live_wave_adapter.py::test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed",
         "tests/test_live_wave_adapter.py::test_admission_refuses_every_live_case_while_the_live_records_are_unsigned",
@@ -1685,9 +1685,11 @@
         "tools/workflow/tests/test_role_schemas.py::test_claim_schema_names_the_controller_citation_fields",
         "container_harness/tests/test_relay_wiring.py::test_live_case_relay_caps_come_from_the_matrix_row"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
-      "reviewed_commit": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-16T18:35:43Z",
+      "reviewed_commit": "dd1993636aa7e0c8c849041f50506e359ab77f44",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-BINDING-PASSTHROUGH": {
       "d4_gated": true,
@@ -1723,9 +1725,11 @@
         "tests/test_live_wave_adapter.py::test_binding_passthrough_method_reads_the_run_records",
         "tests/test_live_wave_adapter.py::test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
-      "reviewed_commit": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-16T18:35:43Z",
+      "reviewed_commit": "dd1993636aa7e0c8c849041f50506e359ab77f44",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-ROLE-INPUT-PATCH": {
       "d4_gated": true,
@@ -1762,9 +1766,11 @@
         "tests/test_live_wave_adapter.py::test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed",
         "tools/workflow/tests/test_rereview_shadow_v27.py::test_verifier_evidence_path_mapping_patches_input_only"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
-      "reviewed_commit": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-16T18:35:43Z",
+      "reviewed_commit": "dd1993636aa7e0c8c849041f50506e359ab77f44",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-METRIC": {
       "d4_gated": true,
@@ -1807,9 +1813,11 @@
         "tools/workflow/tests/test_rereview_shadow_v27.py::test_meter_reading_cannot_lower_or_reset_accounting",
         "tools/workflow/tests/test_rereview_shadow_v27.py::test_ram_readings_stay_unsupported_here"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
-      "reviewed_commit": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-16T18:35:43Z",
+      "reviewed_commit": "dd1993636aa7e0c8c849041f50506e359ab77f44",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-TRANSPORT-RETRY": {
       "d4_gated": true,
@@ -1851,9 +1859,11 @@
         "tools/workflow/tests/test_relay_spend_guard.py::test_transport_retry_matches_recovery_transport_call",
         "tools/workflow/tests/test_relay_spend_guard.py::test_relay_roles_retries_one_pre_write_reset_through_the_recorder"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
-      "reviewed_commit": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-16T18:35:43Z",
+      "reviewed_commit": "dd1993636aa7e0c8c849041f50506e359ab77f44",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-TRANSPORT-RETRY-SETUP": {
       "d4_gated": true,
@@ -1886,9 +1896,11 @@
         "tests/test_live_wave_adapter.py::test_transport_retry_reports_without_a_retry_and_setup_refusals",
         "tools/workflow/tests/test_recovery_v27.py::test_transport_retry_setup_injects_once_before_launch"
       ],
-      "reviewer": null,
-      "reviewed_at": null,
-      "reviewed_commit": null
+      "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
+      "reviewed_at": "2026-10-16T18:35:43Z",
+      "reviewed_commit": "dd1993636aa7e0c8c849041f50506e359ab77f44",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-CONFIRM-LW-A.md"
     },
     "CAP-OPERATOR-NOTIFY-HOOK": {
       "d4_gated": true,
