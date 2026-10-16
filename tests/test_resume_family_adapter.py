@@ -33,6 +33,7 @@ import json
 import os
 import queue
 import signal
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -277,10 +278,19 @@ class ThreadIncarnation:
         errors = ["thread double: incarnation 1 is not killed (never evidence)"]
         receipt = ((self.message or {}).get("packet") or {}).get("stop", {}).get("start_receipt")
         if isinstance(receipt, dict) and isinstance(receipt.get("pid"), int):
-            try:
-                os.kill(receipt["pid"], getattr(signal, "SIGKILL", signal.SIGTERM))
-            except OSError as exc:
-                errors.append(f"tool pid {receipt['pid']}: {exc}")
+            pid = receipt["pid"]
+            if os.name == "nt":
+                # The tool pid can be a venv launcher whose interpreter is its child: the tree.
+                done = subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False
+                )
+                if done.returncode:
+                    errors.append(f"taskkill {pid}: exit {done.returncode}")
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError as exc:
+                    errors.append(f"tool pid {pid}: {exc}")
             time.sleep(0.5)
         return {
             "route": self.route,
