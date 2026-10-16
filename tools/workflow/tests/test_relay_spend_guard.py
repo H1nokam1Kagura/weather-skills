@@ -59,9 +59,12 @@ def envelope(**changes):
         "ok": True,
         "model": "claude-sonnet-4-6",
         "response_id": f"msg_guard_{next(IDS)}",
-        "stop_reason": "end_turn",
+        "stop_reason": "tool_use",  # the forced answer tool (role_schemas)
         "usage": {"input_tokens": 1000, "output_tokens": 100},
-        "text": json.dumps(ANSWER),
+        "text": json.dumps(ANSWER, sort_keys=True),  # role_schemas.answer_text
+        "answer_source": "tool_use.input",
+        "tool_use_count": 1,
+        "content_types": ["tool_use"],
         "via": "1.1 kong/fake",
         "request_id": "req-fake",
         "latency_ms": 5,

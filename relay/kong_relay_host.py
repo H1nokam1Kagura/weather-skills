@@ -31,7 +31,8 @@ Controls:
   so the controller's review binding still holds. The receipt and the audit ask line record
   ``transport_encoding`` and ``transport_bytes`` (request body, payload, model-facing sizes
   and the model-facing hash). Every ask line also records ``settings_sent`` / ``sent_keys``
-  (temperature included) as the worker echoed them;
+  (temperature included, and the forced answer tool's ``tools`` / ``tool_choice``) as the
+  worker echoed them, plus ``structured_output`` and the observed ``answer_source``;
 - one request in flight per run (a concurrent request is refused, never queued);
 - spend guard (``SpendGuard``, LIVE-WAVE-BRIEF "Spend guard"): per-run ``--max-requests``,
   ``--max-total-tokens`` and a priced ``--budget`` (USD, list-price estimate). A call that
@@ -118,6 +119,10 @@ from tools.workflow.relay_roles import (  # noqa: E402
     dedup_decode,
 )
 from tools.workflow.review_evidence import text_hash  # noqa: E402
+from tools.workflow.role_schemas import (  # noqa: E402
+    STRUCTURED_OUTPUT,
+    request_overhead_bytes,
+)
 
 RUNNER_KIT = ROOT / "relay" / "runner_kit"
 RUNNER_SDK = {"anthropic": "1.13.0"}  # relay/runner_kit/requirements.txt
@@ -127,6 +132,11 @@ SCHEMA = "simkit-kong-relay-audit/1"
 # Worst-case input bound: a byte-level tokenizer emits at most one token per UTF-8 byte of
 # text, plus the message framing (role markers, system block). 64 is a generous framing bound.
 INPUT_FRAMING_TOKENS = 64
+# Forced tool use (KongRoles structured_output "forced_tool") adds the tool definition (counted
+# at one token per byte, role_schemas.request_overhead_bytes) and the provider's own tool-use
+# system prompt. Anthropic documents that prompt at a few hundred tokens for tool_choice
+# any/tool; 1,024 bounds it with headroom.
+TOOL_USE_SYSTEM_TOKENS = 1024
 # Every opt-in prompt suffix at once: the longest system prompt a role can be sent.
 _ALL_SUFFIXES = {
     "review_evidence_request": True,
@@ -365,6 +375,8 @@ def worst_case(roles, role, payload, user=None):
     prompt = role_prompt(role, _ALL_SUFFIXES)  # the longest system prompt this role can get
     user = json.dumps(payload) if user is None else user
     tokens_in = len(prompt.encode("utf-8")) + len(user.encode("utf-8")) + INPUT_FRAMING_TOKENS
+    if getattr(roles, "structured_output", None) == STRUCTURED_OUTPUT:
+        tokens_in += request_overhead_bytes(role) + TOOL_USE_SYSTEM_TOKENS
     entry = roles.prices.get(model)
     usd = None
     if entry is not None:
@@ -572,6 +584,8 @@ class Relay:
             "temperature_requested": getattr(self.roles, "temperature", None),
             "settings_sent": last.get("settings_sent"),
             "sent_keys": last.get("sent_keys"),
+            "structured_output": last.get("structured_output"),
+            "answer_source": last.get("answer_source"),
         }
 
     def _forward(self, relay_id, role, payload, remote, size, wire):

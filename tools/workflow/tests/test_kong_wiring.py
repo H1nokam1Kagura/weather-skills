@@ -34,6 +34,7 @@ from tools.workflow.kong_roles import (
 )
 from tools.workflow.processes import Processes
 from tools.workflow.review_evidence import text_hash
+from tools.workflow.role_schemas import answer_tool
 
 ANSWER = {"verdict": "PASS", "binding_hash": "h", "scope": "data-replay"}
 FENCED = "```json\n" + json.dumps(ANSWER) + "\n```"
@@ -53,9 +54,12 @@ def envelope(**changes):
         "ok": True,
         "model": DEFAULT_MODEL,
         "response_id": "msg_fake",
-        "stop_reason": "end_turn",
+        "stop_reason": "tool_use",  # the forced answer tool (role_schemas)
         "usage": {"input_tokens": 10, "output_tokens": 5},
-        "text": json.dumps(ANSWER),
+        "text": json.dumps(ANSWER, sort_keys=True),  # role_schemas.answer_text
+        "answer_source": "tool_use.input",
+        "tool_use_count": 1,
+        "content_types": ["tool_use"],
         "via": "1.1 kong/fake",
         "request_id": "req-fake",
         "latency_ms": 3,
@@ -156,7 +160,8 @@ def test_parser_rejects_prose_extra_content_and_non_strict_json(text):
 
 
 def test_both_transports_apply_the_same_rule_and_record_it(monkeypatch, tmp_path):
-    agent = kong(tmp_path, Process(envelope(text=FENCED)))
+    # The plain text path (structured_output=None): a forced-tool answer is never fenced.
+    agent = kong(tmp_path, Process(envelope(text=FENCED)), structured_output=None)
     assert agent.ask("verifier", {}) == ANSWER
     roles, _ = cli_roles(monkeypatch, tmp_path, FENCED)
     assert roles.ask("verifier", {}) == ANSWER
@@ -432,10 +437,24 @@ def test_real_worker_echoes_sent_settings_without_content_or_key(tmp_path, mock_
         data_policy_ack=True,
         worker_env=env,
     )
-    with pytest.raises(Refused):
-        agent.ask("verifier", {"synthetic": True})  # the mock answers plain "OK", not JSON
+    # The kit mock answers a forced tool with a fixed tool_use input (plumbing only).
+    assert agent.ask("verifier", {"synthetic": True}) == {"location": "Seattle"}
     record = json.loads(next((tmp_path / "proc").glob("process-*.json")).read_text())
     worker = json.loads(record["stdout"])
-    assert worker["sent_settings"] == {"model": DEFAULT_MODEL, "max_tokens": 32}
-    assert worker["sent_keys"] == ["max_tokens", "messages", "model", "system"]
+    tool = answer_tool("verifier", {"synthetic": True})
+    assert worker["sent_settings"] == {
+        "model": DEFAULT_MODEL,
+        "max_tokens": 32,
+        "tools": [tool],
+        "tool_choice": {"type": "tool", "name": "submit_verifier_answer"},
+    }
+    assert worker["sent_keys"] == [
+        "max_tokens",
+        "messages",
+        "model",
+        "system",
+        "tool_choice",
+        "tools",
+    ]
+    assert worker["answer_source"] == "tool_use.input" and worker["stop_reason"] == "tool_use"
     assert "test-key" not in record["stdout"] + record["stderr"]

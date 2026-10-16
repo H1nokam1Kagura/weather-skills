@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import threading
@@ -22,6 +23,7 @@ from tools.workflow.kong_roles import (
 )
 from tools.workflow.processes import Processes
 from tools.workflow.review_evidence import text_hash
+from tools.workflow.role_schemas import answer_text, answer_tool, tool_hash
 
 ANSWER = {"verdict": "PASS", "binding_hash": "h", "scope": "data-replay"}
 CITED = {
@@ -35,9 +37,12 @@ def envelope(**changes):
         "ok": True,
         "model": "claude-sonnet-4-6",
         "response_id": "msg_fake",
-        "stop_reason": "end_turn",
+        "stop_reason": "tool_use",  # the forced answer tool (role_schemas)
         "usage": {"input_tokens": 1000, "output_tokens": 100},
-        "text": json.dumps(ANSWER),
+        "text": json.dumps(ANSWER, sort_keys=True),  # role_schemas.answer_text
+        "answer_source": "tool_use.input",
+        "tool_use_count": 1,
+        "content_types": ["tool_use"],
         "via": "1.1 kong/fake",
         "request_id": "req-fake",
         "latency_ms": 12,
@@ -92,7 +97,19 @@ def test_receipt_records_observed_identity_settings_and_cost(tmp_path):
     assert len(receipt["session_id"]) == 36 and receipt["session_id"] != receipt["invocation_id"]
     argv = process.calls[0]["argv"]
     assert argv[1:4] == ["-I", "-c", WORKER_SOURCE]
-    assert set(sent) == {"model", "max_tokens", "temperature", "system", "user"}  # no key
+    # no key; the answer tool the worker forces (tools + tool_choice)
+    assert set(sent) == {"model", "max_tokens", "temperature", "system", "user", "answer_tool"}
+    tool = answer_tool("verifier", {"manifest": [1, 2, 3]})
+    assert sent["answer_tool"] == tool
+    settings = receipt["settings"]
+    assert settings["structured_output"] == "forced_tool"
+    assert settings["answer_tool"] == "submit_verifier_answer"
+    assert settings["answer_tool_hash"] == tool_hash(tool)
+    assert settings["answer_source"] == "tool_use.input"
+    # output_hash is the sha256 of the exact text the parser was handed
+    text = envelope()["text"]
+    assert hashlib.sha256(text.encode()).hexdigest() == receipt["output_hash"]
+    assert agent.provenance()["structured_output"] == "forced_tool"
 
 
 def test_sessions_are_fresh_per_invocation(tmp_path):
@@ -224,7 +241,8 @@ def test_invalid_answers_cannot_be_receipts(tmp_path, changes):
 def test_empty_answer_is_named_and_its_usage_is_recorded(tmp_path):
     usage = {"input_tokens": 12_433, "output_tokens": 0}
     changes = {"text": "", "stop_reason": "refusal", "content_types": [], "usage": usage}
-    agent = roles(tmp_path, Process(envelope(**changes)))
+    # The plain text path; the forced-tool path names the refusal first (tests below).
+    agent = roles(tmp_path, Process(envelope(**changes)), structured_output=None)
     with pytest.raises(Refused, match=r"invalid verifier Kong response: empty answer") as caught:
         agent.ask("verifier", {})
     assert "stop_reason 'refusal'" in str(caught.value) and "output_tokens 0" in str(caught.value)
@@ -273,10 +291,92 @@ def test_answer_diagnostic_is_bounded_and_shape_drops_the_excerpt():
 def test_single_json_fence_and_surrounding_whitespace_are_accepted(tmp_path, text, form):
     # The shared output rule (agents.parse_role_object) already tolerates both; the live
     # reviewer failure was not a fence (that would not fail at char 0 with 0 output tokens).
-    agent = roles(tmp_path, Process(envelope(text=text)))
+    agent = roles(tmp_path, Process(envelope(text=text)), structured_output=None)
     assert agent.ask("verifier", {}) == {"verdict": "PASS"}
     assert agent.receipts[0]["output_form"] == form
     assert "answer_diagnostic" not in agent.last_call
+
+
+# ------------------------------------------------------------ forced-tool structured output
+PROSE = "Let me review step by step.\n" * 200 + '```json\n{"verdict": "PASS"}\n```'
+
+
+@pytest.mark.parametrize(
+    "changes, reason",
+    [
+        # Run-4 shape: prose plus a trailing fence and no tool_use block at all.
+        (
+            {
+                "text": PROSE,
+                "answer_source": None,
+                "tool_use_count": 0,
+                "stop_reason": "end_turn",
+                "content_types": ["text"],
+            },
+            r"no single submit_verifier_answer tool_use answer \(stop_reason 'end_turn', content "
+            r"\['text'\], output_tokens 100, tool_use blocks 0\)",
+        ),
+        (
+            {
+                "text": "",
+                "answer_source": None,
+                "tool_use_count": 0,
+                "stop_reason": "refusal",
+                "content_types": [],
+            },
+            r"the model refused \(stop_reason 'refusal', content \[\], output_tokens 100\)",
+        ),
+        # A tool input cut off by max_tokens may still parse to a partial object.
+        (
+            {"stop_reason": "max_tokens"},
+            r"forced tool answer incomplete \(stop_reason 'max_tokens'",
+        ),
+        ({"answer_source": None, "tool_use_count": 2}, r".*tool_use blocks 2"),
+        # Not role_schemas.answer_text: output_hash would not be the hash of the parsed text.
+        ({"text": json.dumps(ANSWER, sort_keys=True, indent=1)}, "tool answer text is not the"),
+    ],
+    ids=["prose_no_tool_use", "refusal", "max_tokens", "two_tool_uses", "non_canonical"],
+)
+def test_forced_tool_answer_is_required_and_refused_with_diagnostic(tmp_path, changes, reason):
+    agent = roles(tmp_path, Process(envelope(**changes)))
+    with pytest.raises(Refused, match=r"invalid verifier Kong response: " + reason):
+        agent.ask("verifier", {})
+    assert agent.receipts == [] and agent.last_call["sent"] is True
+    diagnostic = agent.last_call["answer_diagnostic"]
+    assert diagnostic["stop_reason"] == envelope(**changes)["stop_reason"]
+    assert diagnostic["content_types"] == envelope(**changes)["content_types"]
+    assert agent.last_call["structured_output"] == "forced_tool"
+
+
+def test_forced_tool_answer_goes_through_the_unchanged_parser(tmp_path):
+    finding = {"id": "R1", "severity": "blocking", "text": "t"}
+    answer = {"verdict": "REJECT", "binding_hash": "b", "findings": [finding]}
+    text = answer_text(answer)
+    process = Process(envelope(text=text))
+    agent = roles(tmp_path, process)
+    payload = {"review_evidence": {"plan_hash": "p"}}
+    assert agent.ask("reviewer", payload) == answer
+    (receipt,) = agent.receipts
+    assert receipt["output_form"] == "bare" and receipt["output_hash"] == digest(answer)
+    assert hashlib.sha256(text.encode()).hexdigest() == digest(answer)
+    # the reviewer's tool carries the review-evidence variant of its schema
+    tool = process.calls[0]["stdin"]["answer_tool"]
+    assert tool == answer_tool("reviewer", payload)
+    assert tool["input_schema"]["required"] == ["verdict"]
+    assert receipt["settings"]["system_prompt_hash"] == text_hash(role_prompt("reviewer", payload))
+    with pytest.raises(ValueError):
+        roles(tmp_path, Process(), structured_output="json_mode")
+
+
+def test_worker_source_forces_the_answer_tool_and_reads_tool_use_input():
+    for fragment in (
+        'body["tools"] = [tool]',
+        'body["tool_choice"] = {"type": "tool", "name": tool["name"]}',
+        "json.dumps(answer, sort_keys=True, allow_nan=False)",
+        'out["answer_source"] = "tool_use.input"',
+        'out["tool_use_count"] = len(uses)',
+    ):
+        assert fragment in WORKER_SOURCE
 
 
 def test_worker_records_content_block_types():
@@ -405,11 +505,13 @@ def mock_roles(tmp_path, url, model="claude-sonnet-4-6"):
 def test_real_worker_against_mock_reaches_gateway_and_validates_output(tmp_path, mock_gateway):
     (tmp_path / "proc").mkdir()
     agent = mock_roles(tmp_path, mock_gateway)
+    agent.structured_output = None  # the plain text path
     with pytest.raises(Refused, match="invalid verifier Kong response"):
         agent.ask("verifier", {"synthetic": True})  # the mock answers plain "OK", not JSON
     record = json.loads(next((tmp_path / "proc").glob("process-*.json")).read_text())
     worker = json.loads(record["stdout"])
     assert worker["sent"] and worker["ok"] and worker["mock"] is True
+    assert "tools" not in worker["sent_keys"] and "answer_source" not in worker
     assert worker["model"] == "claude-sonnet-4-6" and worker["via"] == "1.1 kong/mock"
     assert "test-key" not in record["stdout"] + record["stderr"]
 
@@ -422,13 +524,20 @@ def test_real_worker_sends_temperature_through_the_sdk_passthrough(tmp_path, moc
     (tmp_path / "proc").mkdir()
     agent = mock_roles(tmp_path, mock_gateway)
     agent.temperature = 0.0
-    with pytest.raises(Refused, match="invalid verifier Kong response"):
-        agent.ask("verifier", {"synthetic": True})  # the mock answers plain "OK", not JSON
+    # Forced tool (default): the kit mock answers any forced tool with a fixed input.
+    assert agent.ask("verifier", {"synthetic": True}) == {"location": "Seattle"}
     record = json.loads(next((tmp_path / "proc").glob("process-*.json")).read_text())
     worker = json.loads(record["stdout"])
     assert worker["sent"] is True and "temperature" not in worker["sent_settings"]
     assert worker["sent_settings"]["extra_body"] == {"temperature": 0.0}
-    assert "extra_body" in worker["sent_keys"]
+    assert {"extra_body", "tools", "tool_choice"} <= set(worker["sent_keys"])
+    choice = worker["sent_settings"]["tool_choice"]
+    assert choice == {"type": "tool", "name": "submit_verifier_answer"}
+    assert worker["stop_reason"] == "tool_use" and worker["answer_source"] == "tool_use.input"
+    assert worker["text"] == answer_text({"location": "Seattle"})
+    receipt = agent.receipts[-1]
+    assert receipt["settings"]["structured_output"] == "forced_tool"
+    assert receipt["output_hash"] == digest({"location": "Seattle"})
 
 
 @needs_kit

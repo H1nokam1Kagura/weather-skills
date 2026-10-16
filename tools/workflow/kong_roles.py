@@ -12,6 +12,21 @@ Shared with ``agents.Roles`` so the transports cannot drift:
   Assistant prefill was not chosen: it is unprobed on this route and the probed model
   generation is not known to accept it.
 
+Structured output (``structured_output="forced_tool"``, the default). Format compliance with
+"Output ONLY JSON" is variable live (two temperature-0 reviewer calls on one payload class: bare
+JSON once, ~6.8 KB of prose with a trailing fence the next), and the parser's strictness is a
+safety property, so the request enforces the format instead: it carries ONE tool whose
+``input_schema`` is the role's answer schema (``role_schemas.answer_tool``, never stricter than
+the controller) and ``tool_choice {"type": "tool", "name": <that tool>}``. The worker takes the
+answer from the single ``tool_use`` block's ``input``, serialised as ``role_schemas.answer_text``
+(``contracts.digest``'s serialisation), and that text goes through the unchanged parser, so the
+receipt's ``output_hash`` is the sha256 of the exact text handed to it. A response with no such
+block, a ``refusal`` stop_reason, or any stop_reason other than ``tool_use`` (a truncated tool
+input could parse to a partial object) is refused with the usual ``answer_diagnostic``. The
+receipt records ``settings.structured_output`` / ``answer_tool`` / ``answer_tool_hash`` /
+``answer_source``; ``settings_sent`` / ``sent_keys`` echo ``tools`` and ``tool_choice``.
+``structured_output=None`` keeps the plain text path (the historical behaviour).
+
 Key isolation: this process never reads a key or a ``.env``. Each call launches a short
 worker under the kit's own interpreter (``python -I -c WORKER_SOURCE``) with its working
 directory at the kit root; the kit's ``kong_client`` loads the consumer key into *that*
@@ -78,6 +93,7 @@ Data policy: only Not Sensitive, synthetic content may be sent; the constructor 
 explicit acknowledgement and the transport is never selected by default.
 """
 
+import hashlib
 import json
 import math
 import os
@@ -92,6 +108,7 @@ from .catalog import child_environment
 from .contracts import Refused, digest
 from .recovery import transport_call
 from .review_evidence import text_hash
+from .role_schemas import ANSWER_SOURCE, STRUCTURED_OUTPUT, answer_tool, tool_hash
 
 KIT_ROOT = Path(
     os.environ.get(
@@ -147,10 +164,16 @@ LIVE_ROLE_MAX_TOKENS = {"planner": 4096, "repairer": 4096}
 # default, kept for the direct ``--roles kong`` path). "response_id": the provider's own
 # response id, OBSERVED after the call; a response without one is refused (live relay).
 SESSION_SOURCES = ("uuid", "response_id")
+# How the answer is obtained: a forced tool (role_schemas) or the plain text block (None).
+STRUCTURED_OUTPUTS = (STRUCTURED_OUTPUT, None)
 
 # Runs under the kit interpreter. Stdlib + kit only; prints exactly one JSON object.
 # "sent" is False only while no request can have left the process. "sent_settings" echoes
-# every non-content field of the body actually passed to the SDK.
+# every non-content field of the body actually passed to the SDK. With an "answer_tool" the
+# body forces that one tool, and "text" is the single matching tool_use input serialised as
+# role_schemas.answer_text (sort_keys, no NaN): "answer_source" says so. Otherwise, or when the
+# response carries no single matching tool_use block, "text" is the first text block, kept for
+# the refusal's answer_diagnostic.
 WORKER_SOURCE = r"""
 import json, sys, time
 out = {"sent": False}
@@ -165,6 +188,10 @@ try:
             "system": request["system"],
             "messages": [{"role": "user", "content": request["user"]}]}
     import inspect
+    tool = request.get("answer_tool")
+    if tool is not None:
+        body["tools"] = [tool]
+        body["tool_choice"] = {"type": "tool", "name": tool["name"]}
     if request.get("temperature") is not None:
         if "temperature" in inspect.signature(client.messages.create).parameters:
             body["temperature"] = request["temperature"]
@@ -194,12 +221,24 @@ try:
     else:
         out["latency_ms"] = round((time.monotonic() - started) * 1000)
         usage = message.usage.model_dump() if message.usage is not None else None
+        blocks = list(getattr(message, "content", None) or [])
         out.update(ok=True, model=message.model, response_id=message.id,
                    stop_reason=message.stop_reason, usage=usage,
                    text=kong_client.text_of(message), via=info.get("via"),
                    request_id=info.get("request_id"),
-                   content_types=[str(getattr(b, "type", None))
-                                  for b in (getattr(message, "content", None) or [])][:16])
+                   content_types=[str(getattr(b, "type", None)) for b in blocks][:16])
+        if tool is not None:
+            uses = [b for b in blocks if getattr(b, "type", None) == "tool_use"]
+            out["tool_use_count"] = len(uses)
+            out["answer_source"] = None
+            if len(uses) == 1 and getattr(uses[0], "name", None) == tool["name"]:
+                answer = getattr(uses[0], "input", None)
+                if isinstance(answer, dict):
+                    try:
+                        out["text"] = json.dumps(answer, sort_keys=True, allow_nan=False)
+                        out["answer_source"] = "tool_use.input"
+                    except (TypeError, ValueError):
+                        out["answer_source"] = None
 except Exception as err:
     out["error_type"] = type(err).__name__
     try:
@@ -341,6 +380,7 @@ class KongRoles:
         role_max_tokens=None,
         session_source="uuid",
         budget_guard="on",
+        structured_output=STRUCTURED_OUTPUT,
         data_policy_ack=False,
         kit_root=KIT_ROOT,
         kit_python=None,
@@ -369,6 +409,8 @@ class KongRoles:
             raise Refused("temperature must be null or in 0..1")
         if session_source not in SESSION_SOURCES:
             raise ValueError(f"session_source must be one of {SESSION_SOURCES}")
+        if structured_output not in STRUCTURED_OUTPUTS:
+            raise ValueError(f"structured_output must be one of {STRUCTURED_OUTPUTS}")
         per_role = dict(role_max_tokens or {})
         for role, tokens in per_role.items():
             if role not in PROMPTS:
@@ -385,6 +427,7 @@ class KongRoles:
         self.max_tokens = max_tokens  # every role without its own entry below
         self.role_max_tokens = per_role
         self.session_source = session_source
+        self.structured_output = structured_output
         self.temperature = temperature
         self.prices = prices
         self.kit_root = Path(kit_root)
@@ -416,6 +459,7 @@ class KongRoles:
             "role_max_tokens": dict(self.role_max_tokens),
             "temperature": self.temperature,
             "session_source": self.session_source,
+            "structured_output": self.structured_output,
             "thinking": None,
             "retries": 0,
             "output_normalization": OUTPUT_NORMALIZATION,
@@ -463,6 +507,8 @@ class KongRoles:
             }
         prompt = role_prompt(role, payload)
         user = json.dumps(payload)  # same serializer as Roles.ask and review_evidence.capture
+        structured = self.structured_output == STRUCTURED_OUTPUT
+        tool = answer_tool(role, payload) if structured else None
         request = {
             "model": model,
             "max_tokens": max_tokens,
@@ -470,6 +516,8 @@ class KongRoles:
             "system": prompt,
             "user": user if model_input is None else model_input,
         }
+        if structured:
+            request["answer_tool"] = tool  # the worker forces it (tools + tool_choice)
         command = [str(self.kit_python), "-I", "-c", WORKER_SOURCE, str(self.kit_root / "scripts")]
         spent_before = self.spent
         if guarded:
@@ -518,7 +566,9 @@ class KongRoles:
         }
         # What the worker echoed it sent (temperature included), for the relay audit line.
         self.last_call.update(
-            settings_sent=envelope.get("sent_settings"), sent_keys=envelope.get("sent_keys")
+            settings_sent=envelope.get("sent_settings"),
+            sent_keys=envelope.get("sent_keys"),
+            structured_output=self.structured_output,
         )
         if not envelope["sent"]:
             self.last_call["sent"] = False
@@ -546,6 +596,7 @@ class KongRoles:
             request_id=_short(envelope.get("request_id"), 128),
             via=_short(envelope.get("via"), 128),
             latency_ms=envelope.get("latency_ms") if _finite(envelope.get("latency_ms")) else None,
+            answer_source=_short(envelope.get("answer_source")) if structured else "text",
         )
         try:
             if self.spent > self.budget:
@@ -560,6 +611,8 @@ class KongRoles:
             if session in self.sessions:
                 raise ValueError("repeated independent session identity")
             text = envelope.get("text")
+            if structured:
+                self._forced_tool_answer(envelope, tool)
             if isinstance(text, str) and not text.strip():
                 # Name the empty answer instead of letting json.loads report "Expecting value".
                 diagnostic = answer_diagnostic(envelope)
@@ -569,6 +622,9 @@ class KongRoles:
                     f"{diagnostic['output_tokens']!r})"
                 )
             value, output_form = parse_role_object(text)
+            if structured and hashlib.sha256(text.encode("utf-8")).hexdigest() != digest(value):
+                # output_hash (digest of the parsed answer) must be the hash of this very text.
+                raise ValueError("tool answer text is not the canonical answer serialisation")
         except (ValueError, TypeError) as exc:
             # Bounded and synthetic-only; the relay audits answer_shape() of it, never the text.
             self.last_call["answer_diagnostic"] = answer_diagnostic(envelope)
@@ -594,6 +650,10 @@ class KongRoles:
                     "thinking": None,  # not requested; no reasoning setting is claimed
                     "retries": 0,
                     "sdk": envelope.get("sdk"),
+                    "structured_output": self.structured_output,
+                    "answer_tool": tool["name"] if structured else None,
+                    "answer_tool_hash": tool_hash(tool) if structured else None,
+                    "answer_source": ANSWER_SOURCE if structured else "text",
                 },
                 "settings_sent": envelope.get("sent_settings"),
                 "sent_keys": envelope.get("sent_keys"),
@@ -619,6 +679,27 @@ class KongRoles:
                 "system_prompt_hash": text_hash(prompt),
             }
         return value
+
+    @staticmethod
+    def _forced_tool_answer(envelope, tool):
+        """A forced-tool response must answer through that tool, completely; else ValueError
+        (refused by ask with the answer_diagnostic)."""
+        stop = _short(envelope.get("stop_reason"))
+        diagnostic = answer_diagnostic(envelope)
+        seen = (
+            f"stop_reason {stop!r}, content {diagnostic['content_types']!r}, output_tokens "
+            f"{diagnostic['output_tokens']!r}"
+        )
+        if stop == "refusal":
+            raise ValueError(f"the model refused ({seen})")
+        if envelope.get("answer_source") != ANSWER_SOURCE:
+            raise ValueError(
+                f"no single {tool['name']} tool_use answer ({seen}, tool_use blocks "
+                f"{envelope.get('tool_use_count')!r})"
+            )
+        if stop != "tool_use":
+            # max_tokens mid-input (or any other stop) may leave a partial object that parses.
+            raise ValueError(f"forced tool answer incomplete ({seen})")
 
     def _resource_guard(self, role, invocation, exc, serial_before, spent_before):
         """The process manager refused or stopped the worker for its RAM floor or wall-time
