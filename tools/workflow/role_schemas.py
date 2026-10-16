@@ -92,7 +92,10 @@ CITATION = _object(
     {
         "source_id": STRING,
         "source_hash": STRING,
-        "quote": {"type": "string", "description": "verbatim text copied from the source"},
+        "quote": {
+            "type": "string",
+            "description": "copied character for character from the source, markdown included",
+        },
     },
     ("source_id", "source_hash", "quote"),
     closed=True,
@@ -102,8 +105,11 @@ CLAIM = _object(
         "claim_id": STRING,
         "text": STRING,
         "citations": {"type": "array", "items": CITATION},
-        "derivable": {"type": "boolean"},
-        "computes": ANY,
+        "derivable": {
+            "type": "boolean",
+            "description": "true only for a fact the controller computes (then add computes)",
+        },
+        "computes": {"description": "{fact, value}; only when derivable is true"},
     },
     ("claim_id", "text", "citations", "derivable"),
     closed=True,
