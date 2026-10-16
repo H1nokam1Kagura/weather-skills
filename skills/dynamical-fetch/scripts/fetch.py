@@ -220,7 +220,10 @@ def _open_dataset(state, dataset) -> dict:
             raise UsageError(
                 f"unknown dataset {dataset!r}. Available datasets:\n  " + "\n  ".join(catalog)
             )
-        ds = dynamical_catalog.open(dataset)
+        # Match CHIRPS and the pressure-level path: retain lazy backend indexing
+        # without constructing a Dask graph for the archive. Date/bbox/variable
+        # selection below happens before the selected fields are materialized.
+        ds = dynamical_catalog.open(dataset, chunks=None)
 
         if "latitude" not in ds.dims or "longitude" not in ds.dims:
             raise UsageError(
