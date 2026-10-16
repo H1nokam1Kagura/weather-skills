@@ -151,6 +151,15 @@ def lab(tmp_path_factory):
         yield built
 
 
+UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
+
+
+def unsigned_wave7(*caps):
+    """resigned() with the D4 signatures of ``caps`` (default: all nine wave-7 records, signed
+    since the w7 review) stripped: the pre-signing state, test-local, never written back."""
+    return resigned(**{cap: UNSIGN for cap in caps or WAVE7})
+
+
 def signed(*caps):
     """resigned() plus test-local signatures on ``caps`` (default: all nine wave-7 records,
     committed unsigned). Never written back: CAPABILITY-PRODUCERS.json is the coordinator's."""
@@ -358,12 +367,12 @@ def test_resigned_producers_keep_24_admitted_and_the_signed_records_add_the_seve
     cases = list(frozen.values())
     assert len(cases) == 66
     committed = WeatherAdapter()
-    assert not set(WAVE7) & committed.implemented_capabilities()
-    # The committed file: the nine wave-7 records unsigned and the flagged records undeclared
-    # until the batch re-review, so it admits exactly SIGNED_ADMITTED (none at this commit).
+    assert set(WAVE7) <= committed.implemented_capabilities()
+    # The committed file: every record signed (D4 w7 reviews), so it admits exactly
+    # SIGNED_ADMITTED (31).
     assert {PREFIX + c for c in admitted(committed, cases)} == SIGNED_ADMITTED
-    # Re-signed (flags cleared, test-local): the 24 cases admitted before wave 7.
-    resigned_adapter = WeatherAdapter(producers=resigned())
+    # The wave-7 records unsigned (test-local): the 24 cases admitted before wave 7.
+    resigned_adapter = WeatherAdapter(producers=unsigned_wave7())
     assert not set(WAVE7) & resigned_adapter.implemented_capabilities()
     before = admitted(resigned_adapter, cases)
     assert len(before) == 24
@@ -374,7 +383,7 @@ def test_resigned_producers_keep_24_admitted_and_the_signed_records_add_the_seve
         for c in cases
         if not set(c["adapter_requirements"]) - implemented
     }
-    after = admitted(WeatherAdapter(producers=signed()), cases)
+    after = admitted(committed, cases)
     assert after - before == set(TARGETS) and before <= after
     assert "E14-P2-CTL" not in after  # CAP-OWNED-STALE-LOCK-SETUP is not built (D31)
 
@@ -398,7 +407,7 @@ def test_an_undeclared_implied_capability_refuses_before_side_effects(lab, froze
     case["id"] += "-REFUSED"  # its own generated source; frozen schedule and requirements
     profile = lab.profile(MAP_GOAL, case, stub=None)
     profile["case_root"] = tmp_path / "never"
-    producers = signed(*(c for c in WAVE7 if c != "CAP-DENY-WRITE"))
+    producers = unsigned_wave7("CAP-DENY-WRITE")
     with pytest.raises(
         AdapterRefusal, match=r"implies undeclared capabilities: \['CAP-DENY-WRITE'\]"
     ):
@@ -408,9 +417,9 @@ def test_an_undeclared_implied_capability_refuses_before_side_effects(lab, froze
 
 def test_unsigned_wave7_records_and_e14_p2_ctl_stay_refused(lab, frozen, tmp_path):  # noqa: F811
     for short, producers, message in (
-        ("E10-P1-CTL", None, "undeclared capabilities"),
-        ("E11-P1-INJ", None, "undeclared capabilities"),
-        ("E14-P1-CTL", None, "undeclared capabilities"),
+        ("E10-P1-CTL", unsigned_wave7(), "undeclared capabilities"),
+        ("E11-P1-INJ", unsigned_wave7(), "undeclared capabilities"),
+        ("E14-P1-CTL", unsigned_wave7(), "undeclared capabilities"),
         ("E14-P2-CTL", signed(), r"undeclared capabilities: \['CAP-OWNED-STALE-LOCK-SETUP'\]"),
     ):
         case = copy.deepcopy(frozen[PREFIX + short])
