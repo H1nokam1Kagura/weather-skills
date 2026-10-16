@@ -65,7 +65,7 @@ ROLE = "reviewer"
 # Measured reviewer documentation block: 55,479 B serialized (live-role-payload-sizes.json).
 DOC_NAME = "onset-rolling-window-guide.md"
 DOC_TARGET_BYTES = 55_400
-REVIEWER_VERDICTS = ("APPROVE", "REJECT", "NEEDS-INFO")  # agents.PROMPTS["reviewer"]
+REVIEWER_VERDICTS = ("APPROVE", "REJECT")  # agents.PROMPTS["reviewer"]; frozen closed set
 # Kong kit KNOWN_GOOD_BODY_BYTES (relay/runner_kit/scripts/kong_client.py): the worker refuses
 # a gateway body above it before sending.
 KNOWN_GOOD_GATEWAY_BODY_BYTES = 97_600
