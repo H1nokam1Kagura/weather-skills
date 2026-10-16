@@ -1,12 +1,14 @@
 """Relay DEDUP smoke, offline (no docker, no network beyond 127.0.0.1, no secret, no Kong).
 
-Pins: (1) the synthetic payload is reviewer-sized, needs dedup, and the production client
-(RelayRoles) actually sends it ``dedup-sha256/1``-encoded under the body cap; (2) the canary
-lives ONLY in the shared block, never in the role-input section the model reads first; (3) the
-report passes on evidence recorded from a full offline pass (real RelayRoles -> real host
-Relay -> real KongRoles with a fake worker) and fails closed when the canary is missing, the
-body was not encoded, or the other guarantees break; (4) the workflow job is wired exactly
-like relay-smoke (secret scoping, isolation, key scan) and runs only for its selector.
+Pins: (1) the synthetic payload is reviewer-sized and real-shaped, needs dedup, and the
+production client (RelayRoles) actually sends it ``dedup-sha256/1``-encoded under the body cap;
+(2) the per-run binding the reviewer must return lives ONLY in a shared block, never in the
+role-input section, and no string value of the payload addresses the model; (3) the report
+passes on evidence recorded from a full offline pass (real RelayRoles -> real host Relay ->
+real KongRoles with a fake worker) and fails closed when the returned binding is not the
+shared one, the body was not encoded, or the other guarantees break; (4) the workflow job is
+wired exactly like relay-smoke (secret scoping, isolation, key scan) and runs only for its
+selector.
 """
 
 import copy
@@ -40,7 +42,7 @@ from tools.workflow.relay_roles import (  # noqa: E402
 )
 
 WORKFLOW = REPO / ".github" / "workflows" / "simkit-cases.yml"
-CANARY = "canary-0123456789abcdef01234567"  # fixed for the offline tests; live runs are random
+NONCE = "0123456789abcdef0123456789abcdef"  # fixed for the offline tests; live runs are random
 TOKEN = "e" * 43
 RUN = "relay-run-dedup-smoke"
 SENT_SETTINGS = {
@@ -54,56 +56,148 @@ SENT_SETTINGS = {
 
 
 def test_payload_is_reviewer_sized_and_needs_dedup():
-    payload = smoke.build_payload(CANARY)
-    p = smoke.predict(payload, CANARY)
-    # Measured reviewer: 122,678 B logical, documentation 55,479 B (live-role-payload-sizes).
-    assert 110_000 < p["logical_body_bytes"] < 135_000
+    payload = smoke.build_payload(NONCE)
+    p = smoke.predict(payload)
+    # Measured reviewer documentation: 55,479 B (live-role-payload-sizes). The logical payload
+    # carries it three times here (documentation + the envelope presented twice).
+    assert 160_000 < p["logical_body_bytes"] < 200_000
     assert p["logical_body_bytes"] > DEFAULT_MAX_BODY  # would be refused plain
     assert 54_000 < len(json.dumps(payload["documentation"])) < 58_000
-    assert p["transport_encoding"] == DEDUP_ENCODING and p["shared_blocks"] == 1
-    assert 60_000 < p["request_body_bytes"] < DEFAULT_MAX_BODY  # ~70 KB, under the cap
+    # doc text, envelope, its sources list and the source entry: each written once
+    assert p["transport_encoding"] == DEDUP_ENCODING and p["shared_blocks"] == 4
+    assert 60_000 < p["request_body_bytes"] < 75_000 < DEFAULT_MAX_BODY  # smoke 2 sent 68,244
     assert p["gateway_body_bytes_bound"] < smoke.KNOWN_GOOD_GATEWAY_BODY_BYTES
-    assert p["reference_count_in_role_input"] == 2  # documentation + review_evidence.sources
+    # documentation, review_evidence and claim_check.presented_review_evidence
+    assert p["reference_count_in_role_input"] == 3
 
 
-def test_sizes_do_not_depend_on_the_random_canary():
-    a, b = smoke.make_canary(), smoke.make_canary()
-    assert a != b and len(a) == len(b)
-    pa = smoke.predict(smoke.build_payload(a), a)
-    pb = smoke.predict(smoke.build_payload(b), b)
+def test_payload_follows_the_real_reviewer_shape():
+    """Real key order and envelope / claim-check shapes, minus the top-level binding."""
+    from tools.workflow import review_evidence
+    from tools.workflow.contracts import keys
+
+    payload = smoke.build_payload(NONCE)
+    assert list(payload) == [
+        "execution_context",
+        "request",
+        "plan",
+        "source",
+        "source_gate",
+        "documentation",
+        "date_contract",
+        "preflight",
+        "prior_review",
+        "repair_response",
+        "controller_gates",
+        "review_evidence",
+        "claim_check",
+    ]
+    evidence = payload["review_evidence"]
+    assert evidence["schema"] == review_evidence.SCHEMA
+    assert set(evidence) == {
+        "schema",
+        "request_hash",
+        "goal_hash",
+        "plan_hash",
+        "manifest_hash",
+        "source_hash",
+        "binding_hash",
+        "plan_claims",
+        "sources",
+        "unsupported",
+        "capability",
+    }
+    # sources are the documentation in the controller's source form (sources_from_docs, minus
+    # its definition-source requirement), and the citation passes the real identity +
+    # verbatim check
+    (doc,) = payload["documentation"].values()
+    assert evidence["sources"] == [
+        {
+            "source_id": "documentation:" + smoke.DOC_NAME,
+            "source_hash": review_evidence.text_hash(doc),
+            "text": doc,
+        }
+    ]
+    review_evidence.validate_claims(evidence["plan_claims"], evidence["sources"])
+    for source in evidence["sources"]:
+        keys(source, {"source_id", "source_hash", "text"}, "review source")
+    check = payload["claim_check"]
+    assert check["decision"] == "PRESENT_FOR_REVIEW" and check[smoke.PRESENTED_KEY] == evidence
+    # the system prompt is the production reviewer prompt with both opt-in suffixes
+    role_prompt, _ = smoke._prompt_and_render()
+    system = role_prompt("reviewer", payload)
+    assert "binding_hash (copy provided identity)" in system
+    assert "review_evidence envelope" in system and "claim_check is the controller" in system
+
+
+def test_binding_is_per_run_and_sizes_do_not_depend_on_it():
+    a, b = smoke.make_nonce(), smoke.make_nonce()
+    pa, pb = smoke.build_payload(a), smoke.build_payload(b)
+    ba, bb = smoke.payload_binding(pa), smoke.payload_binding(pb)
+    assert ba != bb and report.is_binding(ba) and report.is_binding(bb)
+    # the nonce itself never reaches the payload
+    assert a not in json.dumps(pa) and b not in json.dumps(pb)
+    xa, xb = smoke.predict(pa), smoke.predict(pb)
     for key in ("logical_body_bytes", "request_body_bytes", "model_facing_bytes", "shared_bytes"):
-        assert pa[key] == pb[key]
+        assert xa[key] == xb[key]
+    # everything but the binding (and so the envelope's block) is identical across runs
+    assert pa["documentation"] == pb["documentation"] and pa["request"] == pb["request"]
 
 
-def test_canary_only_in_the_shared_block():
-    payload = smoke.build_payload(CANARY)
-    doc = payload["documentation"][smoke.DOC_NAME]
-    assert doc.count(CANARY) == 1
-    assert payload["review_evidence"]["sources"][0]["text"] == doc
-    # The canary is only ever inside the documentation string (which occurs twice).
-    without_doc = copy.deepcopy(payload)
-    without_doc["documentation"] = {}
-    without_doc["review_evidence"]["sources"][0]["text"] = ""
-    assert CANARY not in json.dumps(without_doc)
-    assert CANARY not in smoke.INSTRUCTION
-    p = smoke.predict(payload, CANARY)
-    assert p["canary_in_role_input_section"] is False
-    assert p["canary_in_shared_blocks"] == 1 and p["canary_in_request_body"] == 1
-    assert p["canary_in_model_facing"] == 1
-    assert 0.55 < p["canary_offset_in_shared_block"] / p["shared_bytes"] < 0.70
-    # In the model-facing rendering the canary sits after the shared-documents header only.
+def test_binding_reachable_only_through_a_shared_reference():
+    payload = smoke.build_payload(NONCE)
+    binding = smoke.payload_binding(payload)
+    assert "binding_hash" not in payload  # no top-level copy
+    # the envelope (presented twice) is the binding's only holder
+    text = json.dumps(payload)
+    assert text.count(binding) == 2
+    without = copy.deepcopy(payload)
+    without["review_evidence"]["binding_hash"] = ""
+    without["claim_check"][smoke.PRESENTED_KEY]["binding_hash"] = ""
+    assert binding not in json.dumps(without)
+    p = smoke.predict(payload)
+    assert p["binding_top_level"] is False
+    assert p["binding_in_role_input_section"] is False
+    assert p["binding_in_shared_blocks"] == 1 and p["binding_in_request_body"] == 1
+    assert p["binding_in_model_facing"] == 1
+    assert p["binding_block_referenced_at"] == [
+        "review_evidence",
+        "claim_check." + smoke.PRESENTED_KEY,
+    ]
+    # In the model-facing rendering the binding sits after the shared-documents header only,
+    # inside the block the role input references.
     _, render = smoke._prompt_and_render()
     from tools.workflow.relay_roles import dedup_encode
 
     encoded = dedup_encode(payload)
     user = render(encoded["payload"], encoded["shared"])
     head, _, tail = user.partition("=== SHARED DOCUMENTS")
-    assert CANARY not in head and tail.count(CANARY) == 1
+    assert binding not in head and tail.count(binding) == 1
+    (holder,) = [r for r, v in encoded["shared"].items() if binding in json.dumps(v)]
+    assert encoded["payload"]["review_evidence"] == {"$shared": holder}
+    assert encoded["shared"][holder]["binding_hash"] == binding
+
+
+def test_no_instruction_text_in_the_payload():
+    payload = smoke.build_payload(NONCE)
+    assert smoke.instruction_terms(payload) == []
+    assert smoke.predict(payload)["instruction_terms_in_payload"] == []
+    for term in ("copy", "quote", "character for character", "ignore"):
+        assert term in smoke.INSTRUCTION_TERMS
+    # the scan sees nested string values, any case, whole words only; keys are not scanned
+    planted = copy.deepcopy(payload)
+    planted["claim_check"]["claims"][0]["text"] = "Copy this value Character For Character."
+    assert smoke.instruction_terms(planted) == ["character for character", "copy"]
+    assert smoke.instruction_terms({"quote": "a copyright notice"}) == []
+    doc = payload["documentation"][smoke.DOC_NAME]
+    assert doc.startswith(smoke.TITLE) and smoke.CITED_SENTENCE in doc
+    assert '"' not in doc and "\\" not in doc
 
 
 def test_production_client_sends_it_dedup_encoded(monkeypatch):
     """RelayRoles itself (not the test's own encoder) produces the encoded body."""
-    payload = smoke.build_payload(CANARY)
+    payload = smoke.build_payload(NONCE)
+    binding = smoke.payload_binding(payload)
     roles = RelayRoles("http://127.0.0.1:9", TOKEN, RUN, budget=1)
     sent = []
 
@@ -119,33 +213,35 @@ def test_production_client_sends_it_dedup_encoded(monkeypatch):
     (body,) = sent
     request = json.loads(body)
     assert request["transport_encoding"] == DEDUP_ENCODING and request["role"] == "reviewer"
-    assert len(body) == smoke.predict(payload, CANARY)["request_body_bytes"] < DEFAULT_MAX_BODY
+    assert len(body) == smoke.predict(payload)["request_body_bytes"] < DEFAULT_MAX_BODY
     assert dedup_decode(request) == payload  # lossless
-    assert body.decode().count(CANARY) == 1
-    assert CANARY not in json.dumps(request["payload"])
-    assert sum(json.dumps(v).count(CANARY) for v in request["shared"].values()) == 1
+    assert body.decode().count(binding) == 1
+    assert binding not in json.dumps(request["payload"])
+    assert sum(json.dumps(v).count(binding) for v in request["shared"].values()) == 1
 
 
 # ------------------------------------------------------------------ offline pass -> evidence
 
 
 class Worker:
-    """Fake kit worker: answers like a model that resolved the reference (or not)."""
+    """Fake kit worker: answers like a model that resolved the reference (or not). It reads
+    the binding only from the model-facing message, as the model must."""
 
-    def __init__(self, quote=True, override=None):
-        self.quote = quote
+    def __init__(self, resolve=True, override=None):
+        self.resolve = resolve
         self.override = override or {}  # envelope fields of an invalid answer
         self.calls = []
 
     def run(self, argv, cwd, env, stdin):
         request = json.loads(stdin)
         self.calls.append(request)
-        found = re.search(r"Transport integrity marker: (canary-[0-9a-f]+)", request["user"])
-        marker = found.group(1) if (found and self.quote) else "NOT FOUND"
+        found = re.findall(r'"binding_hash": "([0-9a-f]{64})"', request["user"])
+        # an unresolving model can only fill the field with some other identity it saw
+        other = re.search(r'"plan_hash": "([0-9a-f]{64})"', request["user"]).group(1)
         answer = {
             "verdict": "APPROVE",
-            "binding_hash": smoke.BINDING_HASH,
-            "findings": [smoke.CANARY_FINDING_PREFIX + marker],
+            "binding_hash": found[0] if (len(found) == 1 and self.resolve) else other,
+            "findings": [],
         }
         envelope = {
             "sent": True,
@@ -168,12 +264,12 @@ class Worker:
         return {"exit_code": 0, "stdout": json.dumps(envelope), "stderr": ""}
 
 
-def record_offline_run(tmp_path, quote=True, override=None):
+def record_offline_run(tmp_path, resolve=True, override=None):
     """Drive the real client -> relay -> KongRoles path offline and write the evidence files
     the workflow would (launch.json, the container JSON, key-scan.json, net.json, audit)."""
     python = tmp_path / "python.exe"
     python.write_text("")
-    worker = Worker(quote, override)
+    worker = Worker(resolve, override)
     roles = KongRoles(
         worker,
         tmp_path / "ctx",
@@ -193,8 +289,8 @@ def record_offline_run(tmp_path, quote=True, override=None):
     (server,) = host.serve(relay, ["127.0.0.1"], 0)
     try:
         client = RelayRoles(f"http://127.0.0.1:{server.server_address[1]}", TOKEN, RUN, budget=1)
-        payload = smoke.build_payload(CANARY)
-        prediction = smoke.predict(payload, CANARY)
+        payload = smoke.build_payload(NONCE)
+        prediction = smoke.predict(payload)
         system, user = prediction.pop("_system"), prediction.pop("_user")
         health = client.health()
         try:
@@ -226,8 +322,7 @@ def record_offline_run(tmp_path, quote=True, override=None):
         "credential_like_files": [],
         "health": {k: health.get(k) for k in ("outcome", "run_id", "allowed_roles", "model")},
         "egress_probes": probes,
-        "canary": CANARY,
-        "binding_hash": smoke.BINDING_HASH,
+        "binding_hash": smoke.payload_binding(payload),
         "prediction": prediction,
         "outcome": "SUCCESS",
         "answer": value,
@@ -287,8 +382,13 @@ def test_report_passes_on_recorded_evidence(recorded):
     assert call["estimated_usd"] == pytest.approx((17_000 * 3 + 90 * 15) / 1e6)
     assert call["temperature_sent"] == 0
     assert set(result["refused_answer"].values()) == {None}  # nothing refused
-    # the audit never holds the content or the canary
-    assert CANARY not in (relay_dir / "relay-audit.jsonl").read_text()
+    binding = smoke.payload_binding(smoke.build_payload(NONCE))
+    assert result["answer"]["binding_hash"] == binding == result["binding_hash"]
+    resolved = result["checks"]["answer_binding_resolved_from_shared_block"]["observed"]
+    assert resolved == {"returned": binding, "expected": binding, "equal": True}
+    assert result["checks"]["no_instruction_text_in_payload"]["observed"]["found"] == []
+    # the audit never holds the content or the binding
+    assert binding not in (relay_dir / "relay-audit.jsonl").read_text()
 
 
 EMPTY_ANSWER = {  # the shape smoke 1 (run 38855128796) is consistent with: 0 output tokens
@@ -364,13 +464,20 @@ def test_invalid_answer_evidence_fails_closed(tmp_path, monkeypatch, check, chan
     assert checks[check]["passed"] is False
 
 
-def test_report_fails_when_the_answer_misses_the_canary(tmp_path, monkeypatch):
+def test_report_fails_when_the_answer_does_not_resolve_the_binding(tmp_path, monkeypatch):
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-    out, relay_dir = record_offline_run(tmp_path, quote=False)
+    out, relay_dir = record_offline_run(tmp_path, resolve=False)
     assert report.main(["x", str(out), str(relay_dir)]) == 1
     checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
-    assert checks["answer_quotes_canary"]["passed"] is False
-    assert checks["reviewer_schema_valid"]["passed"] is True  # only the canary check fails
+    assert checks["answer_binding_resolved_from_shared_block"]["passed"] is False
+    assert checks["answer_binding_resolved_from_shared_block"]["observed"]["equal"] is False
+    # the reviewer contract itself requires the supplied binding, so the schema check agrees
+    assert checks["reviewer_schema_valid"]["observed"] == [
+        "binding_hash is not the supplied binding"
+    ]
+    # everything about transport and size still holds: only the resolution failed
+    failed = sorted(n for n, c in checks.items() if not c["passed"])
+    assert failed == ["answer_binding_resolved_from_shared_block", "reviewer_schema_valid"]
 
 
 def test_report_fails_when_the_body_was_not_encoded(recorded):
@@ -408,8 +515,30 @@ def _receipt(field, value):
         ("temperature_zero_sent", _receipt("settings_sent", {"extra_body": {"temperature": 1}})),
         ("reviewer_schema_valid", lambda c: c["answer"].update(note="extra key")),
         (
-            "canary_only_in_shared_block",
-            lambda c: c["prediction"].update(canary_in_role_input_section=True),
+            "binding_only_in_shared_block",
+            lambda c: c["prediction"].update(binding_in_role_input_section=True),
+        ),
+        ("binding_only_in_shared_block", lambda c: c["prediction"].update(binding_top_level=True)),
+        (
+            "binding_only_in_shared_block",
+            lambda c: c["prediction"].update(binding_in_shared_blocks=2),
+        ),
+        (
+            "binding_only_in_shared_block",
+            lambda c: c["prediction"].update(binding_block_referenced_at=[]),
+        ),
+        ("binding_only_in_shared_block", lambda c: c.update(binding_hash="short")),
+        (
+            "no_instruction_text_in_payload",
+            lambda c: c["prediction"].update(instruction_terms_in_payload=["copy"]),
+        ),
+        (
+            "no_instruction_text_in_payload",
+            lambda c: c["prediction"].pop("instruction_terms_in_payload"),
+        ),
+        (
+            "answer_binding_resolved_from_shared_block",
+            lambda c: c["answer"].update(binding_hash="0" * 64),
         ),
         (
             "model_facing_input_as_predicted",
@@ -464,6 +593,8 @@ def test_reviewer_schema_and_temperature_helpers():
     assert report.temperature_sent({"temperature": 0}) == 0
     assert report.temperature_sent({"extra_body": {"temperature": 0.0}}) == 0
     assert report.temperature_sent({"max_tokens": 1}) is None
+    assert report.is_binding("a" * 64) and not report.is_binding("sha256:" + "a" * 64)
+    assert not report.is_binding("A" * 64) and not report.is_binding(None)
 
 
 # ------------------------------------------------------------------ launcher

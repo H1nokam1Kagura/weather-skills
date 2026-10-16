@@ -10,9 +10,11 @@ on top of them it checks the two things this smoke exists for:
 
 (a) the body went ``dedup-sha256/1``-encoded, under the 88,000 B cap, for a payload that would
     NOT fit plain, and Kong answered it (SUCCESS, model_observed claude-sonnet-4-6);
-(b) the model resolved the ``$shared`` reference: the reviewer answer quotes the run's random
-    canary, which occurs only inside the shared block (never in the role-input section), and
-    the answer still validates against the reviewer output schema.
+(b) the model resolved the ``$shared`` reference: the reviewer answer's ``binding_hash`` (the
+    field the reviewer contract always returns) equals the run's per-run binding, which occurs
+    only inside a shared block (never in the role-input section, no top-level copy), and the
+    answer validates against the reviewer output schema. No string value of the payload holds
+    text addressed to the model (``no_instruction_text_in_payload``).
 
 Every check is named and recorded with its observed value; nothing is inferred from an absent
 file. PASS only when every check holds.
@@ -68,6 +70,13 @@ def reviewer_schema_errors(answer, binding_hash):
     if not isinstance(findings, list) or not all(isinstance(f, str) for f in findings):
         errors.append("findings is not an array of strings")
     return errors
+
+
+def is_binding(value):
+    """A controller binding: ``contracts.digest``'s bare 64 lowercase hex characters."""
+    return (
+        isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+    )
 
 
 def temperature_sent(settings_sent):
@@ -214,23 +223,33 @@ def evaluate(out, relay):
     )
 
     # ---- (b) the model resolved the $shared reference
-    canary = smoke.get("canary")
+    binding = smoke.get("binding_hash")
     check(
-        "canary_only_in_shared_block",
-        isinstance(canary, str)
-        and len(canary) >= 16
-        and prediction.get("canary_in_role_input_section") is False
-        and prediction.get("canary_in_shared_blocks") == 1
-        and prediction.get("canary_in_request_body") == 1,
+        "binding_only_in_shared_block",
+        is_binding(binding)
+        and prediction.get("binding_top_level") is False
+        and prediction.get("binding_in_role_input_section") is False
+        and prediction.get("binding_in_shared_blocks") == 1
+        and prediction.get("binding_in_request_body") == 1
+        and prediction.get("binding_in_model_facing") == 1
+        and bool(prediction.get("binding_block_referenced_at")),
         {
             k: prediction.get(k)
             for k in (
-                "canary_in_role_input_section",
-                "canary_in_shared_blocks",
-                "canary_in_request_body",
-                "canary_offset_in_shared_block",
+                "binding_top_level",
+                "binding_in_role_input_section",
+                "binding_in_shared_blocks",
+                "binding_in_request_body",
+                "binding_in_model_facing",
+                "binding_block_referenced_at",
             )
         },
+    )
+    terms = prediction.get("instruction_terms_in_payload")
+    check(
+        "no_instruction_text_in_payload",
+        terms == [] and bool(prediction.get("instruction_terms_checked")),
+        {"found": terms, "checked": prediction.get("instruction_terms_checked")},
     )
     settings = receipt.get("settings") or {}
     check(
@@ -246,13 +265,17 @@ def evaluate(out, relay):
         },
     )
     answer = smoke.get("answer")
-    errors = reviewer_schema_errors(answer, smoke.get("binding_hash"))
+    errors = reviewer_schema_errors(answer, binding)
     check("reviewer_schema_valid", not errors, errors)
-    answer_text = json.dumps(answer) if answer is not None else ""
+    returned = answer.get("binding_hash") if isinstance(answer, dict) else None
     check(
-        "answer_quotes_canary",
-        isinstance(canary, str) and bool(canary) and canary in answer_text,
-        {"canary_found": isinstance(canary, str) and bool(canary) and canary in answer_text},
+        "answer_binding_resolved_from_shared_block",
+        is_binding(binding) and returned == binding,
+        {
+            "returned": returned if isinstance(returned, str) else None,
+            "expected": binding,
+            "equal": is_binding(binding) and returned == binding,
+        },
     )
 
     # ---- settings + priced usage, receipt and relay audit agree
@@ -359,7 +382,7 @@ def evaluate(out, relay):
         "live_call": measured,
         "answer": answer,
         "refused_answer": refused,
-        "canary_sha256": prediction.get("canary_sha256"),
+        "binding_hash": binding,
         "prediction": prediction,
         "egress_probes": smoke.get("egress_probes"),
         "key_scan": scan,
