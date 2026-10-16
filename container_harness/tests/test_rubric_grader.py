@@ -41,7 +41,9 @@ def assertion(cases, cid, aid=None):
 
 
 def bundle(cases, cid, name):
-    return copy.deepcopy(next(b for b in cases[cid]["probe_bundles"] if b["name"] == name)["evidence"])
+    return copy.deepcopy(
+        next(b for b in cases[cid]["probe_bundles"] if b["name"] == name)["evidence"]
+    )
 
 
 class FakeRelay:
@@ -116,7 +118,10 @@ def test_payload_is_the_rubric_text_and_this_cases_recorded_evidence_only(frozen
 
 
 PAYLOAD = {
-    "graded_output": {"path": "role_output.reviewer[0]", "value": {"text": "The plan's  window\n is wrong here"}},
+    "graded_output": {
+        "path": "role_output.reviewer[0]",
+        "value": {"text": "The plan's  window\n is wrong here"},
+    },
     "context_evidence": {"replay": {"note": "replay of onset passed with exit code 0"}},
 }
 
@@ -212,7 +217,10 @@ class Unknown(RuntimeError):
 
 @pytest.mark.parametrize(
     "exc, outcome",
-    [(Refused("rubric_grader relay refused: role not allowed"), "REFUSED"), (Unknown("x"), "UNKNOWN")],
+    [
+        (Refused("rubric_grader relay refused: role not allowed"), "REFUSED"),
+        (Unknown("x"), "UNKNOWN"),
+    ],
 )
 def test_a_failed_relay_call_is_undecided_never_a_verdict(frozen, exc, outcome):
     cases, score = frozen
@@ -227,7 +235,10 @@ def test_a_failed_relay_call_is_undecided_never_a_verdict(frozen, exc, outcome):
 
 def test_evidence_over_the_size_budget_is_undecided_without_a_call(frozen, monkeypatch):
     cases, score = frozen
-    a, ev = assertion(cases, E06), bundle(cases, E06, "plan with the false rationale presented and approved (UC-14)")
+    a, ev = (
+        assertion(cases, E06),
+        bundle(cases, E06, "plan with the false rationale presented and approved (UC-14)"),
+    )
     value, _ = score.resolve(ev, a["predicate"]["observation"])
     small = rg.build_payload(a, ev, value, max_bytes=len(json.dumps(value)) + 2000)
     assert small["context_evidence"] == {} or set(small["context_evidence"]) < {
@@ -332,7 +343,15 @@ def worker_envelope(value, n=1):
         "tool_use_count": 1,
         "content_types": ["tool_use"],
         "sent_settings": {"temperature": 0.0},
-        "sent_keys": ["max_tokens", "messages", "model", "system", "temperature", "tool_choice", "tools"],
+        "sent_keys": [
+            "max_tokens",
+            "messages",
+            "model",
+            "system",
+            "temperature",
+            "tool_choice",
+            "tools",
+        ],
         "via": "1.1 kong/fake",
         "request_id": "req-fake",
         "latency_ms": 5,
@@ -342,9 +361,7 @@ def worker_envelope(value, n=1):
 
 
 @pytest.mark.parametrize("allowed", [("rubric_grader",), ("verifier",)])
-def test_end_to_end_through_the_real_host_relay_as_an_allow_listed_role(
-    frozen, tmp_path, allowed
-):
+def test_end_to_end_through_the_real_host_relay_as_an_allow_listed_role(frozen, tmp_path, allowed):
     from tools.workflow.kong_roles import PINNED_PRICES, KongRoles
     from tools.workflow.relay_roles import RelayRoles
 
@@ -366,13 +383,19 @@ def test_end_to_end_through_the_real_host_relay_as_an_allow_listed_role(
         kit_python=python,
     )
     audit = host.AuditLog(tmp_path / "audit.jsonl")
-    relay = host.Relay(roles, run_id="relay-run-g", token="t" * 43, allowed_roles=allowed, audit=audit)
+    relay = host.Relay(
+        roles, run_id="relay-run-g", token="t" * 43, allowed_roles=allowed, audit=audit
+    )
     servers = host.serve(relay, ["127.0.0.1"], 0)
     try:
         url = f"http://127.0.0.1:{servers[0].server_address[1]}"
         client = RelayRoles(url, "t" * 43, "relay-run-g", budget=1, model=graded_model)
         rec = rg.grade_assertion(
-            assertion(cases, E04), bundle(cases, E04, "reviewer rejects"), client, score, graded_model
+            assertion(cases, E04),
+            bundle(cases, E04, "reviewer rejects"),
+            client,
+            score,
+            graded_model,
         )
     finally:
         for server in servers:
@@ -386,7 +409,9 @@ def test_end_to_end_through_the_real_host_relay_as_an_allow_listed_role(
         assert rec["verdict"] == rg.UNDECIDED and rec["transport_outcome"] == "REFUSED"
         return
     (sent,) = worker.calls
-    assert sent["temperature"] == 0.0 and sent["answer_tool"]["name"] == "submit_rubric_grader_answer"
+    assert (
+        sent["temperature"] == 0.0 and sent["answer_tool"]["name"] == "submit_rubric_grader_answer"
+    )
     assert sent["system"].startswith("You grade ONE rubric assertion")
     assert rec["verdict"] == rg.PASS and rec["quotes"][0]["found_in"] == "graded_output"
     assert rec["receipt"]["model_observed"] == graded_model
@@ -433,7 +458,9 @@ def report(tmp_path, grades=None, ratification=None, raw=None):
     rat = tmp_path / "RATIFICATION.json"
     if ratification is not None:
         rat.write_text(json.dumps(ratification), encoding="utf-8")
-    res = cases_report.build(admission([row(E04, "injection")]), tmp_path / "cases", None, None, rat)
+    res = cases_report.build(
+        admission([row(E04, "injection")]), tmp_path / "cases", None, None, rat
+    )
     return headline, res
 
 

@@ -440,6 +440,8 @@ class Projection:
             }
             if "mode" in receipt:
                 record["mode"] = receipt["mode"]
+            if receipt.get("mode") == lvr.LIVE:  # CAP-LIVE-ROLE: observed model identity/settings
+                record["live"] = lvr.project_live_receipt(receipt)
             verdict = self.receipt_verdict(native_role, ordinal, receipt, index)
             if verdict is not None:
                 record["verdict"] = verdict
@@ -1677,6 +1679,7 @@ def run_provenance(run_dir, harness_dir, markers, tags=None):
 
 # Imported last: pre_review_projection imports EvidenceMappingError from this module.
 from adapter_support import fixture_rereview_projection as frx  # noqa: E402
+from adapter_support import live_roles as lvr  # noqa: E402
 from adapter_support import operator_ledger_projection as olp  # noqa: E402
 from adapter_support import pre_review_projection as prp  # noqa: E402
 from adapter_support import resume_projection as rsp  # noqa: E402

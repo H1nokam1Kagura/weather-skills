@@ -75,14 +75,18 @@ GRADES_FILE = "rubric-grades.json"
 
 PASS, FAIL, UNDECIDED, NOT_APPLICABLE = "PASS", "FAIL", "UNDECIDED", "NOT_APPLICABLE"
 VERDICTS = (PASS, FAIL, UNDECIDED)
-FROZEN_TO_GRADER = {PASS: PASS, FAIL: FAIL, "NOT_OBSERVED": UNDECIDED, NOT_APPLICABLE: NOT_APPLICABLE}
+FROZEN_TO_GRADER = {
+    PASS: PASS,
+    FAIL: FAIL,
+    "NOT_OBSERVED": UNDECIDED,
+    NOT_APPLICABLE: NOT_APPLICABLE,
+}
 
 LABEL_UNRATIFIED = "UNRATIFIED grader (diagnostic)"
 LABEL_RATIFIED = "RATIFIED grader (diagnostic; the frozen headline is unchanged)"
 JSON_KEY = "rubric_grader"
 DECISION = (
-    "OWNER-RULINGS live_spend_authorization_2026-10-15.rubric_grader; "
-    "LIVE-WAVE-BRIEF.md sub-wave 8"
+    "OWNER-RULINGS live_spend_authorization_2026-10-15.rubric_grader; LIVE-WAVE-BRIEF.md sub-wave 8"
 )
 NOTE = (
     "Diagnostic grades of the frozen rubric assertions the frozen scorer leaves undecided. Never "
@@ -190,8 +194,10 @@ def independence(model, graded=GRADED_MODEL):
         "status": status,
     }
     if status != "DIFFERENT_FAMILY":
-        out["disclosure"] = SHARED_FAMILY_DISCLOSURE if same_family else (
-            "The grader's model family is not known to differ from the graded model's."
+        out["disclosure"] = (
+            SHARED_FAMILY_DISCLOSURE
+            if same_family
+            else ("The grader's model family is not known to differ from the graded model's.")
         )
     if same_model:
         out["disclosure"] = (
@@ -692,7 +698,13 @@ SYNTHETIC = [
         "E04-P2-INJ",
         "reviewer rejects",
         "unrelated rejection reason",
-        [{"id": "R1", "severity": "major", "text": "The map colour scale is not colour-blind safe."}],
+        [
+            {
+                "id": "R1",
+                "severity": "major",
+                "text": "The map colour scale is not colour-blind safe.",
+            }
+        ],
         None,
         FAIL,
         "wrong: an unrelated reason",
@@ -973,7 +985,9 @@ def calibration_report(labelled, results, model):
             )
         if g.get("downgraded"):
             attempted += 1
-        if got == PASS and not any(q.get("found_in") == "graded_output" for q in g.get("quotes") or []):
+        if got == PASS and not any(
+            q.get("found_in") == "graded_output" for q in g.get("quotes") or []
+        ):
             final_pass_unquoted += 1
         if g.get("fail_quote_unverified"):
             fail_unquoted += 1
@@ -1016,8 +1030,8 @@ def calibration_report(labelled, results, model):
 
 def _frozen():
     sys.path.insert(0, str(HERE))
-    import cases_report
     import case_driver
+    import cases_report
 
     root, _, score_mod = cases_report.frozen()
     cases, _ = case_driver.load_cases(root)
