@@ -378,9 +378,7 @@ def grader_section(per_case, ratification_path=None):
         "note": rg.NOTE,
         "cases": len(graded),
         "graded_cases": len(done),
-        "not_graded": {
-            e["case_id"]: e[rg.JSON_KEY]["status"] for e in graded if e not in done
-        },
+        "not_graded": {e["case_id"]: e[rg.JSON_KEY]["status"] for e in graded if e not in done},
         "independence": sorted({e[rg.JSON_KEY].get("independence") or "?" for e in done}),
         "verdict_counts": dict(sorted(verdicts.items(), key=lambda kv: str(kv[0]))),
         "assertions": rows,

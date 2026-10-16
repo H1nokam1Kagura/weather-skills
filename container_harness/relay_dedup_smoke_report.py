@@ -194,10 +194,11 @@ def refused_answer(smoke, ask):
     }
 
 
-def evaluate(out, relay):
+def load_evidence(out, relay, container_json):
+    """(launch, container record or None, key scan, net, relay audit lines) of a smoke run."""
     out, relay = Path(out), Path(relay)
     launch = base.load(out / "launch.json") or {}
-    smoke = base.load(out / CONTAINER_JSON)
+    smoke = base.load(out / container_json)
     scan = base.load(out / "key-scan.json") or {}
     net = base.load(relay / "net.json") or {}
     audit_path = relay / "relay-audit.jsonl"
@@ -206,17 +207,15 @@ def evaluate(out, relay):
         if audit_path.is_file()
         else []
     )
-    checks = {}
+    return launch, smoke, scan, net, audit
 
-    def check(name, ok, observed):
-        checks[name] = {"passed": bool(ok), "observed": observed}
 
-    # ---- isolation, probes, key absence: exactly relay_smoke_report's checks
+def isolation_checks(check, launch, smoke, scan, net, client, client_check, roles, roles_check):
+    """Isolation, probes and key absence: exactly relay_smoke_report's checks, plus the
+    launched client and the relay's role allow-list. Shared by the dedup and role smokes."""
     conditions = launch.get("run_conditions") or {}
     check("run_conditions_all_true", conditions and all(conditions.values()), conditions)
-    check(
-        "launched_dedup_client", launch.get("client") == "relay_dedup_smoke", launch.get("client")
-    )
+    check(client_check, launch.get("client") == client, launch.get("client"))
     check("network_internal", net.get("internal") is True, net.get("internal"))
     passed = set(launch.get("env_names_passed") or [])
     check("only_relay_env_names_passed", passed == base.EXPECTED_ENV_NAMES, sorted(passed))
@@ -227,11 +226,7 @@ def evaluate(out, relay):
     check("ran_as_uid_1000", smoke.get("uid") == 1000, smoke.get("uid"))
     health = smoke.get("health") or {}
     check("relay_health_ok", health.get("outcome") == "OK", health)
-    check(
-        "relay_allows_reviewer_only",
-        health.get("allowed_roles") == ["reviewer"],
-        health.get("allowed_roles"),
-    )
+    check(roles_check, health.get("allowed_roles") == roles, health.get("allowed_roles"))
     probes = {p["probe"]: p for p in smoke.get("egress_probes") or []}
     for name in base.REQUIRED_PROBES:
         row = probes.get(name) or {}
@@ -246,6 +241,61 @@ def evaluate(out, relay):
         "key_absent_container_and_artifacts",
         scan.get("key_absent") is True,
         {k: scan.get(k) for k in ("key_supplied_to_scanner", "key_length_ok", "key_absent")},
+    )
+    return smoke
+
+
+def capped_asks(asks):
+    """The asks the relay refused BEFORE forwarding at its spend cap (the request-cap probe)."""
+    return [
+        a
+        for a in asks
+        if a.get("outcome") == "REFUSED"
+        and a.get("sent_to_gateway") is False
+        and a.get("reason_code") == "relay_spend_cap"
+    ]
+
+
+def cap_stop_checks(check, probe, audit, capped):
+    """The relay keeps serving at a full request cap and stops only once EXHAUSTED: the cap
+    probe must be refused before forwarding (spend-cap refusal, client gate ``budget``), the
+    only refusal of that kind, after the request cap was reached; then the relay's own stop
+    line must name the request cap (teardown's kill writes none)."""
+    caps_reached = [a.get("cap") for a in audit if a.get("event") == "spend_cap_reached"]
+    check(
+        "request_cap_refused_before_forwarding",
+        probe.get("outcome") == "REFUSED"
+        and probe.get("gate") == "budget"
+        and "relay spend cap" in str(probe.get("reason"))
+        and len(capped) == 1
+        and caps_reached == ["max_requests"],
+        {
+            "probe": {k: probe.get(k) for k in ("outcome", "gate", "requests", "max_requests")},
+            "spend_cap_reached": caps_reached,
+        },
+    )
+    stops = [a.get("reason") for a in audit if a.get("event") == "relay_stop"]
+    check("relay_stopped_itself", stops == ["spend cap reached: max_requests"], stops)
+
+
+def evaluate(out, relay):
+    launch, smoke, scan, net, audit = load_evidence(out, relay, CONTAINER_JSON)
+    checks = {}
+
+    def check(name, ok, observed):
+        checks[name] = {"passed": bool(ok), "observed": observed}
+
+    # ---- isolation, probes, key absence: exactly relay_smoke_report's checks
+    smoke = isolation_checks(
+        check,
+        launch,
+        smoke,
+        scan,
+        net,
+        "relay_dedup_smoke",
+        "launched_dedup_client",
+        ["reviewer"],
+        "relay_allows_reviewer_only",
     )
 
     # ---- (a) gateway accepted a reviewer-sized, dedup-encoded body
@@ -363,13 +413,7 @@ def evaluate(out, relay):
     asks = [a for a in audit if a.get("event") == "ask"]
     # Exactly one ask may reach the gateway, and it succeeded; the only other ask allowed is
     # the request-cap probe, refused before forwarding (relay_smoke_report's rule).
-    capped = [
-        a
-        for a in asks[1:]
-        if a.get("outcome") == "REFUSED"
-        and a.get("sent_to_gateway") is False
-        and a.get("reason_code") == "relay_spend_cap"
-    ]
+    capped = capped_asks(asks[1:])
     one_paid = bool(asks) and asks[0].get("outcome") == "SUCCESS" and len(capped) == len(asks) - 1
     ask = asks[0] if one_paid or len(asks) == 1 else {}  # a lone refused ask is still diagnosed
     check(
@@ -431,25 +475,8 @@ def evaluate(out, relay):
         {k: refused[k] for k in ("reason_code", "audit_usage", "audit_stop_reason")},
     )
     # Past the request cap the relay answers with a spend-cap refusal (client gate "budget"),
-    # never by having already stopped; that refusal exhausts the guard.
-    probe = smoke.get("cap_probe") or {}
-    caps_reached = [a.get("cap") for a in audit if a.get("event") == "spend_cap_reached"]
-    check(
-        "request_cap_refused_before_forwarding",
-        probe.get("outcome") == "REFUSED"
-        and probe.get("gate") == "budget"
-        and "relay spend cap" in str(probe.get("reason"))
-        and len(capped) == 1
-        and caps_reached == ["max_requests"],
-        {
-            "probe": {k: probe.get(k) for k in ("outcome", "gate", "requests", "max_requests")},
-            "spend_cap_reached": caps_reached,
-        },
-    )
-    # The relay stops itself only once EXHAUSTED or after --run-seconds; here the cap probe
-    # exhausted it, so the stop must name the request cap (teardown's kill writes no stop line).
-    stops = [a.get("reason") for a in audit if a.get("event") == "relay_stop"]
-    check("relay_stopped_itself", stops == ["spend cap reached: max_requests"], stops)
+    # never by having already stopped; that refusal exhausts the guard, so the relay stops.
+    cap_stop_checks(check, smoke.get("cap_probe") or {}, audit, capped)
 
     usage = receipt.get("usage") or {}
     measured = {

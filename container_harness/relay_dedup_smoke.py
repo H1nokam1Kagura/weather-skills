@@ -443,11 +443,11 @@ def _prompt_and_render():
     return role_prompt, render_model_input
 
 
-def answer_tool_for(payload):
+def answer_tool_for(payload, role=ROLE):
     """The forced answer tool KongRoles sends for this payload, its tool_choice and hash."""
     from tools.workflow import role_schemas
 
-    tool = role_schemas.answer_tool(ROLE, payload)
+    tool = role_schemas.answer_tool(role, payload)
     return tool, role_schemas.tool_choice(tool), role_schemas.tool_hash(tool)
 
 
@@ -462,27 +462,26 @@ def gateway_body_bytes(system, user, settings_sent):
     return len(json.dumps(body).encode("utf-8"))
 
 
-def predict(payload):
-    """What RelayRoles will send and the relay will render, computed with the production code,
-    plus where the binding the reviewer must return occurs."""
+def wire(role, payload):
+    """The production wire view of one role call (shared by the role smoke): the body
+    RelayRoles sends (``dedup-sha256/1``-encoded when ``dedup_encode`` applies), the
+    model-facing user message the relay renders, the system prompt and the forced answer tool.
+    Returns (prediction fields, body, user, role_input_value, shared_texts); the fields
+    include ``_system`` / ``_user``, which a caller pops before recording."""
     role_prompt, render_model_input = _prompt_and_render()
-    binding = payload_binding(payload)
-    logical = json.dumps({"role": ROLE, "payload": payload}, allow_nan=False)
+    logical = json.dumps({"role": role, "payload": payload}, allow_nan=False)
     encoded = dedup_encode(payload)
     if encoded is None:
         body, user, shared = logical, json.dumps(payload), {}
     else:
-        body = json.dumps({"role": ROLE, **encoded}, allow_nan=False)
+        body = json.dumps({"role": role, **encoded}, allow_nan=False)
         shared = encoded["shared"]
         user = render_model_input(encoded["payload"], shared)
     role_input_value = encoded["payload"] if encoded else payload
-    role_input = json.dumps(role_input_value)
-    system = role_prompt(ROLE, payload)
-    tool, choice, tool_digest = answer_tool_for(payload)
+    system = role_prompt(role, payload)
+    tool, choice, tool_digest = answer_tool_for(payload, role)
     shared_texts = {ref: json.dumps(v) for ref, v in shared.items()}
-    holders = [ref for ref, text in shared_texts.items() if binding in text]
-    holder = holders[0] if len(holders) == 1 else None
-    return {
+    fields = {
         "transport_encoding": None if encoded is None else DEDUP_ENCODING,
         "logical_body_bytes": len(logical.encode("utf-8")),
         "payload_bytes": len(json.dumps(payload).encode("utf-8")),
@@ -497,16 +496,6 @@ def predict(payload):
         "answer_tool": tool["name"],
         "answer_tool_hash": tool_digest,
         "tool_choice": choice,
-        "binding_top_level": "binding_hash" in payload,
-        "binding_in_role_input_section": binding in role_input,
-        "binding_in_shared_blocks": sum(t.count(binding) for t in shared_texts.values()),
-        "binding_in_request_body": body.count(binding),
-        "binding_in_model_facing": user.count(binding),
-        "binding_block_referenced_at": ref_paths(role_input_value, holder) if holder else [],
-        "binding_block_bytes": len(shared_texts[holder].encode("utf-8")) if holder else None,
-        "reference_count_in_role_input": role_input.count('{"' + SHARED_KEY + '": '),
-        "instruction_terms_checked": list(INSTRUCTION_TERMS),
-        "instruction_terms_in_payload": instruction_terms(payload),
         # temperature unknown until the worker echoes settings_sent; bound with a placeholder
         "gateway_body_bytes_bound": gateway_body_bytes(
             system,
@@ -522,6 +511,37 @@ def predict(payload):
         "gateway_body_known_good": KNOWN_GOOD_GATEWAY_BODY_BYTES,
         "_system": system,
         "_user": user,
+    }
+    return fields, body, user, role_input_value, shared_texts
+
+
+def predict(payload):
+    """What RelayRoles will send and the relay will render, computed with the production code,
+    plus where the binding the reviewer must return occurs."""
+    fields, body, user, role_input_value, shared_texts = wire(ROLE, payload)
+    binding = payload_binding(payload)
+    role_input = json.dumps(role_input_value)
+    holders = [ref for ref, text in shared_texts.items() if binding in text]
+    holder = holders[0] if len(holders) == 1 else None
+    generic = ("transport_encoding", "logical_body_bytes", "payload_bytes", "request_body_bytes")
+    generic += ("request_body_cap", "shared_blocks", "shared_bytes", "model_facing_bytes")
+    generic += ("model_facing_hash", "system_prompt_hash", "structured_output", "answer_tool")
+    generic += ("answer_tool_hash", "tool_choice")
+    return {
+        **{k: fields[k] for k in generic},
+        "binding_top_level": "binding_hash" in payload,
+        "binding_in_role_input_section": binding in role_input,
+        "binding_in_shared_blocks": sum(t.count(binding) for t in shared_texts.values()),
+        "binding_in_request_body": body.count(binding),
+        "binding_in_model_facing": user.count(binding),
+        "binding_block_referenced_at": ref_paths(role_input_value, holder) if holder else [],
+        "binding_block_bytes": len(shared_texts[holder].encode("utf-8")) if holder else None,
+        "reference_count_in_role_input": role_input.count('{"' + SHARED_KEY + '": '),
+        "instruction_terms_checked": list(INSTRUCTION_TERMS),
+        "instruction_terms_in_payload": instruction_terms(payload),
+        **{k: fields[k] for k in ("gateway_body_bytes_bound", "gateway_body_known_good")},
+        "_system": fields["_system"],
+        "_user": fields["_user"],
     }
 
 
