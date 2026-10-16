@@ -231,7 +231,8 @@ def test_runner_harness_error_names_its_source_root_cause_and_text(tmp_path):
     assert "root UnsupportedInjection: unresolved trusted symbol" in line
     # the error text's own pipe is escaped: the row stays 6 cells (5 + the labelled
     # counterfactual column, n/a for a case that did not execute)
-    assert line.count(" | ") == 5 and line.endswith(" | n/a |")
+    # counterfactual and rubric-grader cells: both n/a for a HARNESS_ERROR
+    assert line.count(" | ") == 6 and line.endswith(" | n/a | n/a |")
 
 
 def test_execution_gate_by_selector():
@@ -440,7 +441,7 @@ def test_live_cases_carry_relay_usage_labels_and_the_rerun_eligible_list(tmp_pat
     md = cases_report.markdown(res)
     lines = md.splitlines()
     (l1,) = [x for x in lines if x.startswith("| L1-CTL | controller_conformance")]
-    assert "relay LIVE_TRANSPORT_FAULT" in l1 and l1.count(" | ") == 5
+    assert "relay LIVE_TRANSPORT_FAULT" in l1 and l1.count(" | ") == 6
     assert "## Live relay usage (relay audit; list-price estimate, Kong billing not observed)" in md
     header = (
         "| case | attempt | status | requests | input tokens | output tokens | est. USD "
@@ -546,7 +547,9 @@ def test_offline_report_is_unchanged_apart_from_an_empty_live_section(tmp_path):
     art = artifact(tmp_path, "V3-CTL", score=scored("V3-CTL", FAILED, "FAIL"))
     relay_audit(art, [gw_unknown(429)])  # a stray relay dir on an offline case is ignored
     res = cases_report.build(admission(rows, selector="substituted"), tmp_path / "cases")
-    assert set(res) == PRE_LIVE_KEYS | {"live"}
+    # sub-wave 8 adds the rubric grader block; with no rubric case it is empty and silent
+    assert set(res) == PRE_LIVE_KEYS | {"live", "rubric_grader"}
+    assert res["rubric_grader"]["cases"] == 0 and res["rubric_grader"]["assertions"] == []
     for e in res["cases"]:
         assert not LIVE_KEYS & set(e), e["case_id"]
     live = res["live"]

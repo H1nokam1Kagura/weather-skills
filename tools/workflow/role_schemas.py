@@ -25,6 +25,7 @@ payload, and leaves open whatever the controller leaves open:
 | verifier | ``{verdict, binding_hash, scope[, sub_reason]}``, verdict PASS/FAIL or the native BLOCK/UNVERIFIABLE (``Controller.record_verifier``) | the same; binding_hash and scope untyped (recorded, then compared) |
 | router | exactly ``{question_hash, action, scores}``, scores numbers in 0..1 (``policy.validate``) | the same |
 | shadow_policy | an ACCEPTED decision is exactly ``SHADOW_OUTPUT_FIELDS`` with a numeric score in 0..1 (``policy.shadow_rejection``) | the same |
+| rubric_grader | report-side only, never the controller: exactly ``{verdict, rationale, evidence_quotes}``, verdict PASS/FAIL/UNDECIDED (``container_harness/rubric_grader.check_answer``) | the same |
 
 Reviewer findings follow the frozen v2.7 contract's record typing (DEV-ONLY.json record_lists:
 ``role_output.reviewer[*].findings`` = a string, or a record with string ``id``, ``severity``,
@@ -191,6 +192,28 @@ def _shadow_policy(payload):
     return _object(properties, sorted(properties), closed=True)
 
 
+GRADER_VERDICTS = ("PASS", "FAIL", "UNDECIDED")
+
+
+def _rubric_grader(payload):
+    # Report-side evaluator (container_harness/rubric_grader.py), not a controller role. Its
+    # acceptance is rubric_grader.check_answer, which uses exactly this schema, so the
+    # "never stricter than the controller" rule holds by construction.
+    return _object(
+        {
+            "verdict": {"type": "string", "enum": list(GRADER_VERDICTS)},
+            "rationale": STRING,
+            "evidence_quotes": {
+                "type": "array",
+                "items": STRING,
+                "description": "verbatim excerpts of graded_output, copied exactly",
+            },
+        },
+        ("verdict", "rationale", "evidence_quotes"),
+        closed=True,
+    )
+
+
 SCHEMAS = {
     "compiler": lambda payload: _object({k: ANY for k in sorted(FIELDS)}, sorted(FIELDS), True),
     "planner": _planner,
@@ -200,6 +223,7 @@ SCHEMAS = {
     "verifier": _verifier,
     "router": _router,
     "shadow_policy": _shadow_policy,
+    "rubric_grader": _rubric_grader,
 }
 
 

@@ -243,6 +243,10 @@ def test_admission_refuses_a_rerun_before_any_case_job():
     assert "|| true" not in gate["run"]
     # case jobs need admission, so a refused rerun starts no case (and makes no Kong call)
     assert wf["jobs"]["case"]["needs"] == "admission"
+    # ...and its `if` carries no status function, so GitHub's implicit success() applies: a
+    # FAILED admission (refused rerun) can never be overridden into running case jobs
+    case_if = str(wf["jobs"]["case"].get("if") or "")
+    assert not any(fn in case_if for fn in ("always()", "failure()", "cancelled()"))
     # without rerun_of_run_id nothing else in admission changes: no other step reads it
     readers = [s.get("name") for s in adm["steps"] if "rerun" in json.dumps(s).lower()]
     assert sorted(readers) == sorted([dl["name"], rec["name"], gate["name"]])

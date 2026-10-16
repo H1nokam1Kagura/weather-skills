@@ -28,6 +28,14 @@ Every EXECUTED case also carries a separate, labelled counterfactual "with AMD-V
 never applied to the headline: dimensions/terminal/assertions and frozen_summary stay exactly as
 the frozen scorer computed them in score.json.
 
+Every EXECUTED case that holds a frozen rubric assertion (rubric_grader.EXPECTED_TARGETS), or
+whose artifacts include rubric_grader.GRADES_FILE, also carries the sub-wave 8 rubric grader's
+verdicts under rubric_grader.JSON_KEY, in their own RESULTS.md column labelled
+"UNRATIFIED grader (diagnostic)" until a valid ratification record exists
+(``--grader-ratification``, default decisions/RUBRIC-GRADER-RATIFICATION.json). It never touches
+the frozen headline or the WARN counterfactual: those assertions stay as score.json has them.
+This module only READS grades files; it never calls a model.
+
 Live-role cases (relay_usage.py) also carry their relay usage (requests, tokens, list-price
 estimate, cap state, faults), a relay outcome label (LIVE_TRANSPORT_FAULT | RELAY_GUARD_ABORT |
 null) and an ``attempts`` list; the top-level ``live`` section totals the run and lists the
@@ -53,6 +61,7 @@ REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 
 import relay_usage  # noqa: E402
+import rubric_grader as rg  # noqa: E402
 import warn_counterfactual as wcf  # noqa: E402
 
 HEADER = (
@@ -335,7 +344,50 @@ def prior_index(prior_results):
     }
 
 
-def build(admission, cases_dir, run_url=None, prior_results=None):
+def grader_section(per_case, ratification_path=None):
+    """The labelled rubric-grader block (diagnostic; never applied to the headline)."""
+    graded = [e for e in per_case if rg.JSON_KEY in e]
+    done = [e for e in graded if e[rg.JSON_KEY]["status"] == "GRADED"]
+    record, path = rg.load_ratification(ratification_path)
+    status = rg.ratification_status(record, [e[rg.JSON_KEY].get("grader") for e in done], path)
+    rows, verdicts = [], {}
+    for e in done:
+        for aid, r in e[rg.JSON_KEY]["assertions"].items():
+            verdicts[r.get("verdict")] = verdicts.get(r.get("verdict"), 0) + 1
+            rows.append(
+                {
+                    "case_id": e["case_id"],
+                    "assertion_id": aid,
+                    # the headline, exactly as score.json has it (never the grader's copy)
+                    "as_frozen": (e.get("assertions") or {}).get(aid),
+                    "grader": r.get("verdict"),
+                    "source": r.get("source"),
+                    "downgraded": bool(r.get("downgraded")),
+                    "quote_verified": any(
+                        q.get("found_in") == "graded_output" for q in r.get("quotes") or []
+                    ),
+                    "reason": r.get("reason"),
+                    "rationale": r.get("rationale"),
+                }
+            )
+    return {
+        "label": status["label"],
+        "ratification": status,
+        "applied_to_headline": False,
+        "decision": rg.DECISION,
+        "note": rg.NOTE,
+        "cases": len(graded),
+        "graded_cases": len(done),
+        "not_graded": {
+            e["case_id"]: e[rg.JSON_KEY]["status"] for e in graded if e not in done
+        },
+        "independence": sorted({e[rg.JSON_KEY].get("independence") or "?" for e in done}),
+        "verdict_counts": dict(sorted(verdicts.items(), key=lambda kv: str(kv[0]))),
+        "assertions": rows,
+    }
+
+
+def build(admission, cases_dir, run_url=None, prior_results=None, ratification_path=None):
     root, guarded, score_mod = frozen()
     arts = case_artifacts(cases_dir) if cases_dir and Path(cases_dir).is_dir() else {}
     rows = admission["cases"]
@@ -388,6 +440,10 @@ def build(admission, cases_dir, run_url=None, prior_results=None):
                     row["case_id"], (projection.get("projection") or {}).get("evidence"), scored
                 )
                 cf_scored = cf or scored
+            # Rubric grader verdicts: READ from the case's grades file, in their own key.
+            grades = arts[row["case_id"]] / rg.GRADES_FILE
+            if grades.is_file() or row["case_id"] in rg.EXPECTED_TARGETS:
+                entry[rg.JSON_KEY] = rg.case_record_from_file(grades, row["case_id"])
         cf_scored_all.append(cf_scored)
         entry.pop("scored", None)
         if live_attempted(row):
@@ -473,6 +529,7 @@ def build(admission, cases_dir, run_url=None, prior_results=None):
         "missing_capability_reasons": admission.get("missing_capability_reasons"),
         "frozen_summary": score_mod.summarize(scored_all),
         wcf.JSON_KEY: counterfactual,
+        rg.JSON_KEY: grader_section(per_case, ratification_path),
         "live": live_section(per_case, prior),
         "pairs": sorted(pairs.values(), key=lambda p: p["pair_id"]),
         "cases": per_case,
@@ -531,11 +588,12 @@ def markdown(res):
         "",
         "## Cases",
         "",
-        "`detail` is the result as frozen (the headline). The last column is a labelled "
-        f"counterfactual: {wcf.NOTE}",
+        "`detail` is the result as frozen (the headline). The next column is a labelled "
+        f"counterfactual: {wcf.NOTE} The last column is the rubric grader: {rg.NOTE}",
         "",
-        f"| case | mode | roles | status | detail (as frozen) | {wcf.COLUMN} |",
-        "|---|---|---|---|---|---|",
+        f"| case | mode | roles | status | detail (as frozen) | {wcf.COLUMN} "
+        f"| {grader_column(res)} |",
+        "|---|---|---|---|---|---|---|",
     ]
     for e in res["cases"]:
         if e["status"] == "NOT_IMPLEMENTED":
@@ -555,9 +613,10 @@ def markdown(res):
         if e.get("attempt", 1) > 1:
             detail += f"; attempt {e['attempt']} (rerun; earlier attempts under Live relay usage)"
         cf = _cell(wcf.summary_cell(e.get(wcf.JSON_KEY)), limit=600)
+        grader = _cell(rg.summary_cell(e.get(rg.JSON_KEY)), limit=400)
         lines.append(
             f"| {e['case_id']} | {e['execution_mode']} | {e['role_mode']} | {e['status']} "
-            f"| {detail} | {cf} |"
+            f"| {detail} | {cf} | {grader} |"
         )
     lines += [
         "",
@@ -608,8 +667,50 @@ def markdown(res):
             "```",
             "",
         ]
+    lines += grader_lines(res.get(rg.JSON_KEY))
     lines += live_lines(res.get("live"))
     return "\n".join(lines)
+
+
+def grader_column(res):
+    """The rubric-grader column header: its label (UNRATIFIED unless a valid record exists)."""
+    return (res.get(rg.JSON_KEY) or {}).get("label") or rg.LABEL_UNRATIFIED
+
+
+def grader_lines(section):
+    """RESULTS.md section for the rubric grader; nothing when no case carries a rubric."""
+    if not section or not section["cases"]:
+        return []
+    rat = section["ratification"]
+    lines = [
+        f"## {section['label']}: frozen rubric assertions "
+        "(not applied; the frozen result above is the headline)",
+        "",
+        f"> {section['note']}",
+        "",
+        f"- Decision: {section['decision']}",
+        f"- Ratification: {rat['status']}" + (f" ({rat['reason']})" if rat["reason"] else ""),
+        f"- Cases with a rubric assertion: {section['cases']}; graded: "
+        f"{section['graded_cases']}"
+        + (f"; not graded: {section['not_graded']}" if section["not_graded"] else ""),
+        f"- Grader independence: {', '.join(section['independence']) or 'n/a'}",
+        "",
+    ]
+    if section["assertions"]:
+        lines += [
+            f"| case | assertion | as frozen (headline) | {section['label']} | source "
+            "| quote verified | rationale / reason |",
+            "|---|---|---|---|---|---|---|",
+            *[
+                f"| {r['case_id']} | {r['assertion_id']} | {r['as_frozen']} | {r['grader']}"
+                + (" (PASS downgraded)" if r["downgraded"] else "")
+                + f" | {r['source']} | {'yes' if r['quote_verified'] else 'no'} "
+                f"| {_cell(r['reason'] or r['rationale'] or '', limit=300)} |"
+                for r in section["assertions"]
+            ],
+            "",
+        ]
+    return lines
 
 
 def _usd(value):
@@ -699,13 +800,20 @@ def main(argv):
         help="the original run's RESULTS.json when this run re-dispatches rerun-eligible cases; "
         "its attempts are reported alongside this run's, never replaced",
     )
+    ap.add_argument(
+        "--grader-ratification",
+        default=None,
+        help="the rubric grader's ratification record (default "
+        "decisions/RUBRIC-GRADER-RATIFICATION.json); absent or invalid keeps the grader "
+        "column UNRATIFIED",
+    )
     a = ap.parse_args(argv[1:])
     prior = None
     if a.prior_results:
         prior = load(a.prior_results)
         if prior is None:
             raise SystemExit(f"--prior-results {a.prior_results} is absent or not JSON")
-    res = build(load(a.admission), a.cases_dir, a.run_url, prior)
+    res = build(load(a.admission), a.cases_dir, a.run_url, prior, a.grader_ratification)
     Path(a.out).write_text(json.dumps(res, indent=1, default=str) + "\n", encoding="utf-8")
     Path(a.markdown).write_text(markdown(res), encoding="utf-8")
     print(json.dumps(res["counts"], indent=1))
