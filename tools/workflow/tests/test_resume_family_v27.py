@@ -561,3 +561,175 @@ def test_commit_time_denial_is_unchanged(tmp_path, monkeypatch):
     assert c.write_boundary.armed == {} and c.write_boundary.run_dir_armed == {}
     assert "run_dir_denials" not in c.context
     assert recovery.ledger(c.context)["interruptions"] == []  # a Refused, never recovered
+
+
+# ------------------------------------------------------------------ wave 7f controller defects
+
+
+def verifiable_transition_requests(root):
+    """Every transition request is verifiable the way the projection verifies it: its own
+    transition-request-NNN.json (hashed into the checkpoint evidence) equals the checkpoint
+    record, and its transition_request dispatch event equals the record minus event_seq."""
+    value = read_checkpoint(root)
+    records = value["context"]["transition_requests"]
+    events = [e for e in dispatch_events(root) if e["kind"] == "transition_request"]
+    assert len(events) == len(records)
+    for number, (event, record) in enumerate(zip(events, records, strict=True), 1):
+        assert record["sequence"] == number
+        name = f"transition-request-{number:03}.json"
+        assert json.loads((root / name).read_text(encoding="utf-8")) == record
+        assert value["evidence"][name] == recovery.tree_hash(root / name)
+        assert event["sequence"] == record["event_seq"]
+        assert event["transition_request"] == {k: v for k, v in record.items() if k != "event_seq"}
+    return records
+
+
+def gap_free_dispatch_sequence(root):
+    """The projection's dispatch-event invariant: 1..N, each recorded, N == the sequence."""
+    value = read_checkpoint(root)
+    context = value["context"]["dispatch_evidence"]
+    events = dispatch_events(root)
+    assert [e["sequence"] for e in events] == list(range(1, len(events) + 1))
+    for event in events:
+        name = f"dispatch-event-{event['sequence']:06}.json"
+        assert value["evidence"][name] == recovery.tree_hash(root / name)
+        assert event["run_id"] == context["run_id"] and event["schema"] == context["schema"]
+    assert len(events) == context["sequence"]
+    return events
+
+
+def test_refused_then_accepted_resume_requests_are_verifiable(tmp_path, monkeypatch):
+    """Defect 1: a resume transition request gets the per-record evidence file every other
+    transition request gets (operator_ledger.submit_transition_request), refused or accepted."""
+    c = with_ledger(tmp_path, monkeypatch, hooks=kill_at("after_transition", "ONSET_CHECKED"))
+    with pytest.raises(Killed):
+        c.run()
+    onset = c.paths["onset"].read_bytes()
+    c.paths["onset"].write_text("drifted onset")
+    user_resume(tmp_path, "OPR-RESUME-1")
+    request = {"initiated_by": "operator_ledger", "requested_by": "operator", "run_id": RUN_ID}
+    with pytest.raises(Refused):
+        runner.Controller.request_resume(c.root, EventProcesses(), ReceiptRoles(), request, c.hooks)
+    (refused,) = verifiable_transition_requests(c.root)
+    assert refused["result"] == "REJECTED" and refused["reasons"] == ["artifact:onset"]
+    gap_free_dispatch_sequence(c.root)
+    c.paths["onset"].write_bytes(onset)  # the drift is undone; a second record authorizes
+    user_resume(tmp_path, "OPR-RESUME-2")
+    resumed = runner.Controller.request_resume(
+        c.root, EventProcesses(), ReceiptRoles(), request, c.hooks
+    )
+    first, accepted = verifiable_transition_requests(c.root)
+    assert first == refused
+    assert accepted["result"] == "ACCEPTED" and accepted["requested_via"] == "resume_request"
+    assert [d["result"] for d in book(c)["resume"]] == ["REFUSED", "ACCEPTED"]
+    gap_free_dispatch_sequence(c.root)
+    # The resumed run re-verifies its own evidence (the new files included) and releases.
+    assert resumed.run()["terminal"]["outcome"] == "RELEASED"
+    assert len(verifiable_transition_requests(c.root)) == 2
+    gap_free_dispatch_sequence(c.root)
+
+
+class KillAfterLaunch(EventProcesses):
+    """The controller is killed while ``tool`` runs, AFTER its launch_check and process_launch
+    events are durable and before process_exit (the E11-P1-INJ mid-process stop)."""
+
+    def __init__(self, tool, **kwargs):
+        super().__init__(**kwargs)
+        self.kill_tool = tool
+
+    def run(self, argv, cwd, env, tool=None):
+        if tool != self.kill_tool:
+            return super().run(argv, cwd, env, tool=tool)
+        self.serial += 1
+        self.tools.append(tool)
+        self.on_event("launch_check", {"serial": self.serial, "free_gib": 9.0})
+        self.on_event(
+            "process_launch",
+            {
+                "serial": self.serial,
+                "tool": tool,
+                "argv": list(argv),
+                "pid": 1000 + self.serial,
+                "parent_pid": 999,
+                "started_monotonic_ns": self.serial,
+            },
+        )
+        raise Killed
+
+
+def on_disk(root):
+    return {p.name: p.read_bytes() for p in root.glob("dispatch-event-*.json")}
+
+
+def test_resume_keeps_events_written_after_the_checkpoint(tmp_path, monkeypatch):
+    """Defect 2: the killed incarnation's launch_check / process_launch events, written after
+    its last checkpoint, survive the resume, which continues after the highest on disk."""
+    c = with_ledger(tmp_path, monkeypatch, processes=KillAfterLaunch("onset-date"))
+    with pytest.raises(Killed):
+        c.run()
+    recorded = read_checkpoint(c.root)["context"]["dispatch_evidence"]["sequence"]
+    before = on_disk(c.root)
+    assert len(before) == recorded + 2  # launch_check + process_launch beyond the checkpoint
+    killed = [
+        json.loads(before[f"dispatch-event-{n:06}.json"]) for n in (recorded + 1, recorded + 2)
+    ]
+    assert [e["kind"] for e in killed] == ["launch_check", "process_launch"]
+    assert killed[1]["tool"] == "onset-date"
+    user_resume(tmp_path)
+    request = {"initiated_by": "operator_ledger", "requested_by": "operator", "run_id": RUN_ID}
+    with pytest.raises(Refused) as caught:
+        runner.Controller.request_resume(c.root, EventProcesses(), ReceiptRoles(), request)
+    assert caught.value.gate == "pending_operation"
+    after = on_disk(c.root)
+    assert {name: after[name] for name in before} == before  # never overwritten
+    events = gap_free_dispatch_sequence(c.root)
+    new = [e for e in events if e["sequence"] > len(before)]
+    kinds = [e["kind"] for e in new]
+    assert kinds[0] == "interruption" and {"resume", "transition_request"} <= set(kinds)
+    (launch,) = [e for e in events if e["kind"] == "process_launch" and e["tool"] == "onset-date"]
+    assert launch["sequence"] == recorded + 2
+    assert not [
+        e for e in events if e["kind"] == "process_exit" and e["serial"] == launch["serial"]
+    ]
+    (stop,) = interruptions(c)
+    assert stop["failure_class"] == "controller_killed" and stop["sequence"] == len(before) + 1
+    verifiable_transition_requests(c.root)
+
+
+def test_accepted_resume_continues_after_unrecorded_events(tmp_path, monkeypatch):
+    """The same on an ACCEPTED resume: events the killed controller wrote after its last
+    checkpoint are kept, and the resumed run's sequence continues after them to RELEASED."""
+    c = make_controller(tmp_path, monkeypatch, hooks=kill_at("after_transition", "ONSET_CHECKED"))
+    with pytest.raises(Killed):
+        c.run()
+    # The killed controller's own dispatch_event, never followed by a checkpoint: exactly what a
+    # kill between dispatch_event and the next checkpoint leaves on disk.
+    c.dispatch_event("launch_check", serial=99, free_gib=9.0)
+    before = on_disk(c.root)
+    recorded = read_checkpoint(c.root)["context"]["dispatch_evidence"]["sequence"]
+    assert len(before) == recorded + 1
+    resumed = runner.Controller.resume(c.root, EventProcesses(), ReceiptRoles(), hooks=c.hooks)
+    assert recovery.ledger(resumed.context)["resume"][-1]["result"] == "ACCEPTED"
+    assert resumed.run()["terminal"]["outcome"] == "RELEASED"
+    after = on_disk(c.root)
+    assert {name: after[name] for name in before} == before
+    events = gap_free_dispatch_sequence(c.root)
+    assert events[recorded]["kind"] == "launch_check" and events[recorded]["serial"] == 99
+    assert events[recorded + 1]["kind"] == "interruption"
+
+
+def test_unverifiable_event_beyond_the_checkpoint_is_kept_but_never_adopted(tmp_path, monkeypatch):
+    """A file that is not the controller's own event is not vouched for (left unrecorded, so a
+    projection refuses it), and still never overwritten: the sequence skips past it."""
+    c = make_controller(tmp_path, monkeypatch, hooks=kill_at("after_transition", "ONSET_CHECKED"))
+    with pytest.raises(Killed):
+        c.run()
+    recorded = read_checkpoint(c.root)["context"]["dispatch_evidence"]["sequence"]
+    foreign = c.root / f"dispatch-event-{recorded + 1:06}.json"
+    foreign.write_text(json.dumps({"sequence": recorded + 1, "run_id": "other", "kind": "x"}))
+    data = foreign.read_bytes()
+    resumed = runner.Controller.resume(c.root, EventProcesses(), ReceiptRoles(), hooks=c.hooks)
+    assert foreign.read_bytes() == data
+    assert foreign.name not in read_checkpoint(c.root)["evidence"]
+    (stop,) = recovery.ledger(resumed.context)["interruptions"]
+    assert stop["sequence"] == recorded + 2
