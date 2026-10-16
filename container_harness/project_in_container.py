@@ -34,6 +34,14 @@ scored projection (``harness_interrupt_broker``, beside ``evidence``: it is no c
 and the choice is disclosed in ``notes`` and in this record's ``kill_facts``. Any other kill
 route (in_process: the harness parent's own /proc observation) is used as recorded.
 
+Concurrency (``withhold_concurrency``, D4 w7 B-HO-1): in the container a stop case's controller
+runs as a forked incarnation, and only a trace-confirmed broker stop lets the analyzer count
+that incarnation's children. Unless kill_facts is CONFIRMED (an in_process or other kill, no
+kill record, or an unconfirmed broker stop), harness_observations.max_concurrent_children is
+withheld MISSING (CAP-HARNESS-OBS) with the reason, never kept as a root-only count. A kill
+that fell back in-process although a broker channel was expected carries resume_driver's
+``broker_fallback`` disclosure, repeated in kill_facts and in the reason.
+
 Absent route record on a stop case (the run has several controller incarnations, or the
 analyzer saw the broker engaged): nothing is filled. harness_observations.controller_incarnations
 and harness_observations.onset_partial are listed MISSING with the reason, and an analyzer
@@ -59,6 +67,11 @@ BROKER_KILL_ROUTE = "interrupt_broker"  # resume_driver.ForkedIncarnation.kill
 BROKER_SOURCE = (
     "harness_interrupt_broker: the broker's own record ($OUT/interrupt_broker.json, root, "
     "untraced) as analyze_trace read it, stop and kills confirmed by the trace"
+)
+CONCURRENCY_FIELD = "harness_observations.max_concurrent_children"
+CONCURRENCY_WITHHELD = (
+    "the stop did not go through a trace-confirmed interrupt broker stop, so the controller "
+    "incarnation's children cannot be counted"
 )
 ROUTE_ABSENT_REASON = (
     "the harness resume-route record (run_case resume_route) was not carried into the "
@@ -162,13 +175,21 @@ def broker_kill_facts(route, observations):
     the killed pids whose receipts stay MISSING with ``reason`` (apply_route_disclosures)."""
     kill = route.get("kill") if isinstance(route, dict) else None
     if not isinstance(kill, dict):
-        return route, {"source": "resume_route", "status": "NO_KILL_RECORD"}
-    if kill.get("route") != BROKER_KILL_ROUTE:
         return route, {
+            "source": "resume_route",
+            "status": "NO_KILL_RECORD",
+            "reason": "the route record carries no kill",
+        }
+    if kill.get("route") != BROKER_KILL_ROUTE:
+        facts = {
             "source": f"resume_route.kill (route {kill.get('route')}: the harness parent's own "
             "observation)",
             "status": "AS_RECORDED",
+            "kill_route": kill.get("route"),
         }
+        if kill.get("broker_fallback"):  # resume_driver: a broker channel was expected
+            facts["broker_fallback"] = kill["broker_fallback"]
+        return route, facts
     stop, reason = _broker_stop((observations or {}).get(BROKER_EVIDENCE_KEY), kill)
     route = copy.deepcopy(route)
     out = route["kill"]
@@ -221,6 +242,25 @@ def _gap(projection, path, capability, reason):
     projection["missing"].append({"path": path, "capability": capability, "reason": reason})
 
 
+def withhold_concurrency(projection, kill_facts):
+    """D4 w7 B-HO-1: a stop case's controller ran as a forked incarnation; unless its kill went
+    through a trace-confirmed broker stop, the analyzer's concurrency basis is unconfirmed (a
+    root-only count sees the fork as one child), so the field is withheld MISSING, never kept."""
+    observed = projection["evidence"].get("harness_observations")
+    if isinstance(observed, dict):
+        observed.pop("max_concurrent_children", None)
+    kill_route = kill_facts.get("kill_route")
+    detail = kill_facts.get("reason") or f"kill route {kill_route}"
+    if kill_facts.get("broker_fallback"):
+        detail += "; " + kill_facts["broker_fallback"]
+    _gap(
+        projection,
+        CONCURRENCY_FIELD,
+        "CAP-HARNESS-OBS",
+        f"withheld: {CONCURRENCY_WITHHELD} (kill_facts {kill_facts['status']}: {detail})",
+    )
+
+
 def apply_route_disclosures(projection, harness, observations, kill_facts):
     """After project_run: disclose the kill-fact source (and copy the analyzer's broker
     section); list withheld byte counts, and on a stop case without a route record its fields,
@@ -231,6 +271,8 @@ def apply_route_disclosures(projection, harness, observations, kill_facts):
         projection["notes"].append({"interrupt_broker_kill_facts": kill_facts})
         if kill_facts["source"] == BROKER_SOURCE:
             projection[BROKER_EVIDENCE_KEY] = section
+        if kill_facts["status"] != "CONFIRMED":
+            withhold_concurrency(projection, kill_facts)
         for receipt in evidence.get("process_receipts") or []:
             if receipt.get("pid") in kill_facts.get("withheld", ()) and receipt.get("end") is None:
                 _gap(

@@ -108,6 +108,14 @@ def fake_project_run(seen):
         projection.gap("process_receipts[serial=1].output_bytes", "CAP-RECEIPTS", DEFAULT_GAP)
         rsp.killed_output_bytes(projection, receipts)
         observed = {}
+        # load_harness_observations' merge of the analyzer count (the field B-HO-1 is about).
+        try:
+            analyzed = json.loads(Path(harness["observations_path"]).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            analyzed = {}
+        count = (analyzed.get("harness_observations") or {}).get("max_concurrent_children")
+        if count is not None:
+            observed["max_concurrent_children"] = count
         rsp.harness_fields(projection, observed)
         native, _ = rsp.native_controller(projection, receipts)
         analyzer_pid = ROOT  # what the container analyzer reports as the traced root
@@ -287,6 +295,66 @@ def test_broker_route_unconfirmed_withholds_the_byte_counts(tmp_path, monkeypatc
     assert reason in gap and gap.endswith("(never 0)")
     # The route record still carries the incarnations: the controller pid stays checked.
     assert projection["evidence"]["symbols"]["HARNESS_CONTROLLER_PID"] == ROOT
+
+
+FALLBACK = (
+    "SIMKIT_INTERRUPT_BROKER was set but no broker channel was usable: the harness parent "
+    "killed incarnation 1 itself (route in_process), not the broker"
+)
+
+
+@pytest.mark.parametrize("disclosed", [False, True])
+def test_in_process_fallback_kill_in_the_container_withholds_concurrency(
+    tmp_path, monkeypatch, disclosed
+):
+    """D4 w7 B-HO-1: the kill fell back to the traced root (route in_process) and the analyzer
+    still reported a root-only count; the scored projection must not keep it."""
+    route = route_record()  # kill.route in_process
+    if disclosed:
+        route["kill"]["broker_fallback"] = FALLBACK
+    observations = {
+        "harness_observations": {"max_concurrent_children": 1},  # root-only: the fork is 1
+        pic.BROKER_EVIDENCE_KEY: {"status": "OK", "stops": [], "incarnation_pids": []},
+    }
+    record, _ = run(tmp_path, monkeypatch, route=route, observations=observations)
+    facts = record["kill_facts"]
+    assert facts["status"] == "AS_RECORDED" and facts["kill_route"] == "in_process"
+    assert (facts.get("broker_fallback") == FALLBACK) is disclosed
+    projection = record["projection"]
+    assert "max_concurrent_children" not in projection["evidence"]["harness_observations"]
+    (gap,) = [m for m in projection["missing"] if m["path"] == pic.CONCURRENCY_FIELD]
+    assert gap["capability"] == "CAP-HARNESS-OBS"
+    assert gap["reason"].startswith("withheld: " + pic.CONCURRENCY_WITHHELD)
+    assert "kill_facts AS_RECORDED: kill route in_process" in gap["reason"]
+    assert (FALLBACK in gap["reason"]) is disclosed
+    # The harness parent's own /proc counts are still used as recorded (OI-04).
+    (receipt,) = projection["evidence"]["process_receipts"]
+    assert receipt["output_bytes"] == 15
+
+
+def test_unconfirmed_broker_stop_withholds_concurrency(tmp_path, monkeypatch):
+    route = route_record(kill_route=pic.BROKER_KILL_ROUTE)
+    observations = {
+        "harness_observations": {"max_concurrent_children": 1},
+        pic.BROKER_EVIDENCE_KEY: broker_section(trace_confirmed=False),
+    }
+    record, _ = run(tmp_path, monkeypatch, route=route, observations=observations)
+    projection = record["projection"]
+    assert "max_concurrent_children" not in projection["evidence"]["harness_observations"]
+    assert "not confirmed by the trace" in gaps(projection)[pic.CONCURRENCY_FIELD]
+
+
+def test_confirmed_broker_stop_keeps_the_analyzer_concurrency(tmp_path, monkeypatch):
+    route = route_record(kill_route=pic.BROKER_KILL_ROUTE)
+    observations = {
+        "harness_observations": {"max_concurrent_children": 2},  # over confirmed incarnations
+        pic.BROKER_EVIDENCE_KEY: broker_section(),
+    }
+    record, _ = run(tmp_path, monkeypatch, route=route, observations=observations)
+    projection = record["projection"]
+    assert record["kill_facts"]["status"] == "CONFIRMED"
+    assert projection["evidence"]["harness_observations"]["max_concurrent_children"] == 2
+    assert pic.CONCURRENCY_FIELD not in gaps(projection)
 
 
 def test_a_case_without_a_stop_is_untouched(tmp_path, monkeypatch):

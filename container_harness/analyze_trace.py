@@ -1450,8 +1450,10 @@ def max_concurrent(procs, root_key):
 #     direct child of the traced root, alive at the request, and its trace ends "killed by
 #     SIGKILL"); the incarnations themselves are not tool children. Without this, incarnation-1
 #     tools are invisible and the fork counts as one child (V23-CONCURRENCY would pass falsely).
-#     A declared stop the trace does not confirm, a refused/failed stop, or an absent/unfinished
-#     record makes the field MISSING, never a guess.
+#     A declared stop the trace does not confirm, a refused/failed stop, an absent/unfinished
+#     record, or a ready broker that received NO stop request (the kill fell back in-process,
+#     or no stop was delivered: the incarnation is unconfirmed) makes the field MISSING, never
+#     a guess.
 #   * broker signals (si_pid = broker pid, outside the tree) are harness actions: never in
 #     signalled_pids (they are no kill-family attempt of the tree), listed in harness_notes
 #     (interrupt_broker_deliveries, sigkill_deaths_by_interrupt_broker).
@@ -1463,6 +1465,11 @@ BROKER_RECORD = "interrupt_broker.json"
 BROKER_SCHEMA = "simkit.interrupt-broker/1"
 BROKER_EVIDENCE_KEY = "harness_interrupt_broker"
 CONCURRENCY_FIELD = "harness_observations.max_concurrent_children"
+NO_STOP_REASON = (
+    "interrupt broker engaged but it received no stop request: the controller incarnation "
+    "is unconfirmed (an in-process kill, or no stop delivered), so its children cannot be "
+    "counted"
+)
 # strace's group-stop line ("--- stopped by SIGSTOP ---"): the process is frozen, no syscall.
 GROUP_STOP = re.compile(r"^--- stopped by (SIG\w+) ---$")
 
@@ -1622,8 +1629,14 @@ def apply_interrupt_broker(
         "never controller signals: not in signalled_pids"
     )
     if not record["stops"]:
+        # An engaged broker means a harness_stop_controller case: the controller ran as a
+        # forked incarnation. With no stop request that incarnation is unconfirmed (the kill
+        # fell back to the traced root, or no stop was delivered), so the root-only count would
+        # treat the fork as one child and hide its tools: MISSING, never that count.
         section["status"] = "NO_STOP_REQUESTED"
-    if problems:
+        section["reason"] = NO_STOP_REASON
+        _concurrency_missing(evidence, missing, NO_STOP_REASON)
+    elif problems:
         section["status"] = "UNCONFIRMED"
         section["problems"] = problems
         _concurrency_missing(evidence, missing, "; ".join(problems)[:300])
