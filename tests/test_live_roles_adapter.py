@@ -4,8 +4,11 @@ Frozen cases run verbatim (id, profile, budget, agent_roles, injection_schedule 
 adapter_requirements) through WeatherAdapter.run_case: E12-P1-CTL (all live), E01-P2-CTL
 (mixed), E06-P1-CTL (reviewer split by occurrence), E13-P2-INJ and E15-P2-INJ (mixed, with
 schedules). The live member is a ZERO-COST FAKE relay with the RelayRoles interface
-(tools/workflow/relay_roles.py): it answers from the substituted baselines and returns a
-receipt with exactly the relay receipt fields. No model, relay or network is touched.
+(tools/workflow/relay_roles.py): every ask runs a REAL RelayRoles client over a fake host
+transport that decodes dedup-sha256/1 bodies (relay_roles.dedup_decode, hash-verified),
+answers from the substituted baselines and returns the host's receipt (KongRoles fields plus
+relay_id / transport_encoding / transport_bytes from the host's wire_view), which the real
+client validates. No model, relay or network is touched.
 
 CAP-LIVE-ROLE and CAP-BINDING-PASSTHROUGH have no adapter method yet (live-role sub-wave 3),
 so a TEST-LOCAL adapter subclass declares them (extension_methods) over the live_roles
@@ -13,14 +16,15 @@ producers, with test-local signed producer records (pattern of
 tests/test_operator_ledger_capabilities.py signed()/producers_with). Nothing here is a
 committed declaration.
 
-The fake relay also records the exact relay request body size of every live call
-(json.dumps({"role", "payload"}), the RelayRoles serializer) with the controller's REAL skill
-documentation in the payload, against the 88,000-byte body cap of live-role sub-wave 1. The
-table is written to <basetemp>/live-role-payload-sizes.json and printed.
+The fake relay also records, for every live call with the controller's REAL skill
+documentation in the payload, both the original payload size and the request body actually
+sent (dedup-encoded when dedup applies), against the 88,000-byte body cap of live-role
+sub-wave 1. The table is written to <basetemp>/live-role-payload-sizes.json and printed.
 """
 
 import copy
 import hashlib
+import importlib.util
 import json
 import shutil
 import uuid
@@ -100,9 +104,54 @@ class LiveLabAdapter(WeatherAdapter):
         return live_roles.confirm_binding_passthrough(run_dir)
 
 
+def load_relay_host():
+    """The host relay module (relay/ is not a package), loaded as tools/workflow/tests do."""
+    spec = importlib.util.spec_from_file_location(
+        "kong_relay_host_live_roles", REPO / "relay" / "kong_relay_host.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+relay_host = load_relay_host()
+
+
+class FakeHostTransport:
+    """The fake relay HOST behind a REAL RelayRoles client: RelayTransport's run() seam, no
+    socket. It parses the body exactly as KongRelay.ask does (plain {role, payload} or the
+    dedup-sha256/1 form, decoded and hash-verified by relay_roles.dedup_decode), answers from
+    the substituted baselines on the DECODED payload, and returns the SUCCESS envelope with
+    the KongRoles receipt plus relay_id / transport_encoding / transport_bytes, the latter
+    from the host's own wire_view."""
+
+    def __init__(self, fake, expected_body):
+        self.fake = fake
+        self.expected_body = expected_body
+        self.serial = 0
+
+    def run(self, method, path, body, headers):
+        self.serial += 1
+        assert (method, path) == ("POST", relay_roles.ASK_PATH)
+        assert body == self.expected_body  # the client sent the body measured before sending
+        request = json.loads(body)
+        assert set(request) in (relay_roles.PLAIN_KEYS, relay_roles.ENCODED_KEYS)
+        payload = request["payload"]
+        if set(request) == relay_roles.ENCODED_KEYS:
+            payload = relay_roles.dedup_decode(request)  # DedupMismatch unless hashes verify
+        role = request["role"]
+        wire = relay_host.wire_view(request, body, payload)
+        relay_id = str(uuid.uuid4())
+        value, receipt = self.fake.answer(role, payload, relay_id, wire)
+        envelope = {"outcome": "SUCCESS", "relay_id": relay_id, "value": value, "receipt": receipt}
+        return 200, json.dumps(envelope).encode()
+
+
 class FakeRelay:
     """Zero-cost RelayRoles stand-in: same ask/receipts/spent/budget/model/dispatch_* interface,
-    answers from the substituted baselines, receipt fields exactly relay_roles.RECEIPT_FIELDS."""
+    answers from the substituted baselines. Each ask runs a REAL relay_roles.RelayRoles client
+    (encoding, body cap, envelope + receipt validation, spend reconcile, dispatch observation)
+    over FakeHostTransport, so the fake cannot drift from the current relay protocol."""
 
     def __init__(self, case, goal, budget=5, model=MODEL):
         every = {
@@ -116,27 +165,48 @@ class FakeRelay:
         self.calls = []
 
     def ask(self, role, payload):
-        if self.budget - self.spent < 0.05:
-            raise Refused("aggregate model budget exhausted", gate="budget")
-        body = json.dumps({"role": role, "payload": payload}, allow_nan=False).encode()
-        keys = {k: len(json.dumps(v).encode()) for k, v in payload.items()}
-        self.bodies.append({"role": role, "bytes": len(body), "keys": keys})
+        # Measure the request exactly as RelayRoles.ask builds it, before anything is sent.
+        encoded = relay_roles.dedup_encode(payload)
+        request = (
+            {"role": role, "payload": payload} if encoded is None else {"role": role, **encoded}
+        )
+        body = json.dumps(request, allow_nan=False).encode()
+        self.bodies.append(
+            {
+                "role": role,
+                "transport_encoding": None if encoded is None else relay_roles.DEDUP_ENCODING,
+                "body_bytes": len(body),
+                "payload_bytes": len(json.dumps(payload).encode("utf-8")),
+                "keys": {k: len(json.dumps(v).encode()) for k, v in payload.items()},
+            }
+        )
         self.calls.append(role)
-        invocation = str(uuid.uuid4())
+        client = relay_roles.RelayRoles(
+            "http://127.0.0.1:9", "t" * 43, "fake-run", budget=self.budget, model=self.model
+        )
+        client.processes = FakeHostTransport(self, body)
+        client.spent = self.spent
+        client.receipts = self.receipts  # the client appends its copy of the relay receipt
+        client.sessions = self.sessions
+        client.unknown_outcomes = self.unknown_outcomes
+        client.transport_retry_recorder = getattr(self, "transport_retry_recorder", None)
         context = getattr(self, "dispatch_context", None)
         if context is not None:
-            self.dispatch_observation = {
-                "attempt_id": context["attempt_id"],
-                "invocation_id": invocation,
-                "process_boundary": "NOT_ENTERED",
-            }
-            self.dispatch_observer(dict(self.dispatch_observation))
-            self.dispatch_observation["process_boundary"] = "ENTERED"
+            client.dispatch_context = context
+            client.dispatch_observer = self.dispatch_observer
+        try:
+            return client.ask(role, payload)
+        finally:
+            self.spent = client.spent
+            if context is not None:
+                self.dispatch_observation = client.dispatch_observation
+
+    def answer(self, role, payload, relay_id, wire):
+        """The host side: KongRoles' receipt for the decoded payload, plus the relay fields."""
+        encoding, _model_input, transport_bytes = wire
         value = self.baseline.baseline(role, payload)
-        if context is not None:
-            self.dispatch_observation.update(process_boundary="RETURNED", http_status=200)
         response_id = f"msg_fake_{uuid.uuid4().hex}"
-        user = json.dumps(payload)
+        user = json.dumps(payload)  # stdin_hash stays the logical payload text
         receipt = {
             "role": role,
             "invocation_id": str(uuid.uuid4()),  # minted host-side, as the relay's KongRoles
@@ -171,7 +241,6 @@ class FakeRelay:
             "gateway_mock": True,
             "transport": relay_roles.TRANSPORT,
             "mode": "live",
-            "relay_id": f"relay-fake-{uuid.uuid4().hex}",
         }
         if role == "reviewer" and "review_evidence" in payload:
             receipt["dispatch"] = {
@@ -179,11 +248,10 @@ class FakeRelay:
                 "system_prompt": FAKE_PROMPT,
                 "system_prompt_hash": text_hash(FAKE_PROMPT),
             }
-        optional = relay_roles.OPTIONAL_RECEIPT_FIELDS.get(role, frozenset())
-        assert relay_roles.RECEIPT_FIELDS <= set(receipt) <= relay_roles.RECEIPT_FIELDS | optional
-        self.sessions.add(response_id)
-        self.receipts.append(dict(receipt))  # RelayRoles appends a copy of the relay receipt
-        return value
+        receipt.update(
+            relay_id=relay_id, transport_encoding=encoding, transport_bytes=transport_bytes
+        )
+        return value, receipt
 
 
 @pytest.fixture(scope="module")
@@ -444,32 +512,52 @@ def test_project_live_receipt_carries_live_identity_and_substituted_mode(runs):
 
 
 def test_payload_sizes_against_the_relay_body_cap(runs, tmp_path_factory):
-    """Measurement, not a gate: every live relay body per case and role, written to
-    <basetemp>/live-role-payload-sizes.json and printed (real skill documentation)."""
+    """Every live relay request per case and role, measured twice: the ORIGINAL payload
+    (json.dumps(payload), the decoded role input) and the request body actually SENT (the
+    dedup-sha256/1 encoded body when dedup applies, RelayRoles.ask). Written to
+    <basetemp>/live-role-payload-sizes.json and printed (real skill documentation). The body
+    cap applies to the sent body, so every role's sent body must be within it."""
+    assert BODY_CAP == relay_roles.DEFAULT_MAX_BODY
     table = {
-        short: [{"role": b["role"], "bytes": b["bytes"], "keys": b["keys"]} for b in r.relay.bodies]
-        for short, r in runs.items()
+        short: [{k: b[k] for k in sorted(b)} for b in r.relay.bodies] for short, r in runs.items()
     }
     maxima = {}
     for bodies in table.values():
         for body in bodies:
-            maxima[body["role"]] = max(maxima.get(body["role"], 0), body["bytes"])
+            top = maxima.setdefault(
+                body["role"], {"body_bytes": 0, "payload_bytes": 0, "encodings": set()}
+            )
+            for key in ("body_bytes", "payload_bytes"):
+                top[key] = max(top[key], body[key])
+            top["encodings"].add(body["transport_encoding"])
+    for top in maxima.values():
+        top["encodings"] = sorted(top["encodings"], key=str)
     record = {
         "body_cap": BODY_CAP,
-        "serializer": "json.dumps({'role': role, 'payload': payload}) (RelayRoles.ask)",
+        "serializer": "RelayRoles.ask: json.dumps({'role', 'payload'} or its dedup_encode form)",
         "max_by_role": maxima,
-        "over_cap": sorted(role for role, size in maxima.items() if size > BODY_CAP),
+        "over_cap": sorted(r for r, top in maxima.items() if top["body_bytes"] > BODY_CAP),
         "by_case": table,
     }
     path = tmp_path_factory.getbasetemp() / "live-role-payload-sizes.json"
     path.write_text(json.dumps(record, indent=1), encoding="utf-8")
-    lines = [f"live relay body sizes (cap {BODY_CAP}) -> {path}"]
+    lines = [f"live relay sizes (cap {BODY_CAP} on the sent body) -> {path}"]
     for role in sorted(maxima):
-        flag = "OVER" if maxima[role] > BODY_CAP else "ok"
-        lines.append(f"  {role:17} max {maxima[role]:7d}  {flag}")
+        top = maxima[role]
+        flag = "OVER" if top["body_bytes"] > BODY_CAP else "ok"
+        lines.append(
+            f"  {role:17} sent max {top['body_bytes']:7d}  original max "
+            f"{top['payload_bytes']:7d}  {top['encodings']}  {flag}"
+        )
     print("\n".join(lines))
     assert set(table) == set(CASES) and all(table.values())
     assert {"planner", "reviewer", "evidence_checker", "repairer"} <= set(maxima)
+    assert record["over_cap"] == [], record["max_by_role"]
+    for role in ("planner", "reviewer", "repairer"):  # the doubled-documentation payloads
+        assert relay_roles.DEDUP_ENCODING in maxima[role]["encodings"], role
+    for short, bodies in table.items():
+        for body in bodies:
+            assert body["body_bytes"] <= BODY_CAP, (short, body["role"], body["body_bytes"])
 
 
 # --------------------------------------------------------------------------- unit checks
