@@ -590,6 +590,14 @@ def test_reviewer_schema_and_temperature_helpers():
     assert report.reviewer_schema_errors({**good, "verdict": "MAYBE"}, "b")
     assert report.reviewer_schema_errors({**good, "findings": "x"}, "b")
     assert report.reviewer_schema_errors(good, "other")
+    record = {"id": "R1", "severity": "blocking", "text": "t"}
+    assert report.reviewer_schema_errors({**good, "findings": [record, "prose"]}, "b") == []
+    assert report.reviewer_schema_errors({**good, "findings": [None]}, "b") == [
+        "findings[0] is neither an object nor a string"
+    ]
+    assert report.reviewer_schema_errors({**good, "findings": [{**record, "id": 1}]}, "b") == [
+        "findings[0].id is not a string"
+    ]
     assert report.temperature_sent({"temperature": 0}) == 0
     assert report.temperature_sent({"extra_body": {"temperature": 0.0}}) == 0
     assert report.temperature_sent({"max_tokens": 1}) is None
@@ -729,3 +737,77 @@ def test_dedup_job_reuses_relay_smoke_isolation_and_teardown():
     assert "pyyaml==" in tests["run"] and "env" not in tests
     # relay-smoke itself still launches the default client
     assert "--client" not in step(base, "Smoke container")["run"]
+
+
+# ------------------------------------------------------------------ reviewer finding shape
+
+# Live run A (GitHub run 38859334727): claude-sonnet-4-6 answered findings as objects with
+# category / description and no text (texts shortened here; keys and severities verbatim).
+RUN_A_FINDINGS = [
+    {
+        "id": "F1",
+        "severity": "BLOCKING",
+        "category": "internal_contradiction_missing_value_flag",
+        "description": "The documentation source contains contradictory missing-value rules.",
+    },
+    {
+        "id": "F5",
+        "severity": "INFORMATIONAL",
+        "category": "claim_entailment_unsupported",
+        "description": "The envelope lists claim_entailment under unsupported.",
+    },
+]
+# The frozen contract's record shape: the probe-bundle reviewer finding of
+# DEV-E2E-V2_7-E04-P2-INJ (agentic-e2e-injections.DEV-ONLY.json), verbatim.
+CONTRACT_FINDINGS = [
+    {
+        "id": "R1",
+        "severity": "blocking",
+        "text": "The request does not say whether a comparison with the 2024 short rains is "
+        "wanted; ask the user before planning further.",
+    }
+]
+
+
+def test_reviewer_schema_fails_the_run_a_finding_shape_with_the_missing_field():
+    answer = {"verdict": "REJECT", "binding_hash": "b", "findings": RUN_A_FINDINGS}
+    assert report.reviewer_schema_errors(answer, "b") == [
+        "findings[0] lacks the required field text "
+        "(has ['category', 'description', 'id', 'severity'])",
+        "findings[1] lacks the required field text "
+        "(has ['category', 'description', 'id', 'severity'])",
+    ]
+
+
+def test_reviewer_schema_passes_the_contract_finding_shape():
+    answer = {"verdict": "REJECT", "binding_hash": "b", "findings": CONTRACT_FINDINGS}
+    assert report.reviewer_schema_errors(answer, "b") == []
+    # extra keys are not part of the contract's typing
+    extra = [{**CONTRACT_FINDINGS[0], "category": "scope"}]
+    assert report.reviewer_schema_errors({**answer, "findings": extra}, "b") == []
+
+
+@pytest.mark.parametrize(
+    ("findings", "passed"), [(RUN_A_FINDINGS, False), (CONTRACT_FINDINGS, True)]
+)
+def test_report_reviewer_schema_check_on_finding_shape(recorded, findings, passed):
+    out, relay_dir = recorded
+    path = out / report.CONTAINER_JSON
+    container = json.loads(path.read_text())
+    container["answer"] = {**container["answer"], "verdict": "REJECT", "findings": findings}
+    path.write_text(json.dumps(container))
+    report.main(["x", str(out), str(relay_dir)])
+    checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
+    assert checks["reviewer_schema_valid"]["passed"] is passed
+    if not passed:
+        assert all(
+            "lacks the required field text" in e
+            for e in checks["reviewer_schema_valid"]["observed"]
+        )
+
+
+def test_reviewer_prompt_names_the_contract_finding_fields():
+    role_prompt, _ = smoke._prompt_and_render()
+    prompt = role_prompt("reviewer", {})
+    assert report.REVIEWER_FINDING_FIELDS == ("id", "severity", "text")
+    assert "string fields id, severity and text" in prompt

@@ -55,3 +55,18 @@ def test_invalid_model_envelopes_cannot_be_receipts(monkeypatch, tmp_path, chang
     with pytest.raises(Refused):
         agent.ask("verifier", {})
     assert agent.receipts == []
+
+
+def test_reviewer_prompt_states_the_frozen_finding_record_shape():
+    # The frozen v2.7 evidence contract types role_output.reviewer[*].findings as records with
+    # string fields id, severity and text (DEV-ONLY.json record_lists, read by 66 checks as
+    # findings[*].id / .severity / .text) and declares no severity vocabulary. A live reviewer
+    # told only "array of grounded concerns" answered {id, severity, category, description}
+    # (relay-dedup-smoke run 38859334727), which carries no text.
+    from tools.workflow.agents import PROMPTS, role_prompt
+
+    clause = "each an object with string fields id, severity and text"
+    assert clause in PROMPTS["reviewer"]
+    for payload in ({}, {"review_evidence": {"rationale": "r"}, "claim_check": {}}):
+        assert clause in role_prompt("reviewer", payload)
+    assert "description" not in PROMPTS["reviewer"]

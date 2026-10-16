@@ -38,6 +38,13 @@ KNOWN_GOOD_GATEWAY_BODY = 97_600  # Kong kit KNOWN_GOOD_BODY_BYTES
 EXPECTED_MODEL = "claude-sonnet-4-6"
 REVIEWER_KEYS = {"verdict", "binding_hash", "findings"}
 REVIEWER_VERDICTS = {"APPROVE", "REJECT", "NEEDS-INFO"}
+# The frozen v2.7 evidence contract's reviewer finding record (agentic-e2e-injections.DEV-ONLY.json
+# record_lists: path role_output.reviewer[*].findings, fields {id: str, severity: str, text: str},
+# also_elements: str; EVIDENCE_CONTRACT.md reads findings[*].id / .severity / .text). The scorer
+# (simkit.score.record_list_findings) accepts a string element or a record carrying each field as
+# a string; extra keys are not checked and severity has no closed vocabulary. agents.PROMPTS
+# ["reviewer"] names these fields (test_relay_dedup_smoke pins the two together).
+REVIEWER_FINDING_FIELDS = ("id", "severity", "text")
 TOKEN_KEYS = ("input_tokens", "output_tokens")
 EXCERPT_KEYS = ("head", "tail")  # kong_roles.ANSWER_EXCERPT_KEYS: never in the relay audit
 REFUSED_KEYS = (
@@ -53,10 +60,33 @@ REFUSED_KEYS = (
 )
 
 
+def finding_errors(findings):
+    """Errors against the frozen contract's reviewer finding list (REVIEWER_FINDING_FIELDS),
+    exactly as the scorer types it: each element a string, or an object carrying id, severity
+    and text as strings."""
+    if not isinstance(findings, list):
+        return ["findings is not an array"]
+    errors = []
+    for k, item in enumerate(findings):
+        if isinstance(item, str):
+            continue
+        if not isinstance(item, dict):
+            errors.append(f"findings[{k}] is neither an object nor a string")
+            continue
+        for field in REVIEWER_FINDING_FIELDS:
+            if field not in item:
+                errors.append(
+                    f"findings[{k}] lacks the required field {field} (has {sorted(item)})"
+                )
+            elif not isinstance(item[field], str):
+                errors.append(f"findings[{k}].{field} is not a string")
+    return errors
+
+
 def reviewer_schema_errors(answer, binding_hash):
     """Errors against the reviewer output schema (agents.PROMPTS['reviewer'] + the controller's
     exact-keys branch in runner.py): exactly verdict / binding_hash / findings, the copied
-    binding, a findings array of strings."""
+    binding, and findings shaped as the frozen evidence contract reads them (finding_errors)."""
     if not isinstance(answer, dict):
         return ["answer is not an object"]
     errors = []
@@ -66,10 +96,7 @@ def reviewer_schema_errors(answer, binding_hash):
         errors.append(f"verdict {answer.get('verdict')!r} not in {sorted(REVIEWER_VERDICTS)}")
     if answer.get("binding_hash") != binding_hash:
         errors.append("binding_hash is not the supplied binding")
-    findings = answer.get("findings")
-    if not isinstance(findings, list) or not all(isinstance(f, str) for f in findings):
-        errors.append("findings is not an array of strings")
-    return errors
+    return errors + finding_errors(answer.get("findings"))
 
 
 def is_binding(value):
