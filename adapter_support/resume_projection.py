@@ -14,10 +14,11 @@ Mapping choices, each disclosed in ``notes`` when it is applied (D4 records):
   checkpoints; the contract key is singular, so the first resume's is the one projected.
   Field mapping: AT_CHECKPOINT_MAPPING (the controller's own documented mapping).
 * ``symbols.HARNESS_CONTROLLER_PID`` with several controller incarnations (OI-05): the traced
-  root, the parent of the forked incarnation 1 and itself incarnation 2. Accepted only when the
-  controller's own incarnation pids (initial_state ``controller_pid`` plus every resume
-  decision's ``controller_pid``) are exactly the harness-declared ones, each the root or a
-  direct child of it, and every launch parent is one of them.
+  root, the parent of the forked incarnation 1 and itself incarnation 2. Accepted only when
+  every one of the controller's own incarnation pids (initial_state ``controller_pid`` plus
+  every resume decision's ``controller_pid``) is among the harness-declared ones (a subset
+  check: the harness may declare more) and is the root or a direct child of it, and every
+  launch parent is one of the controller's pids.
 * ``process_receipts[*].output_bytes`` of a process the harness killed (OI-04): the byte count
   the harness observed (st_size of the regular file on fd 1 / fd 2, read while the tree was
   frozen, before SIGKILL), labelled ``output_bytes_source: harness_observed_before_kill``.
