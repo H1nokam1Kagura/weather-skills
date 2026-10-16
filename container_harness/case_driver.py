@@ -330,7 +330,7 @@ def prepare(case_id, work):
     case's before_run fixture operations on the source copy are applied here too
     (prepare_before_run_fixture, record prepared["before_run_fixture"]). The record goes to
     /work/prepared-fixture.json; the traced ``run`` passes it to run_case, which re-verifies
-    it (adopt_prepared_fixture, adopt_before_run) and stages and applies nothing."""
+    it (adopt_prepared_fixture, verify_before_run) and stages and applies nothing."""
     work = Path(work)
     root, _ = frozen_root()
     from adapter_support.weather_adapter import WeatherAdapter

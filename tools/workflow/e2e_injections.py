@@ -1545,7 +1545,10 @@ class InjectionHooks:
         self.harness_error = state["harness_error"]
         raised = state["raised"]
         if raised is not None:
-            kind = {"UnsupportedInjection": UnsupportedInjection, "PermissionError": PermissionError}
+            kind = {
+                "UnsupportedInjection": UnsupportedInjection,
+                "PermissionError": PermissionError,
+            }
             if raised["type"] in kind:
                 raise kind[raised["type"]](raised["message"])
             raise HarnessDispatchError(f"{raised['type']}: {raised['message']}")

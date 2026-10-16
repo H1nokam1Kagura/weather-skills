@@ -642,7 +642,7 @@ def prestage_before_run(plan, native_case, prepared):
     ``native_case``: run_case's schedule (substitution_plan native_case), whose indices the
     plan carries. -> the record (prepared["before_run_fixture"]) or None when the case
     schedules no such entry. A delivery that raised is carried in the record, never hidden:
-    adopt_before_run raises it in run_case, before the controller starts."""
+    InjectionHooks.adopt_before_run raises it in run_case, before the controller starts."""
     entries = prestaged_entries(plan)
     if not entries:
         return None
@@ -659,12 +659,13 @@ def prestage_before_run(plan, native_case, prepared):
     }
 
 
-def adopt_before_run(record, plan, injection, prepared):
-    """run_case, before ``prepare``: install the fixture-preparation delivery on the run's
-    InjectionHooks (so the report carries the records exactly as delivered and prepare does
-    not deliver them again), after re-verifying it against the staged source. Refused when
-    the case schedules such an entry and none was prepared: applying it in the run would
-    create paths outside HARNESS_RUN_DIR in the traced process."""
+def verify_before_run(record, plan, prepared):
+    """run_case, right after the fixture is staged or adopted (before any other side effect):
+    the fixture-preparation record re-verified against the staged source, or AdapterRefusal.
+    Refused when the case schedules such an entry and none was prepared: applying it in the
+    run would create paths outside HARNESS_RUN_DIR in the traced process. run_case installs
+    the verified ``delivery`` on its InjectionHooks (adopt_before_run) before ``prepare``, so
+    the report carries the records exactly as delivered and none is delivered again."""
     entries = prestaged_entries(plan)
     if not entries:
         if record is not None:
@@ -691,12 +692,15 @@ def adopt_before_run(record, plan, injection, prepared):
     if tree_hash(source) != record.get("source_after"):
         _refuse("staged source changed since the before_run fixture operations")
     applied = [r for r in delivery.get("records") or [] if r.get("status") == "APPLIED"]
-    if applied and delivery.get("raised") is None and (
-        applied[0].get("before_hash") != record["source_pre"]
-        or applied[-1].get("after_hash") != record["source_after"]
+    if (
+        applied
+        and delivery.get("raised") is None
+        and (
+            applied[0].get("before_hash") != record["source_pre"]
+            or applied[-1].get("after_hash") != record["source_after"]
+        )
     ):
         _refuse("before_run fixture record hashes do not chain from source_pre to the source")
-    injection.adopt_before_run(delivery)
     return copy.deepcopy(record)
 
 

@@ -499,6 +499,9 @@ class WeatherAdapter(Adapter):
             prepared["before_run_fixture"] = fixture_ops.prestage_before_run(
                 fixture_plan, schedule_plan["native_case"], prepared
             )
+        before_run = fixture_ops.verify_before_run(
+            prepared.get("before_run_fixture"), fixture_plan, prepared
+        )
         run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
         # A copy: a before_run FX-LEDGER-APPEND edits seeded["request"] in place (prepare).
         harness_files = {"seeded-ledger.json": copy.deepcopy(seeded)}
@@ -527,14 +530,8 @@ class WeatherAdapter(Adapter):
             chained=shadow_projection.chain(schedule_hooks, shadow_driver)
         )
         if schedule_hooks is not None:
-            # before_run fixture operations were applied in fixture preparation: adopted here
-            # (re-verified, never re-applied); prepare delivers the remaining before_run entries.
-            fixture_ops.adopt_before_run(
-                prepared.get("before_run_fixture"),
-                fixture_plan,
-                schedule_hooks.injection,
-                prepared,
-            )
+            if before_run is not None:  # applied in fixture preparation: adopted, never re-applied
+                schedule_hooks.injection.adopt_before_run(before_run["delivery"])
             schedule_hooks.prepare(seeded["request"], prepared["source"])
         build = functools.partial(
             Controller,
@@ -680,12 +677,12 @@ class WeatherAdapter(Adapter):
             raise AdapterRefusal("prepared harness manifest differs from the staging record")
         source_pre = prepared.get("source_pre") or {}
         # After fixture preparation applied before_run operations, the staged source is their
-        # result (fixture_rereview_projection.adopt_before_run re-verifies the chain from
+        # result (fixture_rereview_projection.verify_before_run re-verifies the chain from
         # source_pre in run_case).
         expected = (prepared.get("before_run_fixture") or {}).get("source_after")
-        if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(
-            layout["source"]
-        ) != (expected or source_pre.get("value")):
+        if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(layout["source"]) != (
+            expected or source_pre.get("value")
+        ):
             raise AdapterRefusal("staged source changed since staging")
         return copy.deepcopy(prepared)
 
