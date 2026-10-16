@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       selector:
-        description: "'admission' | 'substituted' (runnable offline cases) | 'live' (runnable live-role cases; paid) | 'relay-smoke' (ONE synthetic call container->relay->Kong) | 'relay-dedup-smoke' (ONE reviewer-sized dedup-encoded synthetic call; paid, est. ~USD 0.06, relay-capped at USD 1) | comma-separated case ids"
+        description: "'admission' | 'substituted' (runnable offline cases) | 'live' (runnable live-role cases; paid) | 'relay-smoke' (ONE synthetic call container->relay->Kong) | 'relay-dedup-smoke' (ONE reviewer-sized dedup-encoded synthetic call; paid, est. ~USD 0.06, relay-capped at USD 1) | 'relay-role-smoke' (one synthetic call per live role variant, each answer judged by the controller; paid, est. ~USD 0.40, relay-capped at USD 2) | comma-separated case ids"
         required: true
         default: admission
       max_parallel:
@@ -223,8 +223,110 @@ jobs:
           path: relay-dedup-smoke-out
           retention-days: 30
 
+  relay-role-smoke:
+    # ONE synthetic call per LIVE role and payload variant of the 34 live cases (8 calls:
+    # compiler; planner with review_evidence_request; evidence_checker; reviewer with
+    # review_evidence + claim_check; repairer with review_evidence_request after a rejected
+    # review; reviewer with the planner's rationale; verifier; shadow_policy with the E09-P2
+    # note; container_harness/relay_role_smoke.py CALLS says why), claude-sonnet-4-6,
+    # temperature 0, forced tool use, through container -> host relay -> Kong. The REAL
+    # controller builds every payload (frozen synthetic scenario) and judges every answer in
+    # the container with its own acceptance code; the job FAILS unless each answer is accepted.
+    # Estimated cost at the pinned list price ($3 / $15 per MTok, ~3.6 B per input token):
+    # ~USD 0.40 per dispatch (reviewer x2 ~0.07 each at ~21k input tokens, planner and repairer
+    # ~0.08 each at ~18k in / ~1.5k out, evidence_checker ~0.06, compiler / verifier /
+    # shadow_policy ~0.005 each); the relay's summed worst case (bytes as tokens, full output
+    # ceilings) is ~USD 1.35 and ~366k tokens, under the caps below.
+    # Relay caps: 8 requests, USD 2, then the cap probe makes the relay stop itself. Same
+    # isolation, secret scoping, probes, key-absence scan and teardown as relay-smoke.
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.selector == 'relay-role-smoke'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/relay-role-smoke-out
+      RELAY_DIR: /tmp/simkit-relay  # outside every uploaded path; runner context is not allowed in job env
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Runner Kong client + relay offline tests + role smoke tests (no network, no secret)
+        run: |
+          python -m pip install --quiet -r relay/runner_kit/requirements.txt pytest==9.1.1 pyyaml==6.0.3
+          python -B -m pytest -q -p no:cacheprovider \
+            tools/workflow/tests/test_runner_kong_client.py tools/workflow/tests/test_relay_roles.py \
+            container_harness/tests/test_relay_role_smoke.py
+
+      - uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Controller-judge offline tests (real controller, fake worker; no network, no secret)
+        run: |
+          uv sync --group dev
+          uv run pytest -q -p no:cacheprovider tools/workflow/tests/test_relay_role_smoke_controller.py
+
+      - name: Build harness image
+        id: build
+        run: |
+          mkdir -p "$OUT"
+          IMG="simkit-harness-ctl:${GITHUB_SHA::12}"
+          python container_harness/launch.py build --tag "$IMG" \
+            --context "$RUNNER_TEMP/harness-ctx" --record "$OUT/build.json"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Relay-only network (docker --internal + iptables)
+        run: bash container_harness/relay_ci.sh net-up "$RELAY_DIR"
+
+      - name: Start host relay (the ONLY step besides the key scan that sees the Kong key)
+        env:
+          KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
+          RELAY_ROLES: compiler evidence_checker planner repairer reviewer shadow_policy verifier
+          RELAY_MAX_REQUESTS: "8"
+          RELAY_MAX_TOKENS: "2048"
+          RELAY_MAX_TOTAL_TOKENS: "500000"
+          RELAY_BUDGET: "2"
+          RELAY_RUN_SECONDS: "3300"
+        run: bash container_harness/relay_ci.sh relay-start "$RELAY_DIR"
+
+      - name: Role smoke container (probes + one call per live role variant; no key, no exec, SYS_PTRACE only)
+        run: |
+          python container_harness/launch.py relay-smoke --client relay_role_smoke --timeout 3000 \
+            --image "${{ steps.build.outputs.image }}" --out "$OUT" --relay-dir "$RELAY_DIR"
+
+      - name: Key-absence proof (host-side scan of the exported container + artifacts; counts only)
+        if: always()
+        env:
+          KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
+        run: |
+          c=$(cat "$OUT/container.txt" 2>/dev/null || true)
+          python -I container_harness/kong_key_scan.py ${c:+--container "$c"} \
+            --scan-dir "$OUT" --scan-dir "$RELAY_DIR" --out "$OUT/key-scan.json"
+
+      - name: Tear down relay, rules, network and container
+        if: always()
+        run: |
+          c=$(cat "$OUT/container.txt" 2>/dev/null || true)
+          [ -n "$c" ] && docker rm -f "$c" > /dev/null
+          bash container_harness/relay_ci.sh teardown "$RELAY_DIR"
+          mkdir -p "$OUT/relay"
+          cp "$RELAY_DIR"/*.json "$RELAY_DIR"/*.jsonl "$RELAY_DIR"/*.txt "$RELAY_DIR"/relay.std* "$OUT/relay/" 2>/dev/null || true
+          test ! -e "$RELAY_DIR/secret"
+
+      - name: Assert role smoke + summary (every live role's answer accepted by the controller)
+        run: python -I container_harness/relay_role_smoke_report.py "$OUT" "$OUT/relay"
+
+      - name: Upload relay role smoke evidence (no token, no key)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-relay-role-smoke
+          path: relay-role-smoke-out
+          retention-days: 30
+
   admission:
-    if: github.event_name != 'workflow_dispatch' || (github.event.inputs.selector != 'relay-smoke' && github.event.inputs.selector != 'relay-dedup-smoke')
+    if: github.event_name != 'workflow_dispatch' || (github.event.inputs.selector != 'relay-smoke' && github.event.inputs.selector != 'relay-dedup-smoke' && github.event.inputs.selector != 'relay-role-smoke')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
