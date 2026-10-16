@@ -63,9 +63,12 @@ def envelope(**changes):
         "ok": True,
         "model": "claude-sonnet-4-6",
         "response_id": f"msg_fake_{next(RESPONSE_IDS)}",  # the provider's id: unique per call
-        "stop_reason": "end_turn",
+        "stop_reason": "tool_use",  # the forced answer tool (role_schemas)
         "usage": {"input_tokens": 1000, "output_tokens": 100},
-        "text": json.dumps(ANSWER),
+        "text": json.dumps(ANSWER, sort_keys=True),  # role_schemas.answer_text
+        "answer_source": "tool_use.input",
+        "tool_use_count": 1,
+        "content_types": ["tool_use"],
         "via": "1.1 kong/fake",
         "request_id": "req-fake",
         "latency_ms": 12,
@@ -394,6 +397,46 @@ def test_priced_invalid_answer_reports_the_billed_amount(tmp_path, relay_host):
     assert agent.spent == pytest.approx((1000 * 3 + 100 * 15) / 1e6)
 
 
+def test_invalid_answer_audits_usage_and_shape_and_returns_the_bounded_diagnostic(
+    tmp_path, relay_host
+):
+    usage = {"input_tokens": 12_433, "output_tokens": 0}
+    url, _, _ = relay_host(
+        envelope(text="", stop_reason="refusal", content_types=[], usage=usage),
+        envelope(),
+    )
+    agent = client(url)
+    # Forced tool (the default): a refusal stop is named before the empty text.
+    with pytest.raises(Refused, match=r"invalid verifier Kong response: the model refused \("):
+        agent.ask("verifier", PAYLOAD)
+    refusal = agent.last_refusal
+    assert refusal["reason_code"] == "invalid_answer" and refusal["relay_id"]
+    diagnostic = refusal["answer_diagnostic"]
+    assert diagnostic["empty"] is True and diagnostic["stop_reason"] == "refusal"
+    assert diagnostic["output_tokens"] == 0 and diagnostic["head"] == ""
+    (ask,) = [x for x in audit_lines(tmp_path) if x["event"] == "ask"]
+    # The usage the gateway reported is on the line itself (relay_usage reads it from here),
+    # with the non-content metadata; the answer's shape is audited, its text never is.
+    assert ask["usage"] == usage and ask["stop_reason"] == "refusal"
+    assert ask["model_observed"] == "claude-sonnet-4-6" and ask["request_id"] == "req-fake"
+    assert ask["cost_usd"] == pytest.approx(12_433 * 3 / 1e6) == ask["billed_usd"]
+    assert ask["answer_shape"]["empty"] is True and ask["answer_shape"]["content_types"] == []
+    assert not {"head", "tail"} & set(ask["answer_shape"])
+    assert ask["spend"]["output_tokens"] == 0 and ask["spend"]["input_tokens"] == 12_433
+    # a later successful ask clears the refusal record
+    assert agent.ask("verifier", PAYLOAD) == ANSWER and agent.last_refusal is None
+
+
+def test_refusals_other_than_invalid_answers_carry_no_diagnostic(tmp_path, relay_host):
+    url, _, _ = relay_host({"sent": False, "error_type": "TypeError", "error": {}})
+    agent = client(url)
+    with pytest.raises(Refused, match="before sending"):
+        agent.ask("verifier", PAYLOAD)
+    assert agent.last_refusal["answer_diagnostic"] is None
+    (ask,) = [x for x in audit_lines(tmp_path) if x["event"] == "ask"]
+    assert "answer_shape" not in ask and "usage" not in ask
+
+
 def test_one_request_in_flight_per_run(tmp_path, relay_host):
     url, relay, process = relay_host(envelope(), delay=0.5)
     first, second = client(url), client(url)
@@ -601,19 +644,67 @@ def test_dispatch_observation_mirrors_kong_roles(fake_relay):
 needs_kit = pytest.mark.skipif(not KIT_PYTHON.is_file(), reason="Kong kit not installed")
 
 
-@needs_kit
-def test_relay_through_real_worker_to_the_kit_mock_gateway(tmp_path):
+def kit_mock_gateway():
     spec = importlib.util.spec_from_file_location("kit_mock", KIT_ROOT / "scripts/mock_gateway.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     gateway = ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
     threading.Thread(target=gateway.serve_forever, daemon=True).start()
+    return gateway
+
+
+@needs_kit
+def test_relay_forced_tool_answer_through_real_worker_to_the_kit_mock_gateway(tmp_path):
+    gateway = kit_mock_gateway()
     (tmp_path / "proc").mkdir()
     roles = KongRoles(
         Processes(tmp_path / "proc"),
         tmp_path / "ctx",
         budget=1,
         max_tokens=32,
+        session_source="response_id",
+        data_policy_ack=True,
+        worker_env={
+            "KONG_GATEWAY_URL": f"http://127.0.0.1:{gateway.server_address[1]}",
+            "KONG_ANTHROPIC_KEY": "test-key",  # the mock's fixed fake key, not a credential
+            "KONG_ANTHROPIC_API_KEY": "",
+            "KONG_UNIFIED_AI_KEY": "",
+            "KONG_SDK_MAX_RETRIES": "0",
+        },
+    )
+    audit = host.AuditLog(tmp_path / "audit.jsonl")
+    relay = host.Relay(roles, run_id=RUN, token=TOKEN, allowed_roles=["verifier"], audit=audit)
+    (server,) = host.serve(relay, ["127.0.0.1"], 0)
+    try:
+        agent = client(f"http://127.0.0.1:{server.server_address[1]}")
+        # The kit mock answers any forced tool with a fixed input: plumbing only.
+        assert agent.ask("verifier", {"synthetic": True}) == {"location": "Seattle"}
+    finally:
+        server.shutdown()
+        server.server_close()
+        gateway.shutdown()
+    settings = agent.receipts[0]["settings"]
+    assert settings["structured_output"] == "forced_tool"
+    assert settings["answer_source"] == "tool_use.input"
+    assert settings["answer_tool"] == "submit_verifier_answer"
+    (ask,) = [x for x in audit_lines(tmp_path) if x["event"] == "ask"]
+    assert ask["outcome"] == "SUCCESS" and ask["structured_output"] == "forced_tool"
+    assert ask["answer_source"] == "tool_use.input" and ask["stop_reason"] == "tool_use"
+    assert {"tools", "tool_choice"} <= set(ask["sent_keys"])
+    assert ask["settings_sent"]["tool_choice"] == {"type": "tool", "name": "submit_verifier_answer"}
+    assert "test-key" not in (tmp_path / "audit.jsonl").read_text()
+
+
+@needs_kit
+def test_relay_through_real_worker_to_the_kit_mock_gateway(tmp_path):
+    gateway = kit_mock_gateway()
+    (tmp_path / "proc").mkdir()
+    roles = KongRoles(
+        Processes(tmp_path / "proc"),
+        tmp_path / "ctx",
+        budget=1,
+        max_tokens=32,
+        structured_output=None,  # the plain text path: the mock's "OK" is refused
         data_policy_ack=True,
         worker_env={
             "KONG_GATEWAY_URL": f"http://127.0.0.1:{gateway.server_address[1]}",

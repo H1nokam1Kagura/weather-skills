@@ -16,9 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from tools.workflow.contracts import Refused
+from tools.workflow.contracts import Refused, digest
 from tools.workflow.kong_roles import KIT_PYTHON, WORKER_SOURCE, KongOutcomeUnknown, KongRoles
 from tools.workflow.processes import Processes
+from tools.workflow.role_schemas import answer_tool
 
 ROOT = Path(__file__).resolve().parents[3]
 RUNNER_KIT = ROOT / "relay" / "runner_kit"
@@ -198,8 +199,16 @@ class FakeNativeRoute:
             "type": "message",
             "role": "assistant",
             "model": "claude-sonnet-4-6",
-            "content": [{"type": "text", "text": json.dumps(ANSWER)}],
-            "stop_reason": "end_turn",
+            # The forced answer tool (role_schemas.answer_tool) answering through tool_use.
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_fake_1",
+                    "name": "submit_verifier_answer",
+                    "input": ANSWER,
+                }
+            ],
+            "stop_reason": "tool_use",
             "stop_sequence": None,
             "usage": {"input_tokens": 11, "output_tokens": 7},
         }
@@ -243,7 +252,13 @@ def test_runner_client_success_produces_the_kong_receipt(tmp_path):
     assert seen["headers"]["x-kong-key"] == FAKE_KEY
     assert seen["headers"]["x-api-key"] == "kong-managed"
     assert seen["body"]["model"] == "claude-sonnet-4-6" and seen["body"]["max_tokens"] == 64
+    # Structured output reached the wire: one tool, forced by name.
+    assert seen["body"]["tools"] == [answer_tool("verifier", PAYLOAD)]
+    assert seen["body"]["tool_choice"] == {"type": "tool", "name": "submit_verifier_answer"}
     receipt = roles.receipts[-1]
+    assert receipt["settings"]["structured_output"] == "forced_tool"
+    assert receipt["settings"]["answer_source"] == "tool_use.input"
+    assert receipt["stop_reason"] == "tool_use" and receipt["output_hash"] == digest(ANSWER)
     assert receipt["model_observed"] == "claude-sonnet-4-6" and receipt["model_match"] is True
     assert receipt["via"] == "1.1 kong/3.9-fake" and receipt["request_id"] == "fake-request-1"
     assert receipt["gateway_mock"] is True and receipt["transport"] == "kong-native-anthropic"

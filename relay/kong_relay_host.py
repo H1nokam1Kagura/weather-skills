@@ -31,7 +31,8 @@ Controls:
   so the controller's review binding still holds. The receipt and the audit ask line record
   ``transport_encoding`` and ``transport_bytes`` (request body, payload, model-facing sizes
   and the model-facing hash). Every ask line also records ``settings_sent`` / ``sent_keys``
-  (temperature included) as the worker echoed them;
+  (temperature included, and the forced answer tool's ``tools`` / ``tool_choice``) as the
+  worker echoed them, plus ``structured_output`` and the observed ``answer_source``;
 - one request in flight per run (a concurrent request is refused, never queued);
 - spend guard (``SpendGuard``, LIVE-WAVE-BRIEF "Spend guard"): per-run ``--max-requests``,
   ``--max-total-tokens`` and a priced ``--budget`` (USD, list-price estimate). A call that
@@ -96,9 +97,11 @@ from tools.workflow.kong_roles import (  # noqa: E402
     KIT_PYTHON,
     LIVE_ROLE_MAX_TOKENS,
     MIN_HEADROOM_USD,
+    OBSERVED_KEYS,
     PINNED_PRICES,
     KongOutcomeUnknown,
     KongRoles,
+    answer_shape,
 )
 from tools.workflow.relay_roles import (  # noqa: E402
     ASK_PATH,
@@ -116,6 +119,10 @@ from tools.workflow.relay_roles import (  # noqa: E402
     dedup_decode,
 )
 from tools.workflow.review_evidence import text_hash  # noqa: E402
+from tools.workflow.role_schemas import (  # noqa: E402
+    STRUCTURED_OUTPUT,
+    request_overhead_bytes,
+)
 
 RUNNER_KIT = ROOT / "relay" / "runner_kit"
 RUNNER_SDK = {"anthropic": "1.13.0"}  # relay/runner_kit/requirements.txt
@@ -125,6 +132,11 @@ SCHEMA = "simkit-kong-relay-audit/1"
 # Worst-case input bound: a byte-level tokenizer emits at most one token per UTF-8 byte of
 # text, plus the message framing (role markers, system block). 64 is a generous framing bound.
 INPUT_FRAMING_TOKENS = 64
+# Forced tool use (KongRoles structured_output "forced_tool") adds the tool definition (counted
+# at one token per byte, role_schemas.request_overhead_bytes) and the provider's own tool-use
+# system prompt. Anthropic documents that prompt at a few hundred tokens for tool_choice
+# any/tool; 1,024 bounds it with headroom.
+TOOL_USE_SYSTEM_TOKENS = 1024
 # Every opt-in prompt suffix at once: the longest system prompt a role can be sent.
 _ALL_SUFFIXES = {
     "review_evidence_request": True,
@@ -363,6 +375,8 @@ def worst_case(roles, role, payload, user=None):
     prompt = role_prompt(role, _ALL_SUFFIXES)  # the longest system prompt this role can get
     user = json.dumps(payload) if user is None else user
     tokens_in = len(prompt.encode("utf-8")) + len(user.encode("utf-8")) + INPUT_FRAMING_TOKENS
+    if getattr(roles, "structured_output", None) == STRUCTURED_OUTPUT:
+        tokens_in += request_overhead_bytes(role) + TOOL_USE_SYSTEM_TOKENS
     entry = roles.prices.get(model)
     usd = None
     if entry is not None:
@@ -570,6 +584,8 @@ class Relay:
             "temperature_requested": getattr(self.roles, "temperature", None),
             "settings_sent": last.get("settings_sent"),
             "sent_keys": last.get("sent_keys"),
+            "structured_output": last.get("structured_output"),
+            "answer_source": last.get("answer_source"),
         }
 
     def _forward(self, relay_id, role, payload, remote, size, wire):
@@ -628,6 +644,17 @@ class Relay:
             kind = "kong_pre_send" if not sent else "invalid_answer"
             if exc.gate == "resource_guard":
                 kind = "resource_guard"
+            # An answer came back and did not validate: audit what the gateway reported (usage,
+            # stop_reason, ...) and the answer's non-content shape; the bounded excerpt goes
+            # only to the caller (synthetic content), never to this audit.
+            diagnostic = last.get("answer_diagnostic") if kind == "invalid_answer" else None
+            observed = (
+                {"usage": last.get("usage"), "cost_usd": cost}
+                | {k: last.get(k) for k in OBSERVED_KEYS}
+                | {"answer_shape": answer_shape(diagnostic)}
+                if kind == "invalid_answer"
+                else {}
+            )
             self.audit.write(
                 "ask",
                 **base,
@@ -641,10 +668,11 @@ class Relay:
                 reason_code=kind,
                 **classify_fault(kind=kind),
                 wall_ms=round((time.monotonic() - started) * 1000),
+                **observed,
                 charge=charge,
                 spend=self.guard.snapshot(),
             )
-            return 422, {
+            refusal = {
                 "outcome": "REFUSED",
                 "relay_id": relay_id,
                 "sent_to_gateway": sent,
@@ -652,6 +680,9 @@ class Relay:
                 "reason": reason,
                 "reason_code": kind,
             }
+            if diagnostic is not None:
+                refusal["answer_diagnostic"] = diagnostic
+            return 422, refusal
         except Exception as exc:  # anything else: the call may have left, never a success
             _, _, charge = self._charge(worst, None)
             evidence = {k: None for k in UNKNOWN_EVIDENCE}
