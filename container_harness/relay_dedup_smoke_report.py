@@ -14,7 +14,12 @@ on top of them it checks the two things this smoke exists for:
     field the reviewer contract always returns) equals the run's per-run binding, which occurs
     only inside a shared block (never in the role-input section, no top-level copy), and the
     answer validates against the reviewer output schema. No string value of the payload holds
-    text addressed to the model (``no_instruction_text_in_payload``).
+    text addressed to the model (``no_instruction_text_in_payload``);
+(c) structured output was forced and used (``structured_output_forced``): the request carried
+    exactly the predicted answer tool with ``tool_choice`` naming it (receipt ``settings_sent``
+    / ``sent_keys`` / ``settings.answer_tool_hash``), the response stopped on ``tool_use`` and
+    the answer came from the tool_use input (``settings.answer_source``), on the receipt and on
+    the relay audit line alike.
 
 Every check is named and recorded with its observed value; nothing is inferred from an absent
 file. PASS only when every check holds.
@@ -47,6 +52,10 @@ REVIEWER_VERDICTS = {"APPROVE", "REJECT", "NEEDS-INFO"}
 REVIEWER_FINDING_FIELDS = ("id", "severity", "text")
 TOKEN_KEYS = ("input_tokens", "output_tokens")
 EXCERPT_KEYS = ("head", "tail")  # kong_roles.ANSWER_EXCERPT_KEYS: never in the relay audit
+# role_schemas.STRUCTURED_OUTPUT / ANSWER_SOURCE (this report is stdlib only; a test pins them).
+STRUCTURED_OUTPUT = "forced_tool"
+ANSWER_SOURCE = "tool_use.input"
+FORCED_SENT_KEYS = {"tools", "tool_choice"}
 REFUSED_KEYS = (
     "outcome",
     "reason",
@@ -97,6 +106,45 @@ def reviewer_schema_errors(answer, binding_hash):
     if answer.get("binding_hash") != binding_hash:
         errors.append("binding_hash is not the supplied binding")
     return errors + finding_errors(answer.get("findings"))
+
+
+def structured_output_observed(receipt, ask, prediction):
+    """Whether the forced answer tool was sent and answered, from the receipt and the relay
+    audit ask line; returns (ok, the observed fields for the check record)."""
+    settings = receipt.get("settings") or {}
+    sent = receipt.get("settings_sent") or {}
+    tools = sent.get("tools") if isinstance(sent.get("tools"), list) else []
+    observed = {
+        "structured_output": settings.get("structured_output"),
+        "answer_source": settings.get("answer_source"),
+        "answer_tool": settings.get("answer_tool"),
+        "answer_tool_hash_match": settings.get("answer_tool_hash")
+        == prediction.get("answer_tool_hash"),
+        "tool_choice": sent.get("tool_choice"),
+        "tools_sent": [t.get("name") for t in tools if isinstance(t, dict)],
+        "sent_keys_forced": FORCED_SENT_KEYS <= set(receipt.get("sent_keys") or []),
+        "stop_reason": receipt.get("stop_reason"),
+        "audit_structured_output": ask.get("structured_output"),
+        "audit_answer_source": ask.get("answer_source"),
+        "audit_sent_keys_forced": FORCED_SENT_KEYS <= set(ask.get("sent_keys") or []),
+    }
+    name = prediction.get("answer_tool")
+    ok = (
+        isinstance(name, str)
+        and observed["structured_output"] == STRUCTURED_OUTPUT
+        and observed["answer_source"] == ANSWER_SOURCE
+        and observed["answer_tool"] == name
+        and observed["answer_tool_hash_match"] is True
+        and observed["tool_choice"] == {"type": "tool", "name": name}
+        and observed["tool_choice"] == prediction.get("tool_choice")
+        and observed["tools_sent"] == [name]
+        and observed["sent_keys_forced"]
+        and observed["stop_reason"] == "tool_use"
+        and observed["audit_structured_output"] == STRUCTURED_OUTPUT
+        and observed["audit_answer_source"] == ANSWER_SOURCE
+        and observed["audit_sent_keys_forced"]
+    )
+    return ok, observed
 
 
 def is_binding(value):
@@ -347,6 +395,8 @@ def evaluate(out, relay):
             "charge_basis": charge.get("basis"),
         },
     )
+    forced, forced_observed = structured_output_observed(receipt, ask, prediction)
+    check("structured_output_forced", forced, forced_observed)
     leaked = sorted({k for a in audit for k in a if k in base.AUDIT_FORBIDDEN_KEYS})
     check("audit_redacted_fields_only", not leaked, leaked)
     shape = ask.get("answer_shape")
@@ -391,6 +441,8 @@ def evaluate(out, relay):
         "estimated_usd": receipt.get("cost_usd"),
         "cost_basis": receipt.get("cost_basis"),
         "temperature_sent": temperature,
+        "structured_output": settings.get("structured_output"),
+        "answer_source": settings.get("answer_source"),
         "max_tokens": settings.get("max_tokens"),
         "model_observed": receipt.get("model_observed"),
         "stop_reason": receipt.get("stop_reason"),

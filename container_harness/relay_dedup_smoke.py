@@ -26,6 +26,12 @@ puts the field the reviewer contract already returns inside a shared block. Noth
 data asks the model to do anything: the documentation is ordinary technical prose and no
 string value addresses the model (checked: ``instruction_terms``).
 
+(c) structured output is forced at the API: KongRoles sends ONE tool whose input_schema is the
+    reviewer's answer schema (``tools.workflow.role_schemas``) with ``tool_choice`` naming it,
+    and the answer comes from the ``tool_use`` block (receipt ``settings.structured_output`` /
+    ``answer_source``). The prediction names the tool and its hash so the report can check the
+    receipt sent exactly that tool (``structured_output_forced``).
+
 Prints exactly one JSON object on stdout: the same key-absence (names only) and egress probes
 as ``relay_smoke.py`` (reused), the payload/encoding prediction, exactly one ``reviewer`` call
 through RelayRoles (no retries) with its redacted receipt, and the reviewer answer (synthetic).
@@ -437,9 +443,18 @@ def _prompt_and_render():
     return role_prompt, render_model_input
 
 
+def answer_tool_for(payload):
+    """The forced answer tool KongRoles sends for this payload, its tool_choice and hash."""
+    from tools.workflow import role_schemas
+
+    tool = role_schemas.answer_tool(ROLE, payload)
+    return tool, role_schemas.tool_choice(tool), role_schemas.tool_hash(tool)
+
+
 def gateway_body_bytes(system, user, settings_sent):
     """Size of the body the kit worker builds (kong_roles.WORKER_SOURCE): the echoed
-    non-content settings plus system and the single user message, ``json.dumps``-measured as
+    non-content settings (the forced answer tool's ``tools`` / ``tool_choice`` included) plus
+    system and the single user message, ``json.dumps``-measured as
     ``kong_client.check_body_size`` measures it."""
     body = dict(settings_sent or {})
     body["system"] = system
@@ -463,6 +478,7 @@ def predict(payload):
     role_input_value = encoded["payload"] if encoded else payload
     role_input = json.dumps(role_input_value)
     system = role_prompt(ROLE, payload)
+    tool, choice, tool_digest = answer_tool_for(payload)
     shared_texts = {ref: json.dumps(v) for ref, v in shared.items()}
     holders = [ref for ref, text in shared_texts.items() if binding in text]
     holder = holders[0] if len(holders) == 1 else None
@@ -477,6 +493,10 @@ def predict(payload):
         "model_facing_bytes": len(user.encode("utf-8")),
         "model_facing_hash": "sha256:" + hashlib.sha256(user.encode("utf-8")).hexdigest(),
         "system_prompt_hash": "sha256:" + hashlib.sha256(system.encode("utf-8")).hexdigest(),
+        "structured_output": "forced_tool",  # role_schemas.STRUCTURED_OUTPUT (KongRoles default)
+        "answer_tool": tool["name"],
+        "answer_tool_hash": tool_digest,
+        "tool_choice": choice,
         "binding_top_level": "binding_hash" in payload,
         "binding_in_role_input_section": binding in role_input,
         "binding_in_shared_blocks": sum(t.count(binding) for t in shared_texts.values()),
@@ -491,7 +511,13 @@ def predict(payload):
         "gateway_body_bytes_bound": gateway_body_bytes(
             system,
             user,
-            {"model": "claude-sonnet-4-6", "max_tokens": 64000, "extra_body": {"temperature": 0}},
+            {
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 64000,
+                "extra_body": {"temperature": 0},
+                "tools": [tool],
+                "tool_choice": choice,
+            },
         ),
         "gateway_body_known_good": KNOWN_GOOD_GATEWAY_BODY_BYTES,
         "_system": system,

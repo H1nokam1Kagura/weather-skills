@@ -32,6 +32,7 @@ import relay_dedup_smoke_report as report  # noqa: E402
 import relay_smoke_report  # noqa: E402
 
 from relay import kong_relay_host as host  # noqa: E402
+from tools.workflow import role_schemas  # noqa: E402
 from tools.workflow.contracts import Refused  # noqa: E402
 from tools.workflow.kong_roles import PINNED_PRICES, KongRoles  # noqa: E402
 from tools.workflow.relay_roles import (  # noqa: E402
@@ -40,6 +41,7 @@ from tools.workflow.relay_roles import (  # noqa: E402
     RelayRoles,
     dedup_decode,
 )
+from tools.workflow.role_schemas import answer_text  # noqa: E402
 
 WORKFLOW = REPO / ".github" / "workflows" / "simkit-cases.yml"
 NONCE = "0123456789abcdef0123456789abcdef"  # fixed for the offline tests; live runs are random
@@ -243,22 +245,36 @@ class Worker:
             "binding_hash": found[0] if (len(found) == 1 and self.resolve) else other,
             "findings": [],
         }
+        # The worker forces the answer tool KongRoles asked for and answers through it
+        # (kong_roles.WORKER_SOURCE): tools/tool_choice echoed, the tool_use input as text.
+        tool = request["answer_tool"]
+        choice = {"type": "tool", "name": tool["name"]}
         envelope = {
             "sent": True,
             "ok": True,
             "model": "claude-sonnet-4-6",
             "response_id": f"msg_dedup_smoke_{len(self.calls)}",
-            "stop_reason": "end_turn",
+            "stop_reason": "tool_use",
             "usage": {"input_tokens": 17_000, "output_tokens": 90},
-            "text": json.dumps(answer),
+            "text": answer_text(answer),
+            "answer_source": "tool_use.input",
+            "tool_use_count": 1,
             "via": "1.1 kong/fake",
             "request_id": "req-fake",
             "latency_ms": 5,
             "sdk": "anthropic-python 0.0",
             "mock": False,  # recorded as a live receipt so the report's live checks apply
-            "sent_settings": SENT_SETTINGS,
-            "sent_keys": ["extra_body", "max_tokens", "messages", "model", "system"],
-            "content_types": ["text"],
+            "sent_settings": {**SENT_SETTINGS, "tools": [tool], "tool_choice": choice},
+            "sent_keys": [
+                "extra_body",
+                "max_tokens",
+                "messages",
+                "model",
+                "system",
+                "tool_choice",
+                "tools",
+            ],
+            "content_types": ["tool_use"],
         }
         envelope.update(self.override)
         return {"exit_code": 0, "stdout": json.dumps(envelope), "stderr": ""}
@@ -406,7 +422,10 @@ def test_empty_answer_is_named_and_diagnosable(tmp_path, monkeypatch):
     result = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())
     refused = result["refused_answer"]
     assert refused["outcome"] == "REFUSED" and refused["reason_code"] == "invalid_answer"
-    assert "empty answer (stop_reason 'refusal', content [], output_tokens 0)" in refused["reason"]
+    assert (
+        "the model refused (stop_reason 'refusal', content [], output_tokens 0)"
+        in (refused["reason"])
+    )
     diagnostic = refused["answer_diagnostic"]
     assert diagnostic["empty"] is True and diagnostic["stop_reason"] == "refusal"
     assert diagnostic["output_tokens"] == 0 and diagnostic["content_types"] == []
@@ -429,7 +448,15 @@ def test_prose_answer_excerpt_reaches_the_report_never_the_audit(tmp_path, monke
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     opening = "PROSE-OPENING I reviewed the synthetic plan carefully."
     text = opening + " " + "detail " * 200 + "PROSE-CLOSING"
-    override = {"text": text, "usage": {"input_tokens": 12_433, "output_tokens": 300}}
+    # The run-4 shape: prose and no tool_use block (what forced tool use now refuses by name).
+    override = {
+        "text": text,
+        "usage": {"input_tokens": 12_433, "output_tokens": 300},
+        "answer_source": None,
+        "tool_use_count": 0,
+        "stop_reason": "end_turn",
+        "content_types": ["text"],
+    }
     out, relay_dir = record_offline_run(tmp_path, override=override)
     assert report.main(["x", str(out), str(relay_dir)]) == 1
     result = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())
@@ -437,7 +464,8 @@ def test_prose_answer_excerpt_reaches_the_report_never_the_audit(tmp_path, monke
     assert diagnostic["head"].startswith(opening) and len(diagnostic["head"]) == 300
     assert diagnostic["tail"].endswith("PROSE-CLOSING") and len(diagnostic["tail"]) == 300
     assert diagnostic["text_chars"] == len(text) and diagnostic["fenced"] is False
-    assert "Expecting value" in result["refused_answer"]["reason"]
+    assert "no single submit_reviewer_answer tool_use answer" in result["refused_answer"]["reason"]
+    assert result["checks"]["structured_output_forced"]["passed"] is False
     audit = (relay_dir / "relay-audit.jsonl").read_text()
     assert "PROSE-OPENING" not in audit and "PROSE-CLOSING" not in audit
     (ask,) = [json.loads(x) for x in audit.splitlines() if '"event": "ask"' in x]
@@ -575,6 +603,77 @@ def test_report_fails_closed_on_audit_evidence(recorded, check, change):
     assert report.main(["x", str(out), str(relay_dir)]) == 1
     checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
     assert checks[check]["passed"] is False
+
+
+def test_structured_output_forced_check_passes_on_recorded_evidence(recorded):
+    out, relay_dir = recorded
+    report.main(["x", str(out), str(relay_dir)])
+    result = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())
+    observed = result["checks"]["structured_output_forced"]["observed"]
+    assert result["checks"]["structured_output_forced"]["passed"] is True
+    assert observed["tools_sent"] == ["submit_reviewer_answer"]
+    assert observed["tool_choice"] == {"type": "tool", "name": "submit_reviewer_answer"}
+    assert observed["answer_source"] == "tool_use.input" and observed["stop_reason"] == "tool_use"
+    assert result["live_call"]["structured_output"] == "forced_tool"
+    prediction = result["prediction"]
+    tool = role_schemas.answer_tool("reviewer", smoke.build_payload(NONCE))
+    assert prediction["answer_tool_hash"] == role_schemas.tool_hash(tool)
+    assert prediction["structured_output"] == role_schemas.STRUCTURED_OUTPUT
+    assert report.STRUCTURED_OUTPUT == role_schemas.STRUCTURED_OUTPUT
+    assert report.ANSWER_SOURCE == role_schemas.ANSWER_SOURCE
+    # the gateway body (tool included) is still exactly reconstructed and under known-good
+    assert result["live_call"]["bytes"]["gateway_body"] < smoke.KNOWN_GOOD_GATEWAY_BODY_BYTES
+
+
+def _settings(field, value):
+    def change(c):
+        c["receipt"]["settings"][field] = value
+
+    return change
+
+
+def _sent(field, value):
+    def change(c):
+        c["receipt"]["settings_sent"][field] = value
+
+    return change
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        _settings("structured_output", None),
+        _settings("answer_source", "text"),
+        _settings("answer_tool_hash", "sha256:0"),
+        _sent("tool_choice", {"type": "any"}),
+        _sent("tools", []),
+        lambda c: c["receipt"].update(stop_reason="end_turn"),
+        lambda c: c["receipt"].update(sent_keys=["max_tokens", "messages", "model", "system"]),
+        lambda c: c["prediction"].update(answer_tool="submit_other_answer"),
+    ],
+)
+def test_structured_output_forced_fails_closed_on_container_evidence(recorded, change):
+    out, relay_dir = recorded
+    edit(out / report.CONTAINER_JSON, change)
+    assert report.main(["x", str(out), str(relay_dir)]) == 1
+    checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
+    assert checks["structured_output_forced"]["passed"] is False
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda a: a.update(structured_output=None),
+        lambda a: a.update(answer_source="text"),
+        lambda a: a.update(sent_keys=["max_tokens"]),
+    ],
+)
+def test_structured_output_forced_fails_closed_on_audit_evidence(recorded, change):
+    out, relay_dir = recorded
+    edit_audit(relay_dir, change)
+    assert report.main(["x", str(out), str(relay_dir)]) == 1
+    checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
+    assert checks["structured_output_forced"]["passed"] is False
 
 
 def test_report_fails_without_key_scan_or_container_output(recorded):
