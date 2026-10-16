@@ -387,7 +387,8 @@ class KongRoles:
         (the controller binds them), and the relay records the model-facing hash and size."""
         self.last_call = {"role": role, "sent": False, "usage": None, "cost_usd": None}
         if model_input is not None and (not isinstance(model_input, str) or not model_input):
-            raise Refused("model_input must be a non-empty string")
+            # A relay wiring fault, refused before anything is launched or sent.
+            raise Refused("model_input must be a non-empty string", gate="transition")
         if role not in PROMPTS or self.budget - self.spent < MIN_HEADROOM_USD:
             raise Refused("role unavailable or aggregate model budget exhausted")
         if not self.kit_python.is_file():

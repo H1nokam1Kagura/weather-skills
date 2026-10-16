@@ -484,6 +484,15 @@ def test_client_refuses_a_receipt_whose_encoding_differs_from_the_request():
         agent.ask("planner", payload)
 
 
+def test_kong_roles_refuses_an_empty_model_input_before_launch(tmp_path, relay):
+    _, served, process = relay(worker_envelope())
+    for bad in ("", b"bytes", 7):
+        with pytest.raises(Refused) as caught:
+            served.roles.ask("verifier", {"x": 1}, model_input=bad)
+        assert caught.value.gate == "transition"
+    assert process.calls == [] and served.roles.spent == 0
+
+
 def test_plain_body_keys_are_unchanged_when_nothing_repeats():
     assert PLAIN_KEYS == {"role", "payload"}
     assert ENCODED_KEYS - PLAIN_KEYS == {
