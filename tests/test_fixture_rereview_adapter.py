@@ -404,18 +404,17 @@ def test_repo_copy_is_refused_in_prestaged_mode_and_reverified_when_adopted(lab,
 
 
 def test_unsigned_records_keep_the_cases_not_implemented(frozen):
-    # The committed records are signed (D4 review at 0f264d2) but flagged rereview_required
-    # by wave 7, so the committed file leaves them undeclared; the test-local re-signed copy
-    # declares them, and stripping the signatures from THAT copy must make them undeclared
-    # again and the cases NOT_IMPLEMENTED (the signature alone, not the flag, is the cause).
+    # The committed records are signed (re-signed after wave 7, D4 w7 re-review) and declared;
+    # stripping the signatures from the copy must make them undeclared again and the cases
+    # NOT_IMPLEMENTED (the signature alone is the cause).
     unsign = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
     stripped = resigned(**{"CAP-FIXTURE-OP": unsign, "CAP-REREVIEW": unsign})
     for capability in ("CAP-FIXTURE-OP", "CAP-REREVIEW"):
         record = WeatherAdapter().producers["capabilities"][capability]
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
-        assert record["rereview_required"].strip()
-        assert capability not in WeatherAdapter().implemented_capabilities()
+        assert "rereview_required" not in record
+        assert capability in WeatherAdapter().implemented_capabilities()
         assert capability in WeatherAdapter(producers=resigned()).implemented_capabilities()
         assert capability not in WeatherAdapter(producers=stripped).implemented_capabilities()
         assert capability in WeatherAdapter(producers=signed_producers()).implemented_capabilities()

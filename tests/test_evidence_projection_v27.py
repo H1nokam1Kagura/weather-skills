@@ -1636,53 +1636,40 @@ def test_every_frozen_case_stays_not_implemented_unsigned_under_the_real_runner(
 
 
 # The frozen cases the committed producer file admits. A change to this set is a change to what
-# is runnable and must be made here deliberately. Empty since the wave-7 records (coordinator,
-# sub-wave E): every frozen case requires at least one record flagged rereview_required below
-# (CAP-RECEIPTS among them), so nothing is admitted until the batch D4 re-review re-signs them.
-# The 24 cases admitted before (E01-P1, E02-P1, E03-P1, E03-P3, E04-P1, E05-P1, E07-P1, E08-P1,
-# E09-P1, E13-P1, E13-P3, E15-P1, CTL and INJ each) return when the flags are cleared.
-SIGNED_ADMITTED = set()
+# is runnable and must be made here deliberately. 31 since the wave-7 signing (D4 w7 reviews,
+# confirm reviews D4-CONFIRM-W7 / -W7B at b524c40): the 24 offline cases admitted before plus
+# E10-P1, E11-P1 and E14-P1 (CTL and INJ each) and E14-P2-INJ. E14-P2-CTL stays refused
+# (CAP-OWNED-STALE-LOCK-SETUP is not built, OWNER-RULINGS scope / D31).
+SIGNED_ADMITTED = {
+    *(f"DEV-E2E-V2_7-{pair}-{kind}" for pair in (
+        "E01-P1",
+        "E02-P1",
+        "E03-P1",
+        "E03-P3",
+        "E04-P1",
+        "E05-P1",
+        "E07-P1",
+        "E08-P1",
+        "E09-P1",
+        "E10-P1",
+        "E11-P1",
+        "E13-P1",
+        "E13-P3",
+        "E14-P1",
+        "E15-P1",
+    ) for kind in ("CTL", "INJ")),
+    "DEV-E2E-V2_7-E14-P2-INJ",
+}
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
-# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. The nine
-# wave-7 interrupt/resume records (WAVE7-BRIEF.md sub-wave E).
-PENDING_D4_REVIEW = {
-    "CAP-INTERRUPT",
-    "CAP-RESUME",
-    "CAP-RESUME-ATTRIBUTION",
-    "CAP-MIDPROCESS",
-    "CAP-AUTO-RESUME",
-    "CAP-DIAGNOSIS",
-    "CAP-OPERATOR-NOTIFY",
-    "CAP-MECHANICAL-REPAIR",
-    "CAP-DENY-WRITE",
-}
-# Signed records whose producer files changed after their reviewed_commit (wave 7), flagged
+# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Empty since
+# the wave-7 signing.
+PENDING_D4_REVIEW = set()
+# Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
-# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Only
-# CAP-PROFILE kept its signature valid.
-REREVIEW_REQUIRED = {
-    "CAP-RECEIPTS",
-    "CAP-SYMBOLS",
-    "CAP-REASON-MAP",
-    "CAP-ROLE-OUTPUT-SCHEMA",
-    "CAP-BOUND-SOURCES",
-    "CAP-RUN-PROVENANCE",
-    "CAP-LEDGER-SEED",
-    "CAP-HARNESS-OBS",
-    "CAP-SIGNAL-CAPTURE",
-    "CAP-EXHAUSTIVE-WRITES",
-    "CAP-EVIDENCE-CHECKER",
-    "CAP-PRE-REVIEW-GATES",
-    "CAP-OPERATOR-ACTIONS",
-    "CAP-ROLE-SUBSTITUTE",
-    "CAP-SHADOW",
-    "CAP-FIXTURE-OP",
-    "CAP-REREVIEW",
-    "CAP-TRANSITION-REQUEST",
-    "CAP-LEDGER-APPEND",
-    "CAP-OPERATOR-RECORD-SETUP",
-}
+# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty
+# since the wave-7 re-signing.
+REREVIEW_REQUIRED = set()
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
