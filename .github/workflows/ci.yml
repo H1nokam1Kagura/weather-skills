@@ -33,11 +33,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: tests/test_capability_signatures.py diffs each D4 record's
+          # reviewed_commit against HEAD and fails closed on a shallow clone.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
       - run: uv sync --group dev
       - run: uv run pytest
+      # container_harness/ is outside testpaths (its other tests run in simkit-cases.yml's slim
+      # step), but this module needs the controller stack: the CAP-FIXTURE-OP record lists it.
+      - run: uv run pytest -q container_harness/tests/test_case_driver_fixture_ops.py
 
   discover:
     runs-on: ubuntu-latest

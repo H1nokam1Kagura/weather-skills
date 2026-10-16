@@ -1,9 +1,11 @@
 """Pre-review claim gates, evidence checker and frozen reviewer shape (SIMKIT v2.7 D1/D7/D10-D12/D19).
 
 Real Controller and Roles; only a deterministic local process stub stands in for the CLI.
-The reference definition text below is the exact text the frozen v2.7 review snapshots bind
-under 'definition:agrhymet-sos-rolling'. It is supplied to the controller as an explicit
-input file, never read from the frozen package at runtime.
+The reference definition text is the exact text the frozen v2.7 review snapshots bind under
+'definition:agrhymet-sos-rolling'. Its ONE copy is the pinned input file the container case
+driver also passes (container_harness/pinned/definitions/agrhymet-sos-rolling.txt, LF-only by
+.gitattributes). It is supplied to the controller as an explicit input file, never read from
+the frozen package at runtime.
 """
 
 import copy
@@ -15,28 +17,25 @@ from pathlib import Path
 import pytest
 
 from tools.workflow import agents, claim_gates, review_evidence, runner
-from tools.workflow.contracts import Refused, expected_plan
+from tools.workflow.contracts import (
+    Refused,
+    digest,
+    expected_plan,
+    plan_version_hash,
+    validate_plan,
+)
 from tools.workflow.evaluation import FixtureRoles
 from tools.workflow.tests.test_workflow import GOAL, request
 
-REFERENCE_DEFINITION = "\n".join(
-    [
-        "id: agrhymet-sos-rolling",
-        "time_basis: rolling daily approximation, not calendar dekads",
-        "trigger: At least 25 mm accumulated across the first 10 consecutive days.",
-        "confirmation: At least 20 mm across the next 20 consecutive days, beginning 10 days "
-        "after the candidate onset date.",
-        "required_complete_window_days: 30",
-        "first_eligible_onset_date: 2025-09-01",
-        "last_eligible_onset_date: 2025-12-02",
-        "date_reasoning: A candidate at day t requires t through t+29 inclusive. December 2 plus "
-        "29 days is December 31. Input end date and last eligible onset date are different "
-        "fields with different meanings.",
-        "plot_scale: September 1 through December 2 is valid for this fixture. It does not "
-        "truncate the rainfall input. Do not treat the input end date as a user-mandated "
-        "plot-scale endpoint.",
-    ]
+REFERENCE_DEFINITION_FILE = (
+    Path(__file__).resolve().parents[3]
+    / "container_harness"
+    / "pinned"
+    / "definitions"
+    / "agrhymet-sos-rolling.txt"
 )
+# Bytes, not text mode: newline translation would change the bound hash.
+REFERENCE_DEFINITION = REFERENCE_DEFINITION_FILE.read_bytes().decode("utf-8")
 # The source hash every frozen v2.7 probe citation carries for this source.
 FROZEN_SOURCE_HASH = "sha256:3db5ec77bcb91aa6eacb9e7e5d09c385e75461866ac369a9ac940df8ab763aa6"
 # Every distinct quote the frozen DEV-ONLY planner/repairer outputs and injection patches cite
@@ -429,6 +428,120 @@ def test_non_verbatim_quote_routes_to_repair_without_checker_or_reviewer(tmp_pat
         "C-WINDOW"
         in [call for call in stub.calls if call["role"] == "repairer"][0]["payload"]["failure"]
     )
+
+
+def test_claims_only_repair_is_a_new_plan_version_everywhere(tmp_path, monkeypatch):
+    """E13-P1-INJ: a repair that restates only the claims is a new plan version. Its hash
+    (plan + claims) differs from v1 in plan_versions, plan_validations, claim_checks, the
+    checker payload, the review envelope and the active approval, so v1 and v2 never collide."""
+
+    def t19(claims):
+        claims[0]["citations"][0]["quote"] = FROZEN_NON_VERBATIM_QUOTES[0]
+
+    stub = Stub(planner=patched_planner(t19))
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    planned = [call for call in stub.calls if call["role"] == "planner"]
+    assert len(planned) == 1
+    v1_claims = reference_claims()
+    t19(v1_claims)
+    v1 = plan_version_hash(expected_plan(GOAL), v1_claims)
+    v2 = plan_version_hash(expected_plan(GOAL), reference_claims())
+    assert v1 != v2 and digest(expected_plan(GOAL)) not in (v1, v2)
+    context = c.context
+    assert [v["plan_hash"] for v in context["plan_versions"]] == [v1, v2]
+    assert [v["source"]["role"] for v in context["plan_validations"]] == ["planner", "repairer"]
+    assert [v["plan_hash"] for v in context["plan_validations"]] == [v1, v2]
+    first, second = records(c)
+    assert (first["plan_hash"], second["plan_hash"]) == (v1, v2)
+    (checked,) = [call for call in stub.calls if call["role"] == "evidence_checker"]
+    assert checked["payload"]["plan_hash"] == v2
+    (reviewed,) = [call for call in stub.calls if call["role"] == "reviewer"]
+    assert reviewed["payload"]["review_evidence"]["plan_hash"] == v2
+    assert c.plan_hash() == v2 == context["active_approval"]["plan_hash"]
+    # A claims-only change keeps the steps: the review binding still covers the claims.
+    assert c.current_binding() == c.binding
+
+
+def output_path_planner(payload, n):
+    """E04-P1-INJ's planner patch: an output_path outside the run directory."""
+    value = default_planner(payload, n)
+    value["plan"]["steps"][0]["args"]["output_path"] = "../shared_outputs/onset.nc"
+    return value
+
+
+def test_refused_planner_plan_is_recorded_once_and_names_the_argument(tmp_path, monkeypatch):
+    """E04-P1-INJ (max_repairs 0, as frozen): a planner plan refused while its envelope is
+    unpacked still leaves exactly one FAIL plan validation, naming the offending argument; the
+    original refusal stands (plan_validation, never repair_exhausted); no repair, checker or
+    reviewer."""
+
+    planner = output_path_planner
+    stub = Stub(planner=planner)
+    c = make_controller(tmp_path, monkeypatch, stub, max_repairs=0)
+    with pytest.raises(Refused) as caught:
+        c._run()
+    assert caught.value.gate == "plan_validation"
+    assert "bounded plan repair exhausted" not in str(caught.value)
+    assert c.repairs_used == 0 and "repair_attempts" not in c.context
+    (record,) = c.context["plan_validations"]
+    assert record["verdict"] == "FAIL" and record["parser_accepted"] is False
+    assert record["failed_fields"] == ["plan.steps[0].args.output_path"]
+    assert record["source"] == {"role": "planner", "occurrence": 1}
+    injected = planner({}, 1)
+    assert record["plan_hash"] == plan_version_hash(injected["plan"], injected["claims"])
+    assert "plan_versions" not in c.context and c.plan is None
+    assert c.state == "GOAL_CHECKED"
+    assert [call["role"] for call in stub.calls].count("planner") == 1
+    assert not {"repairer", "evidence_checker", "reviewer"} & {r["role"] for r in stub.calls}
+
+
+def refusal(plan):
+    """The refusal validate_plan raises for ``plan`` against the goal."""
+    with pytest.raises(Refused) as caught:
+        validate_plan(plan, GOAL)
+    return caught.value
+
+
+def test_refused_planner_plan_routes_to_repair_within_the_allowance(tmp_path, monkeypatch):
+    """E07-P1 spec basis: plan validation may trigger repair. A planner plan refused by
+    validation (with review evidence on) is sent to the repairer once, within max_repairs 1;
+    the refused plan's FAIL is recorded once, the repaired plan is validated and proceeds."""
+    stub = Stub(planner=output_path_planner)
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    assert stub.count("planner") == 1 and stub.count("repairer") == 1
+    (repaired,) = [call for call in stub.calls if call["role"] == "repairer"]
+    refused = output_path_planner({}, 1)
+    assert repaired["payload"]["prior_plan"] == refused["plan"]
+    assert repaired["payload"]["failure"] == str(refusal(refused["plan"]))
+    assert c.repairs_used == 1
+    assert [a["status"] for a in c.context["repair_attempts"]] == ["returned"]
+    assert c.context["repair_attempts"][0]["trigger_gate"] == "plan_validation"
+    first, second = c.context["plan_validations"]
+    assert first["verdict"] == "FAIL" and first["source"] == {"role": "planner", "occurrence": 1}
+    assert first["failed_fields"] == ["plan.steps[0].args.output_path"]
+    assert first["plan_hash"] == plan_version_hash(refused["plan"], refused["claims"])
+    assert second["verdict"] == "PASS" and second["source"]["role"] == "repairer"
+    assert [v["role"] for v in c.context["plan_versions"]] == ["repairer"]
+    assert c.plan == expected_plan(GOAL)
+    assert stub.count("reviewer") == 1
+
+
+def test_refused_planner_envelope_is_not_a_plan_validation(tmp_path, monkeypatch):
+    """A refusal of the envelope or claims (not the plan) records no plan validation."""
+
+    def planner(payload, n):
+        value = default_planner(payload, n)
+        value["unexpected"] = True
+        return value
+
+    c = make_controller(tmp_path, monkeypatch, Stub(planner=planner))
+    with pytest.raises(Refused, match="unexpected or missing fields"):
+        c._run()
+    assert c.context.get("plan_validations", []) == []
 
 
 def test_non_verbatim_quote_with_no_repair_budget_never_reaches_reviewer(tmp_path, monkeypatch):

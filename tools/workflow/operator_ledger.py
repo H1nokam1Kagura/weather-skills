@@ -15,8 +15,9 @@ Frozen shapes (casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json):
 
 Records are checkpointed in ``controller.context``, each one is also written atomically as its own
 evidence file, and a dispatch event keyed by ``record_id`` is emitted when dispatch evidence mode
-is on. ``operator_actions`` exists only once the native channel exists or a claim was observed:
-an absent ledger never yields a fabricated empty list.
+is on. ``operator_actions`` and ``transition_requests`` exist (possibly empty) once the native
+channel exists, or once a claim or request was observed: an absent ledger never yields a
+fabricated empty list.
 """
 
 import hashlib
@@ -133,6 +134,9 @@ def open_channel(controller, ledger_path, run_id=None):
     }
     controller.context["operator_channel"] = channel
     controller.context["operator_actions"] = []
+    # The transition interface is open from here on: zero requests is observed, so a run that
+    # received none emits [] (never an absent stream), like operator_actions.
+    controller.context.setdefault("transition_requests", [])
     return channel
 
 

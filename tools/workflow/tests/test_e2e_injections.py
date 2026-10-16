@@ -153,3 +153,35 @@ def test_error_does_not_become_success():
         h("after_tool", {"skill": "verify-run", "process": {"stdout": "not json"}}, None)
     assert h.coverage()["errors"]
     assert not h.coverage()["applied"]
+
+
+def test_source_hash_symbol_resolves_against_the_bound_sources():
+    """E13-P3-INJ: an injected claim citing HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling
+    resolves through claim_gates.resolve_source_symbol to the controller's bound source, with
+    no symbol table passed in (role_substitution passes none)."""
+    symbol = "HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling"
+    sources = [
+        {"source_id": "definition:agrhymet-sos-rolling", "source_hash": "sha256:" + "a" * 64},
+        {"source_id": "documentation:onset-date", "source_hash": "sha256:" + "b" * 64},
+    ]
+    patch = [{"op": "replace", "path": "/0/args/title", "value": symbol}]
+    h = hooks(spec(payload=patch))
+    controller = SimpleNamespace(
+        paths={}, context={"review_evidence": {"sources": sources}}, root=Path("run")
+    )
+    answer = {"steps": [{"args": {"title": "good"}}], "final": ["map"]}
+    h("after_role", {"role": "planner", "answer": answer}, controller)
+    assert answer["steps"][0]["args"]["title"] == "sha256:" + "a" * 64
+    assert h.coverage()["applied"] == [0]
+    # Before the review sources are bound, the bound reference definition answers.
+    bound = {"definition_source": {**sources[0], "path": "x", "symbol": "s"}}
+    early = SimpleNamespace(paths={}, context={"review_evidence": bound})
+    assert hooks().resolve({"h": symbol}, early) == {"h": "sha256:" + "a" * 64}
+    # A symbol naming no bound source, or no controller sources at all, is never delivered.
+    with pytest.raises(UnsupportedInjection, match="unresolved trusted symbol"):
+        hooks().resolve("HARNESS_SOURCE_HASH:definition.unknown", controller)
+    with pytest.raises(UnsupportedInjection, match="unresolved trusted symbol"):
+        hooks().resolve(symbol, SimpleNamespace(paths={}))
+    # An explicitly supplied symbol still wins.
+    explicit = InjectionHooks({"id": "t", "injection_schedule": []}, symbols={symbol: "given"})
+    assert explicit.resolve(symbol, controller) == "given"

@@ -102,6 +102,19 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
+def plan_version_hash(plan, claims=None):
+    """The controller-assigned identity of one plan version (EC v2_5.plan_symbols).
+
+    A plan version is the plan together with the claims envelope it was emitted with, so a
+    claims-only repair is a new version with its own hash (claim_checks are one per plan
+    version). Without review evidence a plan carries no claims and its version hash is the
+    plan's own digest. Every writer and reader of a plan_hash uses this one function.
+    """
+    if claims is None:
+        return digest(plan)
+    return digest({"plan": plan, "plan_claims": claims})
+
+
 FIELDS = {
     "task",
     "bbox",
@@ -283,7 +296,17 @@ def plan_failed_fields(plan, goal):
                 continue
             missing = object()
             for field in sorted(set(step) | set(target)):
-                if step.get(field, missing) != target.get(field, missing):
+                value, wanted_value = step.get(field, missing), target.get(field, missing)
+                if value == wanted_value:
+                    continue
+                if field == "args" and isinstance(value, dict) and isinstance(wanted_value, dict):
+                    # Name each offending argument, not only the args map that holds it.
+                    failed += [
+                        f"plan.steps[{index}].args.{name}"
+                        for name in sorted(set(value) | set(wanted_value), key=str)
+                        if value.get(name, missing) != wanted_value.get(name, missing)
+                    ]
+                else:
                     failed.append(f"plan.steps[{index}].{field}")
     return failed
 

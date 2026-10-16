@@ -24,6 +24,25 @@ Frozen v2.7 shapes produced (EVIDENCE_CONTRACT.json ``structures``):
     direct child processes of the controller alive at once), ``harness_observations.shell_launches``
     (successful execve of a shell binary by any tree process), ``signal_capture_exhaustive``,
     ``tracer_status``.
+  * ``harness_observations.data_fetch_attempts``: network attempts of the tree. Every connect()
+    and every destination-addressed sendto/sendmsg/sendmmsg message whose address family is not
+    local (AF_UNIX/AF_LOCAL and AF_NETLINK, plus the AF_UNSPEC disconnect, are excluded),
+    whether or not it succeeded (containers run with ``--network none``, so attempts fail).
+    DECISION: the host relay endpoint (``relay_endpoint`` in harness_status, live-role
+    containers only) is the role transport, not a data fetch, when the CONTROLLER process
+    itself connects to it; those calls are listed in ``harness_notes.role_transport_connects``.
+    A relay connect by any other tree process counts as a fetch attempt. Missing when network
+    syscalls were not in the traced set (``trace_network`` absent from harness_status), when
+    io_uring was set up (IORING_OP_CONNECT bypasses syscall tracing) or when a destination
+    address could not be read.
+  * ``harness_observations.min_free_ram_while_running_gib``: NOT trace-derived. The minimum
+    MemAvailable (GiB, /proc/meminfo: the container VM figure, owner reading UC-07_memory) over
+    the harness RAM sampler's readings taken while the traced tree was running (strictly
+    between ``run_start`` and ``run_end``). The sampler (``ram_sampler.py``) is a root process
+    the entry shell starts outside the traced tree. Missing when the sampler did not finish
+    cleanly, no reading falls inside the run window, or the readings leave a gap longer than
+    ``RAM_MAX_GAP_S`` (at either end or between readings): a sampled minimum is claimed only
+    when the whole run is covered. A post-exit reading is never used.
 
 Missing stays missing: if the tracer died, a trace file is truncated, the harness did not
 finish, or the trace is structurally inconsistent, every trace-derived field is ABSENT (listed
@@ -60,7 +79,13 @@ TRACE_FIELDS = (
     "controller_trace.signalled_pids",
     "harness_observations.max_concurrent_children",
     "harness_observations.shell_launches",
+    "harness_observations.data_fetch_attempts",
 )
+RAM_FIELD = "harness_observations.min_free_ram_while_running_gib"
+RAM_MAX_GAP_S = 2.0
+NETWORK_SYSCALLS = {"connect", "sendto", "sendmsg", "sendmmsg"}
+# Address families that never leave the container: not a data fetch.
+LOCAL_FAMILIES = {"AF_UNIX", "AF_LOCAL", "AF_NETLINK"}
 
 LINE = re.compile(r"^(\d+)\.(\d{1,9}) (.*)$")
 SYSCALL = re.compile(
@@ -160,6 +185,93 @@ def parse_int(token):
         return None
 
 
+def _skip_quoted(text, i):
+    """Index just past the C string literal starting at text[i] == '"'."""
+    i += 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == '"':
+            return i + 1
+        i += 1
+    return i
+
+
+def braced_after(text, marker):
+    """Every balanced ``{...}`` directly following ``marker`` outside quoted strings."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] == '"':
+            i = _skip_quoted(text, i)
+            continue
+        if text.startswith(marker + "{", i):
+            j, depth = i + len(marker), 0
+            while j < n:
+                if text[j] == '"':
+                    j = _skip_quoted(text, j)
+                    continue
+                if text[j] == "{":
+                    depth += 1
+                elif text[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            out.append(text[i + len(marker) : j + 1])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def marker_values(text, marker):
+    """Every value that follows ``marker`` outside quoted strings: a balanced ``{...}``, or the
+    bare token up to the next ',' / '}' (``NULL``, ``0x7ffd...``)."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] == '"':
+            i = _skip_quoted(text, i)
+            continue
+        if text.startswith(marker, i):
+            j = i + len(marker)
+            if text.startswith("{", j):
+                (value,) = braced_after(text[i:], marker)[:1] or [text[j:]]
+            else:
+                k = j
+                while k < n and text[k] not in ",}":
+                    k += 1
+                value = text[j:k].strip()
+            out.append(value)
+            i = j + max(len(value), 1)
+            continue
+        i += 1
+    return out
+
+
+def sockaddr(token):
+    """strace sockaddr text -> (family, destination). (None, None) for NULL; ("UNREADABLE",
+    raw) when the argument is not a decoded sockaddr (e.g. a bare pointer)."""
+    if token is None or token.strip() in ("NULL", ""):
+        return None, None
+    token = token.strip()
+    m = re.match(r"\{sa_family=(AF_\w+)", token)
+    if not m:
+        return "UNREADABLE", token[:120]
+    family = m.group(1)
+    port = re.search(r"sin6?_port=htons\((\d+)\)", token)
+    dest = token[:120]
+    if family == "AF_INET":
+        addr = re.search(r'inet_addr\("([^"]*)"\)', token)
+        if addr and port:
+            dest = f"{addr.group(1)}:{port.group(1)}"
+    elif family == "AF_INET6":
+        addr = re.search(r'inet_pton\(AF_INET6, "([^"]*)"', token)
+        if addr and port:
+            dest = f"[{addr.group(1)}]:{port.group(1)}"
+    return family, dest
+
+
 class Event:
     __slots__ = (
         "ts",
@@ -250,6 +362,10 @@ def parse_trace_file(path, tid):
                     Event(ts, tid, seg, lineno, "delivery", name=dm.group(1), raw_args=dm.group(2))
                 )
                 continue
+            gm = GROUP_STOP.match(rest)  # interrupt broker SIGSTOP (no syscall; see the end)
+            if gm:
+                segments[-1].append(Event(ts, tid, seg, lineno, "group_stop", name=gm.group(1)))
+                continue
             sm = SYSCALL.match(rest)
             if sm:
                 segments[-1].append(
@@ -334,6 +450,9 @@ def analyze(outdir, run_dir=None):
         "pid_reuse": [],
         "clone_flags_of_note": [],
         "exec_failures": [],
+        "role_transport_connects": [],
+        "local_socket_calls": 0,
+        "sockets_created": {},
         "semantics": {
             "signal_zero": "excluded from signalled_pids (no signal is sent); listed here",
             "failed_signal_attempts": "included in signalled_pids (the controller issued them)",
@@ -343,6 +462,12 @@ def analyze(outdir, run_dir=None):
             "(clone/vfork/fork return or first event, to exit)",
             "shell_launches": "successful execve of a shell binary by any tree process",
             "process_tree": "creating parent from clone events, never the reassigned parent",
+            "data_fetch_attempts": "connect() and destination-addressed send calls of any "
+            "tree process to a non-local address family, successful or not; the controller's "
+            "own connects to the declared relay endpoint are role transport (listed in "
+            "role_transport_connects), not data fetches",
+            "min_free_ram_while_running_gib": "minimum MemAvailable over harness RAM sampler "
+            "readings strictly inside the traced run window; whole-run coverage required",
         },
     }
     missing = {}
@@ -504,6 +629,10 @@ def analyze(outdir, run_dir=None):
     add_harness(tracer_pid, entry_pid, parse_int(status.get("tracer_pgid")), "strace")
     decoy = parse_int(status.get("decoy_pid"))
     add_harness(decoy, entry_pid, parse_int(status.get("decoy_pgid")), "decoy")
+    sampler = parse_int(status.get("ram_sampler_pid"))
+    add_harness(sampler, entry_pid, parse_int(status.get("ram_sampler_pgid")), "ram-sampler")
+    broker_pid = parse_int(status.get("interrupt_broker_pid"))  # absent unless a stop case
+    add_harness(broker_pid, entry_pid, parse_int(status.get("interrupt_broker_pgid")), BROKER)
 
     # ---- global replay in time order
     all_events = []
@@ -568,6 +697,9 @@ def analyze(outdir, run_dir=None):
     shell_launches = 0
     io_uring_ok = False
     unresolved_targets = []
+    fetch_attempts, unreadable_destinations = [], []
+    unresolved_creations = []
+    relay_endpoint = status.get("relay_endpoint") or None
 
     def canon(path):
         """Resolve symlinked DIRECTORY components (not the final one) via the link table."""
@@ -612,6 +744,9 @@ def analyze(outdir, run_dir=None):
 
     def add(path, how, ev, pkey, kind="file"):
         if path is None:
+            # A creating call whose path cannot be resolved (relative path, unknown base):
+            # the created set would silently lose an entry, so created_paths becomes MISSING.
+            unresolved_creations.append({"pid": ev.tid, "call": how, "line": ev.line})
             return
         if path.startswith(PSEUDO_FS):
             notes["excluded_pseudo_fs"].append({"path": path, "call": how})
@@ -641,6 +776,10 @@ def analyze(outdir, run_dir=None):
         links.pop(path, None)
 
     def move(src, dst, how, ev, pkey):
+        if src is None:  # entries moved with an unknown source cannot be named
+            unresolved_creations.append({"pid": ev.tid, "call": how + "(source)", "line": ev.line})
+            add(dst, how, ev, pkey)
+            return
         moved = sorted(p for p in exists if p == src or p.startswith(src + "/"))
         was = dst in exists
         for p in moved:
@@ -660,6 +799,51 @@ def analyze(outdir, run_dir=None):
             links[dst] = links.pop(src)
 
     deliveries, kills, analyzer_errors = [], [], []
+
+    def record_network(ev, pkey):
+        """data_fetch_attempts: one entry per non-local destination a call addresses."""
+        a, name = ev.args, ev.name
+        if name == "connect":
+            addrs = [a[1] if len(a) > 1 else "<absent>"]
+        elif name == "sendto":
+            addrs = [a[4] if len(a) > 4 else None]
+        else:  # sendmsg / sendmmsg: every msg_name; NULL means a connected socket
+            message = a[1].strip() if len(a) > 1 else ""
+            addrs = marker_values(message, "msg_name=")
+            undecoded = not message.startswith("[" if name == "sendmmsg" else "{")
+            if name == "sendmmsg" and not undecoded:
+                # every message's header must be decoded (an abbreviated array hides some)
+                vlen = parse_int(a[2]) if len(a) > 2 else None
+                headers = len(marker_values(message, "msg_hdr="))
+                undecoded = vlen is None or headers < vlen or "...]" in message
+            if not undecoded and not addrs:
+                undecoded = True  # a decoded msghdr always prints msg_name
+            if undecoded:
+                addrs = ["<undecoded msghdr>"]
+        sender = procs[pkey].pid
+        for token in addrs:
+            family, dest = sockaddr(token)
+            if family is None:
+                continue  # NULL destination: a connected socket (its connect is counted)
+            if family == "AF_UNSPEC" and name == "connect":
+                continue  # dissolves a datagram association; addresses nothing
+            entry = {
+                "pid": sender,
+                "tid": ev.tid,
+                "call": name,
+                "family": family,
+                "destination": dest,
+                "result": "ok" if ev.ok else f"{ev.ret} {ev.tail}".strip()[:80],
+                "ts_ns": ev.ts,
+            }
+            if family == "UNREADABLE":
+                unreadable_destinations.append(entry)
+            elif family in LOCAL_FAMILIES:
+                notes["local_socket_calls"] += 1
+            elif relay_endpoint and dest == relay_endpoint and sender == root_tid:
+                notes["role_transport_connects"].append(entry)
+            else:
+                fetch_attempts.append(entry)
 
     def replay_one(ev, pkey):
         nonlocal shell_launches, io_uring_ok
@@ -763,6 +947,13 @@ def analyze(outdir, run_dir=None):
                 for other in procs[pkey].threads:  # threads share the fs struct
                     if other in procs:
                         cwd[other] = newcwd
+            return
+        if name in NETWORK_SYSCALLS:
+            record_network(ev, pkey)
+            return
+        if name == "socket" and a:
+            family = a[0].split("|")[0]
+            notes["sockets_created"][family] = notes["sockets_created"].get(family, 0) + 1
             return
         if name in SIGNAL_SYSCALLS:
             record_signal(
@@ -993,6 +1184,10 @@ def analyze(outdir, run_dir=None):
             missing["filesystem_snapshot.created_paths"] = (
                 "io_uring_setup succeeded: writes may bypass the trace"
             )
+        elif unresolved_creations:
+            missing["filesystem_snapshot.created_paths"] = (
+                f"{len(unresolved_creations)} creating call(s) with an unresolvable path"
+            )
         else:
             evidence["filesystem_snapshot"]["created_paths"] = sorted({r["path"] for r in created})
         signalled = sorted({t for at in attempts for t in at["target_pids"]})
@@ -1025,6 +1220,25 @@ def analyze(outdir, run_dir=None):
             procs, root_key
         )
         evidence["harness_observations"]["shell_launches"] = shell_launches
+        fetch_gap = None
+        if status.get("trace_network") != "1":
+            fetch_gap = "network syscalls were not in the traced set"
+        elif io_uring_ok:
+            fetch_gap = "io_uring_setup succeeded: connects may bypass the trace"
+        elif unreadable_destinations:
+            fetch_gap = "network destination address unreadable in the trace"
+        if fetch_gap:
+            missing["harness_observations.data_fetch_attempts"] = fetch_gap
+        else:
+            evidence["harness_observations"]["data_fetch_attempts"] = len(fetch_attempts)
+    notes["network_attempts"] = fetch_attempts[:50]
+    notes["unresolved_creations"] = unresolved_creations[:20]
+    notes["unreadable_network_destinations"] = unreadable_destinations[:20]
+    ram, ram_reason, notes["ram_sampling"] = min_free_ram(outdir, status)
+    if ram is None:
+        missing[RAM_FIELD] = ram_reason
+    else:
+        evidence["harness_observations"]["min_free_ram_while_running_gib"] = ram
     evidence["harness_observations"]["signal_capture_exhaustive"] = bool(
         complete and not unresolved_targets
     )
@@ -1039,6 +1253,10 @@ def analyze(outdir, run_dir=None):
         ]
     notes["created_outside_run_dir"] = outside
     notes["created_then_deleted"] = sorted({r["path"] for r in created if r["deleted_later"]})
+    if broker_engaged(outdir, status):  # harness_stop_controller cases only
+        apply_interrupt_broker(
+            outdir, status, evidence, missing, notes, procs, root_key, kills, deliveries, complete
+        )
     evidence["missing"] = missing
     evidence["harness_notes"] = notes
     evidence["detail"] = {
@@ -1067,6 +1285,51 @@ def analyze(outdir, run_dir=None):
 
 def roots_has(roots, tid):
     return tid in roots
+
+
+def min_free_ram(outdir, status):
+    """-> (GiB or None, missing reason, note). Only readings strictly inside (run_start,
+    run_end) count: a reading before the tree started or after it exited is never the
+    running minimum."""
+    path = Path(outdir) / "ram_samples.txt"
+    note = {
+        "source": "harness ram_sampler.py: /proc/meminfo MemAvailable (container VM figure)",
+        "file": path.name,
+        "max_gap_s": RAM_MAX_GAP_S,
+    }
+    try:
+        start, end = float(status["run_start"]), float(status["run_end"])
+    except (KeyError, ValueError):
+        return None, "run window not recorded (run_start/run_end)", note
+    if not path.exists():
+        return None, "no harness RAM sampler readings", note
+    readings, header, footer, errors = [], None, False, []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("#start"):
+            header = line
+        elif line.startswith("#end"):
+            footer = True
+        elif line.startswith("#"):
+            errors.append(line[:200])
+        elif line.strip():
+            parts = line.split()
+            try:
+                readings.append((float(parts[0]), int(parts[1])))
+            except (IndexError, ValueError):
+                errors.append(line[:200])
+    note.update(header=header, readings=len(readings), errors=errors[:10])
+    if header is None or not footer or errors:
+        return None, "harness RAM sampler did not finish cleanly", note
+    inside = sorted(r for r in readings if start < r[0] < end)
+    note["readings_in_run_window"] = len(inside)
+    if not inside:
+        return None, "no RAM reading while the tree was running", note
+    gaps = [inside[0][0] - start, end - inside[-1][0]]
+    gaps += [b[0] - a[0] for a, b in zip(inside, inside[1:], strict=False)]
+    note["largest_gap_s"] = round(max(gaps), 3)
+    if max(gaps) > RAM_MAX_GAP_S:
+        return None, f"RAM readings leave a {max(gaps):.3f}s gap in the run window", note
+    return min(kib for _, kib in inside) / 1024**2, None, note
 
 
 def record_signal(
@@ -1178,6 +1441,212 @@ def max_concurrent(procs, root_key):
     return best
 
 
+# ------------------------------------------------------------------ interrupt broker (Wave 7 D)
+# harness_stop_controller cases only. interrupt_broker.py (root, untraced, a child of the entry
+# shell) freezes and SIGKILLs controller incarnation 1 -- a fork, a direct child of the traced
+# root -- and its descendants, and records the facts in $OUT/interrupt_broker.json. Here:
+#   * max_concurrent_children counts the direct children of the traced root AND of every
+#     incarnation the broker declared (a verified stop) and the trace confirms (that pid is a
+#     direct child of the traced root, alive at the request, and its trace ends "killed by
+#     SIGKILL"); the incarnations themselves are not tool children. Without this, incarnation-1
+#     tools are invisible and the fork counts as one child (V23-CONCURRENCY would pass falsely).
+#     A declared stop the trace does not confirm, a refused/failed stop, an absent/unfinished
+#     record, or a ready broker that received NO stop request (the kill fell back in-process,
+#     or no stop was delivered: the incarnation is unconfirmed) makes the field MISSING, never
+#     a guess.
+#   * broker signals (si_pid = broker pid, outside the tree) are harness actions: never in
+#     signalled_pids (they are no kill-family attempt of the tree), listed in harness_notes
+#     (interrupt_broker_deliveries, sigkill_deaths_by_interrupt_broker).
+#   * the broker's facts (output_bytes harness-observed via /proc before the kill, OI-04) go to
+#     evidence[BROKER_EVIDENCE_KEY], each stop with its trace confirmation.
+# A case with no stop scheduled has none of the status keys and no record: nothing here runs.
+BROKER = "interrupt-broker"
+BROKER_RECORD = "interrupt_broker.json"
+BROKER_SCHEMA = "simkit.interrupt-broker/1"
+BROKER_EVIDENCE_KEY = "harness_interrupt_broker"
+CONCURRENCY_FIELD = "harness_observations.max_concurrent_children"
+NO_STOP_REASON = (
+    "interrupt broker engaged but it received no stop request: the controller incarnation "
+    "is unconfirmed (an in-process kill, or no stop delivered), so its children cannot be "
+    "counted"
+)
+# strace's group-stop line ("--- stopped by SIGSTOP ---"): the process is frozen, no syscall.
+GROUP_STOP = re.compile(r"^--- stopped by (SIG\w+) ---$")
+
+
+def broker_engaged(outdir, status):
+    return (
+        status.get("interrupt_broker_needed") in ("1", "error")
+        or "interrupt_broker_pid" in status
+        or (Path(outdir) / BROKER_RECORD).exists()
+    )
+
+
+def read_broker_record(outdir, status):
+    """-> (record or None, reason)."""
+    if status.get("interrupt_broker_needed") == "error":
+        return (
+            None,
+            "interrupt broker need check failed: whether the case stops a controller is unknown",
+        )
+    path = Path(outdir) / BROKER_RECORD
+    if not path.exists():
+        return None, "interrupt broker record absent"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"interrupt broker record unreadable: {exc}"[:200]
+    if not isinstance(record, dict) or record.get("schema") != BROKER_SCHEMA:
+        return None, "interrupt broker record has an unknown schema"
+    if not isinstance(record.get("stops"), list):
+        return None, "interrupt broker record has no stops list"
+    if record.get("complete") is not True:
+        return None, "interrupt broker did not finish (record incomplete)"
+    if record.get("tracer_check") != "TracerPid":
+        return (
+            None,
+            f"interrupt broker ran without the TracerPid check ({record.get('tracer_check')})",
+        )
+    if status.get("interrupt_broker_needed") == "1" and status.get("interrupt_broker_ready") != "1":
+        return None, "interrupt broker channel was not ready: an incarnation kill is unobserved"
+    if status.get("interrupt_broker_exit", "0") != "0":
+        return None, f"interrupt broker exited {status.get('interrupt_broker_exit')}"
+    spid = parse_int(status.get("interrupt_broker_pid"))
+    if spid is not None and record.get("broker_pid") != spid:
+        return None, "interrupt broker record pid differs from interrupt_broker_pid"
+    return record, None
+
+
+def _concurrency_missing(evidence, missing, reason):
+    evidence["harness_observations"].pop("max_concurrent_children", None)
+    missing.setdefault(CONCURRENCY_FIELD, reason)
+
+
+def max_concurrent_over_incarnations(procs, root_key, incarnation_keys):
+    """Most direct children of the traced root or of a confirmed incarnation alive at once; an
+    incarnation is not itself a child (same tie rule as max_concurrent)."""
+    parents = {root_key, *incarnation_keys}
+    points = []
+    for p in procs.values():
+        if p.creator in parents and p.key not in parents:
+            if p.start is not None and p.end is not None:
+                points.append((p.start, 1))
+                points.append((p.end, -1))
+    points.sort(key=lambda x: (x[0], x[1]))
+    best = cur = 0
+    for _, d in points:
+        cur += d
+        best = max(best, cur)
+    return best
+
+
+def apply_interrupt_broker(
+    outdir, status, evidence, missing, notes, procs, root_key, kills, deliveries, complete
+):
+    broker_pid = parse_int(status.get("interrupt_broker_pid"))
+    section = {
+        "source": "harness interrupt_broker.py (root, untraced, outside the traced tree): "
+        "harness actions, never controller signals; output_bytes harness-observed via /proc "
+        "before SIGKILL",
+        "status": "OK",
+        "broker_pid": broker_pid,
+        "record": BROKER_RECORD,
+        "stops": [],
+        "incarnation_pids": [],
+        "harness_killed_pids": [],
+    }
+    record, reason = read_broker_record(outdir, status)
+    tree_pids = {p.pid for p in procs.values()}
+    if record is not None and broker_pid in tree_pids:
+        record, reason = None, "interrupt broker pid is also a traced pid"
+    if record is None:
+        section.update(status="UNAVAILABLE", reason=reason)
+        _concurrency_missing(evidence, missing, reason)
+        evidence[BROKER_EVIDENCE_KEY] = section
+        return
+    section["output_bytes_basis"] = record.get("output_bytes_basis")
+    killed_at = {}  # pid -> [ts_ns of "killed by SIGKILL"]
+    for k in kills:
+        if k["signal"] == "SIGKILL":
+            killed_at.setdefault(k["pid"], []).append(k["ts_ns"])
+    incarnations, problems, harness_kills = [], [], []  # harness_kills: (pid, requested_at)
+    for i, stop in enumerate(record["stops"]):
+        out = dict(stop) if isinstance(stop, dict) else {"raw": stop}
+        pid, req = out.get("pid"), out.get("requested_at_ns")
+        if not isinstance(req, int):
+            req = None
+        claimed = [p for p in out.get("killed") or [] if isinstance(p, int)]
+        confirmed_kills = sorted(
+            p for p in claimed if req is not None and any(t >= req for t in killed_at.get(p, []))
+        )
+        cands = [
+            p
+            for p in procs.values()
+            if p.pid == pid
+            and p.creator == root_key
+            and req is not None
+            and p.start is not None
+            and p.start <= req
+            and (p.end is None or req <= p.end)
+        ]
+        confirmed = bool(out.get("verified")) and len(cands) == 1 and pid in confirmed_kills
+        out.update(
+            trace_confirmed=confirmed,
+            trace_incarnation_key=cands[0].key if len(cands) == 1 else None,
+            trace_confirmed_kills=confirmed_kills,
+            trace_unconfirmed_kills=sorted(set(claimed) - set(confirmed_kills)),
+        )
+        section["stops"].append(out)
+        harness_kills += [(p, req) for p in confirmed_kills]
+        if not out.get("verified"):
+            problems.append(f"stop {i} (pid {pid}) refused by the broker")
+            continue
+        if not out.get("ok"):
+            problems.append(f"stop {i} (pid {pid}) failed in the broker")
+        if confirmed:
+            incarnations.append(cands[0].key)
+        else:
+            problems.append(f"stop {i} (pid {pid}) not confirmed by the trace")
+    section["incarnation_pids"] = [procs[k].pid for k in incarnations]
+    section["harness_killed_pids"] = sorted({p for p, _ in harness_kills})
+
+    def by_broker(k):
+        return any(k["pid"] == p and k["ts_ns"] >= req for p, req in harness_kills)
+
+    deaths = notes.get("sigkill_deaths_without_attempt", [])
+    notes["sigkill_deaths_without_attempt"] = [k for k in deaths if not by_broker(k)]
+    notes["sigkill_deaths_by_interrupt_broker"] = [k for k in deaths if by_broker(k)]
+    notes["interrupt_broker_deliveries"] = [
+        d for d in deliveries if broker_pid is not None and d["si_pid"] == broker_pid
+    ]
+    notes["semantics"]["max_concurrent_children"] = (
+        "direct child processes of the controller (the traced root) and of every "
+        "broker-declared, trace-confirmed incarnation alive at once; the incarnations "
+        "themselves are not counted"
+    )
+    notes["semantics"]["interrupt_broker"] = (
+        "broker SIGSTOP/SIGKILL (si_pid = broker, outside the tree) are harness actions, "
+        "never controller signals: not in signalled_pids"
+    )
+    if not record["stops"]:
+        # An engaged broker means a harness_stop_controller case: the controller ran as a
+        # forked incarnation. With no stop request that incarnation is unconfirmed (the kill
+        # fell back to the traced root, or no stop was delivered), so the root-only count would
+        # treat the fork as one child and hide its tools: MISSING, never that count.
+        section["status"] = "NO_STOP_REQUESTED"
+        section["reason"] = NO_STOP_REASON
+        _concurrency_missing(evidence, missing, NO_STOP_REASON)
+    elif problems:
+        section["status"] = "UNCONFIRMED"
+        section["problems"] = problems
+        _concurrency_missing(evidence, missing, "; ".join(problems)[:300])
+    elif complete and "max_concurrent_children" in evidence["harness_observations"]:
+        evidence["harness_observations"]["max_concurrent_children"] = (
+            max_concurrent_over_incarnations(procs, root_key, incarnations)
+        )
+    evidence[BROKER_EVIDENCE_KEY] = section
+
+
 def main(argv):
     import argparse
 
@@ -1201,6 +1670,12 @@ def main(argv):
             "max_concurrent_children", "MISSING"
         ),
         "shell_launches": evidence["harness_observations"].get("shell_launches", "MISSING"),
+        "data_fetch_attempts": evidence["harness_observations"].get(
+            "data_fetch_attempts", "MISSING"
+        ),
+        "min_free_ram_while_running_gib": evidence["harness_observations"].get(
+            "min_free_ram_while_running_gib", "MISSING"
+        ),
         "missing": evidence["missing"],
         "created_outside_run_dir": evidence["harness_notes"]["created_outside_run_dir"],
     }

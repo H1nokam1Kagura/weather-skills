@@ -21,7 +21,25 @@ STATUS = {
     "tracer_pgid": ENTRY,
     "root_cwd": "/work/run",
     "run_dir": "/work/run",
+    # entry.sh: network syscalls are in the strace set; the run window brackets every event.
+    "trace_network": 1,
+    "run_start": "1699999999.900000000",
+    "run_end": "1700000001.000000000",
 }
+GIB = 1024**2  # kiB per GiB (MemAvailable is in kiB)
+
+
+def ram_lines(start=1699999999.85, end=1700000001.05, step=0.2, kib=8 * GIB, footer=True):
+    """A clean harness RAM sampler file covering [start, end]."""
+    lines, t = ["#start interval=0.2"], start
+    while t <= end + 1e-9:
+        lines.append(f"{t:.6f} {kib}")
+        t += step
+    if footer:
+        lines.append("#end")
+    return lines
+
+
 BASELINE = [
     "/",
     "/work",
@@ -48,6 +66,7 @@ class Capture:
         self.stderr = ""
         self.baseline = list(BASELINE)
         self.links = {"/lib": "usr/lib"}
+        self.ram = ram_lines()  # None: the sampler wrote no file
 
     def __call__(self, tid, text):
         self.t += 1000
@@ -68,6 +87,8 @@ class Capture:
             "".join(f"{k}\t{v}\n" for k, v in self.links.items()), encoding="utf-8"
         )
         (self.dir / "root.stderr").write_text(self.stderr, encoding="utf-8")
+        if self.ram is not None:
+            (self.dir / "ram_samples.txt").write_text("\n".join(self.ram) + "\n", encoding="utf-8")
         return A.analyze(self.dir, self.status.get("run_dir"))
 
 
@@ -377,6 +398,282 @@ def test_unfinished_resumed_lines_are_merged(tmp_path):
     cap(ROOT, "<... openat resumed>) = 3</work/run/slow>")
     ev = cap.exit(ROOT).write()
     assert ev["filesystem_snapshot"]["created_paths"] == ["/work/run/slow"]
+
+
+def test_confined_case_run_creates_nothing_outside_the_run_dir(tmp_path):
+    """The container case layout after the write-allow-list fix: case root staged before the
+    baseline, controller caches under run/scratch. Every created path is under run/, which is
+    what the frozen all_under(created_paths, HARNESS_RUN_DIR) needs."""
+    cap = Capture(tmp_path)
+    cap.status.update(run_dir="/work/case/run", root_cwd="/opt/ctl")
+    cap.baseline += [
+        "/opt",
+        "/opt/ctl",
+        "/work/case",
+        "/work/case/run",
+        "/work/case/source",
+        "/work/case/source/source.zarr",
+        "/work/case/harness",
+        "/work/case/harness/manifest.json",
+        "/work/prepared-fixture.json",
+    ]
+    run = "/work/case/run"
+    lines = [
+        'execve("/usr/local/bin/python", ["python", "-m", "case_driver"], 0x7f /* 9 vars */) = 0',
+        'openat(AT_FDCWD</opt/ctl>, "/work/prepared-fixture.json", O_RDONLY|O_CLOEXEC)'
+        " = 3</work/prepared-fixture.json>",
+        f'mkdir("{run}/artifacts", 0777) = 0',
+        f'mkdir("{run}/scratch", 0777) = 0',
+        f'mkdir("{run}/scratch/matplotlib", 0777) = 0',
+        f'openat(AT_FDCWD</opt/ctl>, "{run}/scratch/tmpab12cd", O_RDWR|O_CREAT|O_EXCL, 0600)'
+        f" = 3<{run}/scratch/tmpab12cd>",
+        f'unlink("{run}/scratch/tmpab12cd") = 0',
+        f'openat(AT_FDCWD</opt/ctl>, "{run}/checkpoint.json.tmp", O_WRONLY|O_CREAT|O_TRUNC, 0666)'
+        f" = 3<{run}/checkpoint.json.tmp>",
+        f'rename("{run}/checkpoint.json.tmp", "{run}/checkpoint.json") = 0',
+    ]
+    for line in lines:
+        cap(ROOT, line)
+    child(cap, ROOT, 101)
+    cap(101, f'mkdir("{run}/scratch/xdg-data", 0777) = 0')
+    cap.exit(101)
+    ev = cap.exit(ROOT).write()
+    created = ev["filesystem_snapshot"]["created_paths"]
+    assert created and all(p.startswith(run + "/") for p in created)
+    assert ev["harness_notes"]["created_outside_run_dir"] == []
+    # The pre-fix layout (bookkeeping and HOME caches inside the trace) is reported outside.
+    cap = start(Capture(tmp_path / "old"))
+    cap.status.update(run_dir=run)
+    cap.baseline += ["/work/case", run, "/home", "/home/runner"]
+    cap(ROOT, 'mkdir("/work/case/harness", 0777) = 0')
+    cap(ROOT, 'mkdir("/home/runner/.config", 0777) = 0')
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_notes"]["created_outside_run_dir"] == [
+        "/home/runner/.config",
+        "/work/case/harness",
+    ]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'openat(5, "x.txt", O_WRONLY|O_CREAT, 0666) = 3',  # undecorated dirfd, no -y result
+        'mkdirat(7, "d", 0777) = 0',
+        'renameat(7, "a", AT_FDCWD</work/run>, "b") = 0',  # unknown source directory
+    ],
+)
+def test_unresolvable_creating_call_makes_created_paths_missing(tmp_path, line):
+    cap = start(Capture(tmp_path))
+    cap(ROOT, 'openat(AT_FDCWD</work/run>, "ok.txt", O_WRONLY|O_CREAT, 0666) = 3</work/run/ok.txt>')
+    cap(ROOT, line)
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_observations"]["tracer_status"]["status"] == "OK"
+    assert "created_paths" not in ev["filesystem_snapshot"]  # absent, never a short list
+    assert ev["missing"]["filesystem_snapshot.created_paths"] == (
+        "1 creating call(s) with an unresolvable path"
+    )
+    assert ev["harness_notes"]["unresolved_creations"]
+    assert ev["controller_trace"]["signalled_pids"] == []  # other fields unaffected
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "sendmsg(3<socket:[1]>, 0x7ffd1234, 0) = 5",  # whole msghdr undecoded
+        'sendmsg(3<socket:[1]>, {msg_name=0x7ffd5678, msg_namelen=16, msg_iov=[{iov_base="a", '
+        "iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 1",
+        "sendmmsg(3<socket:[1]>, 0x7ffd9abc, 2, 0) = 2",
+        'sendmmsg(3<socket:[1]>, [{msg_hdr={msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="a", '
+        "iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=1}], 2, 0) = 2",
+    ],
+)
+def test_undecoded_sendmsg_destination_makes_fetch_attempts_missing(tmp_path, line):
+    cap = start(Capture(tmp_path))
+    cap(ROOT, line)
+    ev = cap.exit(ROOT).write()
+    assert "data_fetch_attempts" not in ev["harness_observations"]  # never a quiet 0
+    assert ev["missing"]["harness_observations.data_fetch_attempts"] == (
+        "network destination address unreadable in the trace"
+    )
+
+
+def test_connected_sendmsg_with_null_destination_is_not_an_attempt(tmp_path):
+    cap = start(Capture(tmp_path))
+    cap(
+        ROOT,
+        'sendmsg(3<socket:[1]>, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="a", '
+        "iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 1",
+    )
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_observations"]["data_fetch_attempts"] == 0
+    assert ev["missing"] == {}
+
+
+RELAY = "172.30.0.1:18080"
+NET_LINES = [
+    (101, "socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_TCP) = 3<socket:[4242]>"),
+    (
+        101,
+        'connect(3<socket:[4242]>, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("93.184.216.34")}, 16) = -1 ENETUNREACH (Network is unreachable)',
+    ),
+    (
+        101,
+        'connect(4<socket:[4243]>, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)',
+    ),
+    (
+        101,
+        'connect(5<socket:[4244]>, {sa_family=AF_UNSPEC, sa_data="\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0"}, 16) = 0',
+    ),
+    (
+        101,
+        'sendto(6<socket:[4245]>, "\\x12\\x34"..., 33, MSG_NOSIGNAL, {sa_family=AF_INET6, sin6_port=htons(53), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "2001:4860:4860::8888", &sin6_addr), sin6_scope_id=0}, 28) = -1 ENETUNREACH (Network is unreachable)',
+    ),
+    # connected socket: no destination; quoted data that merely looks like an address
+    (101, 'sendto(7<socket:[4246]>, "msg_name={sa_family=AF_INET, x", 30, 0, NULL, 0) = 30'),
+    (
+        101,
+        'sendmsg(8<socket:[4247]>, {msg_name={sa_family=AF_INET, sin_port=htons(123), sin_addr=inet_addr("10.0.0.1")}, msg_namelen=16, msg_iov=[{iov_base="msg_name={sa_family=AF_INET6", iov_len=28}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = -1 ENETUNREACH (Network is unreachable)',
+    ),
+    (
+        101,
+        'sendmmsg(9<socket:[4248]>, [{msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("8.8.8.8")}, msg_namelen=16, msg_iov=[{iov_base="a", iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=1}, {msg_hdr={msg_name={sa_family=AF_UNIX, sun_path="/dev/log"}, msg_namelen=110, msg_iov=[{iov_base="b", iov_len=1}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=1}], 2, 0) = 2',
+    ),
+    (
+        101,
+        "sendto(10<socket:[4249]>, {{nlmsg_len=20, nlmsg_type=RTM_GETADDR, nlmsg_flags=NLM_F_REQUEST|NLM_F_DUMP, nlmsg_seq=1, nlmsg_pid=0}, {ifa_family=AF_UNSPEC}}, 20, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 20",
+    ),
+]
+
+
+def network_capture(tmp_path):
+    cap = start(Capture(tmp_path))
+    child(cap, ROOT, 101)
+    for tid, line in NET_LINES:
+        cap(tid, line)
+    cap.exit(101)
+    return cap
+
+
+def test_data_fetch_attempts_count_non_local_destinations(tmp_path):
+    ev = network_capture(tmp_path).exit(ROOT).write()
+    assert ev["missing"] == {}
+    # connect AF_INET, sendto AF_INET6, sendmsg AF_INET, sendmmsg's AF_INET message: failed
+    # attempts count; AF_UNIX / AF_NETLINK / AF_UNSPEC / NULL destinations do not.
+    assert ev["harness_observations"]["data_fetch_attempts"] == 4
+    notes = ev["harness_notes"]
+    assert [(a["call"], a["family"], a["destination"]) for a in notes["network_attempts"]] == [
+        ("connect", "AF_INET", "93.184.216.34:443"),
+        ("sendto", "AF_INET6", "[2001:4860:4860::8888]:53"),
+        ("sendmsg", "AF_INET", "10.0.0.1:123"),
+        ("sendmmsg", "AF_INET", "8.8.8.8:53"),
+    ]
+    assert notes["network_attempts"][0]["result"].startswith("-1 ENETUNREACH")
+    assert notes["local_socket_calls"] == 3
+    assert notes["sockets_created"] == {"AF_INET": 1}
+
+
+def test_quiet_run_reports_zero_fetch_attempts_only_when_network_was_traced(tmp_path):
+    ev = start(Capture(tmp_path)).exit(ROOT).write()
+    assert ev["harness_observations"]["data_fetch_attempts"] == 0
+    cap = start(Capture(tmp_path / "untraced-net"))
+    cap.status.pop("trace_network")
+    ev = cap.exit(ROOT).write()
+    assert "data_fetch_attempts" not in ev["harness_observations"]  # absent, never 0
+    assert ev["missing"] == {
+        "harness_observations.data_fetch_attempts": "network syscalls were not in the traced set"
+    }
+
+
+def test_relay_connect_is_role_transport_only_from_the_controller(tmp_path):
+    cap = start(Capture(tmp_path))
+    cap.status["relay_endpoint"] = RELAY
+    relay = (
+        "connect(3<socket:[77]>, {sa_family=AF_INET, sin_port=htons(18080), "
+        'sin_addr=inet_addr("172.30.0.1")}, 16) = 0'
+    )
+    cap(ROOT, relay)
+    child(cap, ROOT, 101)
+    cap(101, relay)  # a tool reaching the relay is a fetch attempt
+    cap.exit(101)
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_observations"]["data_fetch_attempts"] == 1
+    notes = ev["harness_notes"]
+    assert [a["pid"] for a in notes["role_transport_connects"]] == [ROOT]
+    assert [a["pid"] for a in notes["network_attempts"]] == [101]
+
+
+@pytest.mark.parametrize(
+    "line,reason",
+    [
+        (
+            "connect(3<socket:[5]>, 0x7ffd1234, 16) = -1 EFAULT (Bad address)",
+            "network destination address unreadable in the trace",
+        ),
+        (
+            "io_uring_setup(4, 0x7ffc) = 3<anon_inode:[io_uring]>",
+            "io_uring_setup succeeded: connects may bypass the trace",
+        ),
+    ],
+)
+def test_unobservable_network_makes_fetch_attempts_missing(tmp_path, line, reason):
+    cap = start(Capture(tmp_path))
+    cap(ROOT, line)
+    ev = cap.exit(ROOT).write()
+    assert "data_fetch_attempts" not in ev["harness_observations"]
+    assert ev["missing"]["harness_observations.data_fetch_attempts"] == reason
+
+
+def test_min_free_ram_is_the_running_minimum_of_harness_readings(tmp_path):
+    cap = start(Capture(tmp_path))
+    lines = ram_lines()
+    # a dip while running counts; a lower reading after run_end (post-exit) never does
+    lines.insert(3, f"1700000000.300000 {3 * GIB}")
+    lines.insert(-1, f"1700000001.500000 {1 * GIB}")
+    cap.ram = lines
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_observations"]["min_free_ram_while_running_gib"] == 3.0
+    sampling = ev["harness_notes"]["ram_sampling"]
+    assert sampling["readings_in_run_window"] >= 5 and sampling["largest_gap_s"] <= 0.21
+
+
+def test_min_free_ram_is_independent_of_the_tracer(tmp_path):
+    cap = start(Capture(tmp_path))
+    cap.status["harness_killed_tracer"] = 1
+    ev = cap.exit(ROOT).write()
+    assert ev["harness_observations"]["tracer_status"]["status"] == "TRACER_KILLED"
+    assert ev["harness_observations"]["min_free_ram_while_running_gib"] == 8.0
+
+
+@pytest.mark.parametrize(
+    "ram,status,reason",
+    [
+        (None, None, "no harness RAM sampler readings"),
+        (ram_lines(footer=False), None, "harness RAM sampler did not finish cleanly"),
+        (
+            ram_lines()[:-1] + ["#error OSError: boom", "#end"],
+            None,
+            "harness RAM sampler did not finish cleanly",
+        ),
+        (ram_lines(start=1700000003.0, end=1700000004.0), None, "no RAM reading while"),
+        (  # the sampler stalled: its readings stop 2.5 s before the tree exited
+            ram_lines(end=1700000000.5),
+            {"run_end": "1700000003.000000000"},
+            "RAM readings leave a 2.",
+        ),
+        (ram_lines(), {"run_end": None}, "run window not recorded"),
+    ],
+)
+def test_min_free_ram_missing_unless_the_whole_run_is_covered(tmp_path, ram, status, reason):
+    cap = start(Capture(tmp_path))
+    cap.ram = ram
+    for key, value in (status or {}).items():
+        if value is None:
+            cap.status.pop(key)
+        else:
+            cap.status[key] = value
+    ev = cap.exit(ROOT).write()
+    assert "min_free_ram_while_running_gib" not in ev["harness_observations"]
+    assert ev["missing"][A.RAM_FIELD].startswith(reason)
 
 
 def test_pinned_inputs_match_their_authorities():

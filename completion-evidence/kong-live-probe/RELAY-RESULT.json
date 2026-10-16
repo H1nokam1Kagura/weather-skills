@@ -1,0 +1,106 @@
+{
+  "schema": "kong-relay-probe/1",
+  "generated_utc": "2026-10-13T14:47:10.198112+00:00",
+  "owner_ruling": "container_route_ruling_2026-10-13.live_roles",
+  "payload_classification": "synthetic, Not Sensitive",
+  "role": "verifier",
+  "attempts": 1,
+  "retries": 0,
+  "relay": {
+    "run_id": "relay-run-8efe0a95ca0f",
+    "port": 62409,
+    "binds": [
+      "127.0.0.1"
+    ],
+    "allowed_roles": [
+      "verifier"
+    ],
+    "model": "claude-sonnet-4-6",
+    "max_body_bytes": 65536,
+    "max_requests": 1,
+    "interpreter": "Kong kit .venv python"
+  },
+  "container": {
+    "name": "simkit-relay-smoke-6913721c",
+    "image": "python:3.12-slim",
+    "image_id": "sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9",
+    "network": "bridge",
+    "privileged": false,
+    "cap_drop": [
+      "ALL"
+    ],
+    "mounts": [],
+    "env_names_inspected": [
+      "GPG_KEY",
+      "LANG",
+      "PATH",
+      "PYTHON_SHA256",
+      "PYTHON_VERSION",
+      "SIMKIT_RELAY_MODEL",
+      "SIMKIT_RELAY_RUN_ID",
+      "SIMKIT_RELAY_TOKEN",
+      "SIMKIT_RELAY_URL"
+    ],
+    "credential_like_env_names_inspected": [],
+    "files_copied": [
+      "tools/workflow/__init__.py",
+      "tools/workflow/contracts.py",
+      "tools/workflow/profiles.py",
+      "tools/workflow/relay_roles.py",
+      "client.py"
+    ],
+    "removed": false
+  },
+  "outcome": "HARNESS_ERROR",
+  "harness_error": "TimeoutExpired: Command '['docker', 'start', '-a', 'simkit-relay-smoke-6913721c']' timed out after -564.4689999999828 seconds",
+  "relay_exit_code": 0,
+  "relay_audit": [
+    {
+      "schema": "simkit-kong-relay-audit/1",
+      "ts": "2026-10-13T14:47:12.691303+00:00",
+      "event": "relay_start",
+      "run_id": "relay-run-8efe0a95ca0f",
+      "port": 62409,
+      "binds": [
+        "127.0.0.1"
+      ],
+      "allowed_roles": [
+        "verifier"
+      ],
+      "model": "claude-sonnet-4-6",
+      "max_body_bytes": 65536,
+      "max_requests": 1,
+      "pid": 46468,
+      "python": "3.12.10"
+    },
+    {
+      "schema": "simkit-kong-relay-audit/1",
+      "ts": "2026-10-13T15:02:36.771566+00:00",
+      "event": "ask",
+      "run_id": "relay-run-8efe0a95ca0f",
+      "relay_id": "b2582aea-f711-4fb8-9629-a6ad8b2ba0cd",
+      "remote": "127.0.0.1",
+      "role": "verifier",
+      "body_bytes": 260,
+      "http_status": 502,
+      "outcome": "UNKNOWN",
+      "invocation_id": "97bf3caf-2840-4f67-8cad-6d626899a4df",
+      "wall_ms": 900469,
+      "status": null,
+      "via": null,
+      "request_id": null,
+      "error_type": null,
+      "hint": null,
+      "reason": "worker process failed: Refused"
+    },
+    {
+      "schema": "simkit-kong-relay-audit/1",
+      "ts": "2026-10-13T15:02:37.057454+00:00",
+      "event": "relay_stop",
+      "run_id": "relay-run-8efe0a95ca0f",
+      "reason": "max_requests reached",
+      "asks": 1
+    }
+  ],
+  "relay_stderr_bytes": 0
+}

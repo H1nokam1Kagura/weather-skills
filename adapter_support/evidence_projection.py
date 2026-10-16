@@ -15,7 +15,9 @@ Rules (WAVE3-BRIEF rule 1, owner ruling D4):
 * Write and whole-tree signal evidence come only from the container harness (OWNER-RULINGS
   container_route_ruling_2026-10-13): its trace analyzer writes a harness-observations file
   (``simkit.container-harness-evidence/1``) carrying ``filesystem_snapshot.created_paths``,
-  ``process_tree``, ``controller_trace.signalled_pids`` and ``symbols.HARNESS_CONTROLLER_PID``.
+  ``process_tree``, ``controller_trace.signalled_pids``, ``symbols.HARNESS_CONTROLLER_PID``,
+  the whole-tree counts (``max_concurrent_children``, ``shell_launches``,
+  ``data_fetch_attempts``) and the harness RAM sampler's ``min_free_ram_while_running_gib``.
   It is merged when supplied (``harness["observations_path"]``) and checked against the native
   records; without it those fields stay MISSING. Carrying the values does not declare
   CAP-EXHAUSTIVE-WRITES or CAP-SIGNAL-CAPTURE: that needs a reviewed D4 record.
@@ -27,6 +29,7 @@ it is never partially projected.
 import copy
 import hashlib
 import json
+import math
 import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -36,6 +39,7 @@ from tools.workflow.contracts import (
     TERMINAL_OUTCOMES,
     digest,
     expected_plan,
+    plan_version_hash,
     request_goal,
 )
 from tools.workflow.persistence import read_checkpoint
@@ -57,12 +61,12 @@ CONTRACT_ROLES = (
 GATE_TOOLS = ("check-artifact", "verify-run")
 CATALOG_TOOLS = tuple(catalog.CATALOG)
 # Records other wave-3 packages are building, keyed by their frozen controller_trace names
-# (EC:controller_trace, v2_4.resume, v2_4.interruptions, v2_4.operator_actions,
-# v2_4.material_changes). Projected verbatim from context[<name>] when the native record
-# exists; MISSING (key absent) otherwise, never [].
+# (EC:controller_trace, v2_4.resume, v2_4.interruptions, v2_4.material_changes). Projected
+# verbatim from context[<name>] (the recovery lists: context["recovery"][<name>], see
+# RECOVERY_LEDGER_LISTS) when the native record exists; MISSING (key absent) otherwise,
+# never []. operator_actions has its own checked projection (pre_review_projection);
+# shadow_decisions has its own (shadow_projection.project, CAP-SHADOW).
 PENDING_TRACE_LISTS = {
-    "operator_actions": ("CAP-OPERATOR-ACTIONS", "record_id"),
-    "transition_requests": ("CAP-TRANSITION-REQUEST", None),
     "shadow_decisions": ("CAP-SHADOW", None),
     "resume": ("CAP-RESUME", None),
     "interruptions": ("CAP-INTERRUPT", "index"),
@@ -73,6 +77,21 @@ PENDING_TRACE_LISTS = {
     "material_changes": ("CAP-REREVIEW", "index"),
     "source_rechecks": ("CAP-REREVIEW", "index"),
 }
+# Lists the controller keeps in its recovery ledger, context["recovery"] (recovery.new_ledger,
+# schema workflow.recovery/1, bound by every run), not at the context top level. Projected
+# from the ledger after its schema is checked; MISSING with a reason only when the ledger is
+# absent or malformed, never [] (EC:absence: an existing empty list IS emitted as []).
+RECOVERY_SCHEMA = "workflow.recovery/1"
+RECOVERY_LEDGER_LISTS = frozenset(
+    {
+        "resume",
+        "interruptions",
+        "diagnoses",
+        "mechanical_repairs",
+        "operator_notifications",
+        "transport_retries",
+    }
+)
 # Container-route harness observations (container_harness/analyze_trace.py SCHEMA). Each
 # accepted field, keyed by its frozen evidence path, with the capability that owns it.
 HARNESS_OBSERVATIONS_SCHEMA = "simkit.container-harness-evidence/1"
@@ -84,7 +103,12 @@ HARNESS_OBSERVED_FIELDS = {
     "symbols.HARNESS_CONTROLLER_PID": "CAP-SYMBOLS",
     "harness_observations.max_concurrent_children": "CAP-HARNESS-OBS",
     "harness_observations.shell_launches": "CAP-HARNESS-OBS",
+    "harness_observations.data_fetch_attempts": "CAP-HARNESS-OBS",
+    "harness_observations.min_free_ram_while_running_gib": "CAP-HARNESS-OBS",
 }
+# Harness fields that do not come from the trace (analyze_trace.RAM_FIELD: the harness RAM
+# sampler). A gap in one says nothing about the completeness of the trace.
+HARNESS_UNTRACED_FIELDS = ("harness_observations.min_free_ram_while_running_gib",)
 DISPATCH_EVENT = re.compile(r"dispatch-event-(\d{6})\.json")
 ROLE_FILE = re.compile(r"role-(\d{3})-([a-z_]+)\.json")
 
@@ -182,9 +206,18 @@ def load_harness_observations(path):
         "symbols.HARNESS_CONTROLLER_PID",
         "harness_observations.max_concurrent_children",
         "harness_observations.shell_launches",
+        "harness_observations.data_fetch_attempts",
     ):
         if field in fields and not _is_count(fields[field]):
             raise EvidenceMappingError(f"{field} must be a non-negative integer")
+    ram = fields.get("harness_observations.min_free_ram_while_running_gib")
+    if ram is not None and not (
+        isinstance(ram, (int, float))
+        and not isinstance(ram, bool)
+        and math.isfinite(ram)
+        and ram >= 0
+    ):
+        raise EvidenceMappingError("min_free_ram_while_running_gib must be a finite GiB reading")
     observations = record.get("harness_observations") or {}
     return {
         "fields": fields,
@@ -193,6 +226,21 @@ def load_harness_observations(path):
         "harness_notes": record.get("harness_notes"),
         "sha256": file_sha256(path),
     }
+
+
+_ARGUMENT_FIELD = re.compile(r"^plan\.steps\[\d+\]\.args\.(.+)$")
+
+
+def argument_labels(failed_fields):
+    """CAP-REASON-MAP: a failed plan argument (plan.steps[i].args.<name>) is also named by its
+    frozen label, the bare argument name (EC plan_validations failed_fields contains
+    output_path). The controller's dotted paths are kept verbatim and first; labels follow."""
+    labels = []
+    for field in failed_fields:
+        match = _ARGUMENT_FIELD.match(field) if isinstance(field, str) else None
+        if match and match.group(1) not in failed_fields and match.group(1) not in labels:
+            labels.append(match.group(1))
+    return [*failed_fields, *labels]
 
 
 def plan_steps(plan):
@@ -228,7 +276,8 @@ class NativeRun:
 
     def _verify_evidence_hashes(self):
         for name, expected in self.checkpoint["evidence"].items():
-            if "/" in name or "\\" in name:
+            # One nested form is run-local: the controller's notification outbox (rsp).
+            if ("/" in name or "\\" in name) and not rsp.outbox_record(name):
                 raise EvidenceMappingError("native evidence path must be run-local")
             try:
                 observed = catalog.tree_hash(self.root / name)
@@ -323,6 +372,12 @@ class Projection:
     def gap(self, path, capability, reason):
         self.missing.append({"path": path, "capability": capability, "reason": reason})
 
+    def read_native(self, name):
+        """A run-local evidence file the controller recorded (hash-verified at load)."""
+        if name not in self.n.checkpoint["evidence"]:
+            raise EvidenceMappingError(f"native record not recorded by the controller: {name}")
+        return _read_json(self.n.root / name)
+
     def observed(self, path, fallback_reason):
         """A container-harness field, or _ABSENT after recording the gap (the harness's own
         reason when it reported the field missing; ``fallback_reason`` when no file)."""
@@ -368,9 +423,8 @@ class Projection:
             if native_role == "compiler":
                 # Contract: compiler_N is the N-th compiler invocation, each occurrence 1
                 # (EC:event_seq_keys 'invocation_receipts[role=compiler_3][occurrence=1]').
-                if ordinal > 3:
-                    raise EvidenceMappingError("more than three compiler invocations")
-                role, occurrence = f"compiler_{ordinal}", 1
+                # A compile re-asked after a resume is that slot's next occurrence (rsp).
+                role, occurrence = rsp.compiler_role(self, index, ordinal)
             else:
                 role, occurrence = native_role, ordinal
             record = {
@@ -449,20 +503,30 @@ class Projection:
     # ---- controller trace (EC:controller_trace)
     def states(self):
         events = self.n.checkpoint["events"]
-        transitions = self.n.kinds("transition")
-        if [t["transition"] for t in transitions] != events:
-            raise EvidenceMappingError("transition events differ from the checkpoint history")
+        # CAP-REREVIEW (review finding X3): a return to review withdraws transitions from the
+        # checkpoint but not their dispatch events; the controller's own return_to_review
+        # record says which, so the surviving history is rebuilt from it (frx).
+        transitions, withdrawn = frx.transition_history(self.n)
+        if withdrawn:
+            self.notes.append({"withdrawn_transitions": withdrawn})
         states = [events[0]["from"]] if events else [self.n.checkpoint["state"]]
         for t in transitions:
             states.append(t["transition"]["to"])
             self.seq[f"controller_trace.states[{t['transition']['to']}]"] = t["sequence"]
-        # The initial state is entered at construction, before any dispatch event: there is
-        # no native clock for it (never invented).
-        self.gap(
-            f"event_seq['controller_trace.states[{states[0]}]']",
-            "CAP-RECEIPTS",
-            "the controller records no dispatch event for its initial state",
-        )
+        # The initial state is entered at construction; the controller clocks it with an
+        # initial_state event at run start, before any other event (trace_records). A run
+        # without that event (an older build, or events before run()) keeps it MISSING.
+        initial = self.n.kinds("initial_state")
+        if len(initial) > 1 or (initial and initial[0]["sequence"] != 1):
+            raise EvidenceMappingError("initial_state event is not the first and only one")
+        if initial and initial[0]["state"] == states[0]:
+            self.seq[f"controller_trace.states[{states[0]}]"] = initial[0]["sequence"]
+        else:
+            self.gap(
+                f"event_seq['controller_trace.states[{states[0]}]']",
+                "CAP-RECEIPTS",
+                "the controller recorded no initial_state event for its initial state",
+            )
         return states
 
     def terminal(self):
@@ -482,6 +546,8 @@ class Projection:
         out = []
         for event, record in zip(events, records, strict=True):
             value = _detached(record)
+            if isinstance(value.get("failed_fields"), list):
+                value["failed_fields"] = argument_labels(value["failed_fields"])
             plan = self.plan_for(record, role_output)
             if plan is not None:
                 value["plan"] = plan
@@ -491,6 +557,13 @@ class Projection:
                     "CAP-RECEIPTS",
                     "no role output carries a plan with this plan_hash",
                 )
+            # One frozen key per plan hash, DEFINED as the first validation of that plan
+            # (EVIDENCE_CONTRACT.md:645 structures, requirements.json:746). A replan that returns
+            # the identical plan, or a re-review of one plan, validates the same hash again; the
+            # key keeps the first one's clock, as the contract says, even where the frozen
+            # plan_sources check then misorders a later validation (run-4 E03-P3-CTL). That the
+            # key is not unique is an oracle issue carried to the next case set (OI-03); a
+            # latest-wins re-mapping was rejected in D4 review w6 (B-RCPT-1).
             key = f"controller_trace.plan_validations[plan_hash={record['plan_hash']}]"
             self.seq.setdefault(key, event["sequence"])
             out.append(value)
@@ -504,76 +577,39 @@ class Projection:
         if isinstance(occurrence, int) and 1 <= occurrence <= len(outputs):
             candidates.append(outputs[occurrence - 1])
         candidates += role_output.get("planner", []) + role_output.get("repairer", [])
+        reviewed = "review_evidence" in self.n.context
         for output in candidates:
             plan = output.get("controller_plan") if isinstance(output, dict) else None
+            claims = output.get("claims") if reviewed and isinstance(output, dict) else None
             try:
-                if plan is not None and digest(plan) == record["plan_hash"]:
+                if plan is not None and plan_version_hash(plan, claims) == record["plan_hash"]:
                     return plan_steps(plan)
             except (TypeError, ValueError):
                 continue
         return None
 
-    def authorizations(self):
-        request = self.n.checkpoint["request"]
-        auth = request["authorization"]
-        speaker = next(m["speaker"] for m in request["messages"] if m["id"] == auth["message_id"])
-        # The request is the operator source ledger the controller validated at capture.
-        return [
-            {
-                "source": "operator_ledger",
-                "speaker": speaker,
-                "goal_hash": auth["goal_hash"],
-                "message_id": auth["message_id"],
-                "quote": auth["quote"],
-            }
-        ]
-
     def goal_check(self):
+        record = self.n.context.get("goal_check")
+        if isinstance(record, dict):
+            # trace_records.retain_compiled_goal: the failed goal check, durably recorded.
+            events = [e["goal_check"] for e in self.n.kinds("goal_check")]
+            if events != [record] or self.read_native("goal-check.json") != record:
+                raise EvidenceMappingError("goal_check record differs from its file or event")
+            if isinstance(record.get("failed_fields"), list) and record["failed_fields"]:
+                return {"verdict": record["verdict"], "failed_fields": record["failed_fields"]}
+            self.gap(
+                "controller_trace.goal_check",
+                "CAP-RECEIPTS",
+                "the goal check refusal could not be attributed to named fields",
+            )
+            return None
         if any(e["to"] == "GOAL_CHECKED" for e in self.n.checkpoint["events"]):
             # The controller retained every compiled goal equal to the trusted goal.
             return {"verdict": "PASS", "failed_fields": []}
-        self.gap(
-            "controller_trace.goal_check",
-            "CAP-RECEIPTS",
-            "a failed goal check records its fields only in message text (never parsed)",
-        )
+        if self.n.finished():
+            return None  # never reached: no goal check was decided (key absent)
+        self.gap("controller_trace.goal_check", "CAP-RECEIPTS", "run did not finish")
         return None
-
-    def active_approval(self, receipts):
-        evidence = self.n.context.get("review_evidence")
-        if not isinstance(evidence, dict):
-            if any(e["to"] == "REVIEW_APPROVED" for e in self.n.checkpoint["events"]):
-                self.gap(
-                    "controller_trace.active_approval",
-                    "CAP-BOUND-SOURCES",
-                    "review evidence mode was off: approval binding hashes not captured",
-                )
-            return None
-        accepted = [c for c in self.captures() if c["record"].get("accepted_review") is True]
-        if not accepted:
-            return None
-        capture = accepted[-1]["record"]
-        committed = capture["committed_transition"]
-        transitions = [
-            t for t in self.n.kinds("transition") if t["transition"] == committed["event"]
-        ]
-        if not transitions or committed["event"]["to"] != "REVIEW_APPROVED":
-            raise EvidenceMappingError("accepted review lacks its durable transition event")
-        reviewer = self.match_receipt(receipts, capture["receipt"])
-        envelope = capture["review_evidence"]
-        self.seq["controller_trace.active_approval"] = transitions[-1]["sequence"]
-        return {
-            # No native approval id exists: the committed binding hash is the controller's
-            # own identity for this approval (documented in CAPABILITY-PRODUCERS.json).
-            "approval_id": committed["binding_hash"],
-            "verdict": committed["event"]["evidence"]["verdict"],
-            "reviewer_occurrence": reviewer["occurrence"],
-            "reviewer_session_id": reviewer["session_id"],
-            **{
-                k: envelope[k]
-                for k in ("request_hash", "goal_hash", "plan_hash", "manifest_hash", "source_hash")
-            },
-        }
 
     def match_receipt(self, receipts, native):
         for record in receipts:
@@ -588,29 +624,29 @@ class Projection:
                 out.append({"name": name, "record": _read_json(self.n.root / name)})
         return out
 
-    def claim_checks(self):
-        evidence = self.n.context.get("review_evidence")
-        if not isinstance(evidence, dict) or "claim_checks" not in evidence:
-            self.gap(
-                "controller_trace.claim_checks",
-                "CAP-PRE-REVIEW-GATES",
-                "claim gates were not enabled (no bound definition source)",
-            )
-            return None
-        records = evidence["claim_checks"]
-        events = self.n.kinds("claim_check")
-        if len(events) != len(records):
-            raise EvidenceMappingError("claim_check events differ from the checkpoint")
-        for event, record in zip(events, records, strict=True):
-            saved = _read_json(self.n.root / f"claim-check-{record['index']:03}.json")
-            if saved != record or event["index"] != record["index"]:
-                raise EvidenceMappingError("claim-check file differs from the checkpoint")
-            self.seq[f"controller_trace.claim_checks[index={record['index']}]"] = event["sequence"]
-        return _detached(records)
+    def recovery_list(self, name):
+        """(list, None) from the recovery ledger, or (None, reason) when it cannot be read."""
+        book = self.n.context.get("recovery")
+        if book is None:
+            return None, "no native recovery ledger in this run"
+        if not isinstance(book, dict) or book.get("schema") != RECOVERY_SCHEMA:
+            return None, f"recovery ledger is malformed (schema is not {RECOVERY_SCHEMA})"
+        value = book.get(name)
+        if not isinstance(value, list):
+            return None, f"recovery ledger is malformed ({name} is not a list)"
+        return value, None
 
     def pending_lists(self, trace):
         for name, (capability, ident) in PENDING_TRACE_LISTS.items():
-            value = self.n.context.get(name)
+            if name in frx.REREVIEW_LISTS:
+                continue  # checked projection: frx.rereview_lists (CAP-REREVIEW)
+            if name in RECOVERY_LEDGER_LISTS:
+                value, reason = self.recovery_list(name)
+                if value is None:
+                    self.gap(f"controller_trace.{name}", capability, reason)
+                    continue
+            else:
+                value = self.n.context.get(name)
             if value is None:
                 self.gap(
                     f"controller_trace.{name}",
@@ -758,6 +794,15 @@ class Projection:
             }
             if argv is None:
                 self.notes.append({"argv_not_stripped": launch["serial"]})
+            flags = prp.argv_flags(argv) if argv is not None else None
+            if flags is not None:
+                record["flags"] = flags
+            else:
+                self.gap(
+                    f"process_receipts[serial={launch['serial']}].flags",
+                    "CAP-RECEIPTS",
+                    "argv is not a strict option sequence of the catalogued CLI",
+                )
             if producing_tools is not None:
                 record["producing"] = tool in producing_tools
             exit_event = exits.get(launch["serial"])
@@ -962,28 +1007,41 @@ class Projection:
                 "CAP-RECEIPTS",
                 "a process has no exit byte count",
             )
-        for key, capability in (("automatic_resumes_used", "CAP-AUTO-RESUME"),):
-            if isinstance(self.n.context.get(key), int):
-                final[key] = self.n.context[key]
-            else:
-                self.gap(
-                    f"budget_ledger.final.{key}", capability, "no native automatic/operator split"
-                )
-        limit = self.n.context.get("max_resume_attempts")
-        if isinstance(limit, int):
+        # The controller's recovery ledger (recovery.new_ledger, bound by every run): the
+        # automatic-resume counter and limit. UC-15-resume-r2: limits.max_resume_attempts IS
+        # the automatic-resume limit (EC:v2_4.resume).
+        book = self.n.context.get("recovery")
+        counters = book.get("counters") if isinstance(book, dict) else None
+        limits = book.get("limits") if isinstance(book, dict) else None
+        used = counters.get("automatic_resumes_used") if isinstance(counters, dict) else None
+        if _is_count(used):
+            final["automatic_resumes_used"] = used
+        else:
+            self.gap(
+                "budget_ledger.final.automatic_resumes_used",
+                "CAP-AUTO-RESUME",
+                "no native recovery ledger counter",
+            )
+        limit = limits.get("max_automatic_resumes") if isinstance(limits, dict) else None
+        if _is_count(limit):
             final["limits"]["max_resume_attempts"] = limit
         else:
             self.gap(
                 "budget_ledger.final.limits.max_resume_attempts",
                 "CAP-RESUME",
-                "the resume limit is not recorded in the checkpoint",
+                "the automatic-resume limit is not recorded in the checkpoint",
             )
-        self.gap(
-            "budget_ledger.at_checkpoint",
-            "CAP-RESUME",
-            "no snapshot is captured at an interruption checkpoint",
-        )
-        return {"final": final, "launch_checks": launch_checks}
+        interrupted = not isinstance(book, dict) or book.get("interruptions") or cp["resumes"]
+        ledger = {"final": final, "launch_checks": launch_checks}
+        if interrupted:
+            # EC:budget_ledger.at_checkpoint exists "when a checkpoint exists": the durable
+            # interruption checkpoint consumed by resume[0] (resume_projection, disclosed).
+            snapshot, reason = rsp.at_checkpoint(self)
+            if snapshot is not None:
+                ledger["at_checkpoint"] = snapshot
+            else:
+                self.gap("budget_ledger.at_checkpoint", "CAP-RESUME", reason)
+        return ledger
 
     # ---- signals and harness (CAP-SIGNAL-CAPTURE, CAP-HARNESS-OBS)
     def signal_capture(self, receipts, trace, harness):
@@ -1007,17 +1065,25 @@ class Projection:
             harness["signal_capture_exhaustive"] = projected["signal_capture_exhaustive"]
             for pid, parent in projected["process_tree"].items():
                 tree.setdefault(pid, parent)
-        parents = {r["parent_pid"] for r in receipts}
-        controller = parents.pop() if len(parents) == 1 else None
+        # One incarnation: the sole launch parent (else the initial_state pid); several: the
+        # traced root, checked against the controller's incarnation pids (OI-05, rsp).
+        controller, incarnations = rsp.native_controller(self, receipts)
+        for pid, parent in incarnations.items():
+            tree.setdefault(pid, parent)
         return tree, controller
+
+    def initial_controller_pid(self):
+        """The controller pid its initial_state event recorded (trace_records), or None."""
+        initial = self.n.kinds("initial_state")
+        pid = initial[0].get("controller_pid") if initial else None
+        return pid if _is_count(pid) else None
 
     def observed_signal_capture(self, receipts, records, trace, harness):
         """Container route: signals and the process tree come from the harness trace, checked
         against what the controller itself recorded. The native signal_stop projection is kept
         in notes (owner reading parent_at_signal: creating parent in process_tree, both kept).
         Returns (tree or None, controller pid or None)."""
-        parents = {r["parent_pid"] for r in receipts}
-        native_controller = parents.pop() if len(parents) == 1 else None
+        native_controller, _ = rsp.native_controller(self, receipts)  # incarnation-aware
         controller = self.observed("symbols.HARNESS_CONTROLLER_PID", None)
         if controller is _ABSENT:
             controller = native_controller
@@ -1064,37 +1130,86 @@ class Projection:
         return tree, controller
 
     def harness_observations(self):
+        """CAP-HARNESS-OBS whole-tree fields: only from the container harness. The in-process
+        route has no whole-tree observer; the controller's own per-tool RAM samples
+        (process_exit min_free_gib) are the system under test's guard readings, sampled only
+        while a tool runs, and are never presented as the harness's running minimum."""
         harness = {}
-        for key in ("max_concurrent_children", "shell_launches"):
-            value = self.observed(
-                f"harness_observations.{key}",
-                "no whole-tree observer (concurrency, shell launches) exists",
-            )
+        for key, fallback in (
+            ("max_concurrent_children", "no whole-tree observer (concurrency) without the trace"),
+            ("shell_launches", "no whole-tree observer (shell launches) without the trace"),
+            ("data_fetch_attempts", "no whole-tree network observer without the trace"),
+            (
+                "min_free_ram_while_running_gib",
+                "no harness RAM sampler outside the container route",
+            ),
+        ):
+            value = self.observed(f"harness_observations.{key}", fallback)
             if value is not _ABSENT:
                 harness[key] = value
-        self.gap(
-            "harness_observations.data_fetch_attempts",
-            "CAP-HARNESS-OBS",
-            "no whole-tree fetch observer exists",
-        )
-        self.gap(
-            "harness_observations.min_free_ram_while_running_gib",
-            "CAP-HARNESS-OBS",
-            "per-process minimum falls back to a post-exit read when no sample was taken",
-        )
         return harness
 
     # ---- symbols (CAP-SYMBOLS)
-    def symbols(self, receipts, controller_pid):
+    def harness_manifest_hash(self):
+        """HARNESS_MANIFEST_HASH:current: the harness's own digest of the controller's build
+        manifest routine (runner.build_manifest, call-time lookup as in HarnessLaunchObserver)
+        over the repository the controller ran on (checkpoint ``repo``), taken when the run has
+        ended, so it is the manifest in place after the last fixture operation.
+
+        Never the checkpoint ``build_hash``: that is the system under test's last ADOPTED build,
+        which a refused re-review (cap reached) correctly leaves at the pre-change build. Never
+        a controller material_changes to_hash either: frozen captured_identities compares those
+        records WITH this symbol, so sourcing it from them would make the check vacuous.
+
+        The digest covers the runtime block (python, installed packages, core origin), so it is
+        only the controller's manifest when computed under the controller's runtime: a runtime
+        that differs from the one in the controller's recorded build (apart from the repo's
+        own build_id), an unreadable repository or a refusing routine leaves it MISSING."""
+        from tools.workflow import runner  # call-time lookup: a patched manifest applies
+
+        cp = self.n.checkpoint
+        path = "symbols.HARNESS_MANIFEST_HASH:current"
+        try:
+            build = runner.build_manifest(Path(cp["repo"]))
+        except Exception as exc:  # declared, never swallowed
+            self.gap(path, "CAP-SYMBOLS", f"build manifest unobservable at run end: {exc!r}")
+            return None
+
+        def runtime(value):
+            block = value.get("@runtime") if isinstance(value, dict) else None
+            if not isinstance(block, dict):
+                return block
+            return {k: v for k, v in block.items() if k != "build_id"}
+
+        if runtime(build) != runtime(cp.get("build")):
+            self.gap(
+                path,
+                "CAP-SYMBOLS",
+                "the projecting runtime differs from the controller's recorded build runtime; "
+                "its manifest digest would not be the controller's",
+            )
+            return None
+        value = digest(build)
+        if value != cp["build_hash"]:
+            self.notes.append(
+                {"manifest_current_is_not_adopted": {"current": value, "adopted": cp["build_hash"]}}
+            )
+        return value
+
+    def symbols(self, receipts, controller_pid, snapshots=None):
         cp = self.n.checkpoint
         out = {"HARNESS_RUN_DIR": str(self.n.root.resolve())}
+        out["HARNESS_SOURCE_CACHE"] = str(Path(cp["source"]))
         if digest(_read_json(self.n.root / "request.json")) != cp["request_hash"]:
             raise EvidenceMappingError("request.json differs from the captured request hash")
         out["HARNESS_REQUEST_HASH"] = out["HARNESS_REQUEST_HASH:current"] = cp["request_hash"]
-        out["HARNESS_MANIFEST_HASH:current"] = cp["build_hash"]
+        manifest = self.harness_manifest_hash()
+        if manifest is not None:
+            out["HARNESS_MANIFEST_HASH:current"] = manifest
         out["HARNESS_GOAL_HASH:current"] = digest(request_goal(cp["request"]))
         if cp.get("plan") is not None:
-            out["HARNESS_PLAN_HASH:current"] = digest(cp["plan"])
+            claims = (self.n.context.get("review_evidence") or {}).get("plan_claims")
+            out["HARNESS_PLAN_HASH:current"] = plan_version_hash(cp["plan"], claims)
         for i, version in enumerate(self.n.context.get("plan_versions", []), 1):
             out[f"HARNESS_PLAN_HASH:v{i}"] = version["plan_hash"]
         paths = self.artifact_paths()
@@ -1107,12 +1222,30 @@ class Projection:
         for key in ("source_pre", "source_expected_after"):
             if isinstance(self.h.get(key), str):
                 out[f"HARNESS_HASH:{key}"] = self.h[key]
+        if "source_expected_after" not in self.h:
+            reason = self.h.get(
+                "source_expected_after_reason",
+                "not supplied by the harness (no run_case projection inputs)",
+            )
+            # Owned by CAP-FIXTURE-OP only when the case applies fixture operations (the reason
+            # from pre_review_projection.expected_source_after names it); otherwise the harness
+            # value is simply absent, a CAP-SYMBOLS gap.
+            owner = "CAP-FIXTURE-OP" if "CAP-FIXTURE-OP" in reason else "CAP-SYMBOLS"
+            self.gap("symbols.HARNESS_HASH:source_expected_after", owner, reason)
+        frx.project_fixture_symbols(self, out)  # CAP-FIXTURE-OP: onset_after_mutation
+        rsp.project_symbols(self, out)  # CAP-MIDPROCESS: onset_partial_at_interrupt
         try:
             out["HARNESS_HASH:source"] = catalog.tree_hash(cp["source"])
-        except Exception:
-            pass
+        except Exception as exc:  # declared, never swallowed
+            self.gap("symbols.HARNESS_HASH:source", "CAP-SYMBOLS", f"source unreadable: {exc!r}")
         if controller_pid is not None:
             out["HARNESS_CONTROLLER_PID"] = controller_pid
+        else:
+            self.gap(
+                "symbols.HARNESS_CONTROLLER_PID",
+                "CAP-SYMBOLS",
+                "no launched process names the controller as parent and no harness observation",
+            )
         tools = {}
         for r in receipts:
             tools.setdefault(r["tool"], []).append(r["pid"])
@@ -1120,10 +1253,23 @@ class Projection:
             if len(pids) == 1:
                 out[f"HARNESS_PID:{tool}"] = pids[0]
         definition = (self.n.context.get("review_evidence") or {}).get("definition_source")
-        if isinstance(definition, dict):
-            out["HARNESS_SOURCE_HASH:" + review_evidence.DEFINITION_SOURCE_ID] = definition[
-                "source_hash"
-            ]
+        captured = {
+            source["source_hash"]
+            for snapshot in snapshots or []
+            for source in snapshot["sources"]
+            if source["source_id"] == review_evidence.REFERENCE_DEFINITION_SOURCE_ID
+        }
+        bound = definition["source_hash"] if isinstance(definition, dict) else None
+        symbol = "HARNESS_SOURCE_HASH:" + review_evidence.DEFINITION_SOURCE_ID
+        if len(captured) > 1 or (captured and bound is not None and captured != {bound}):
+            raise EvidenceMappingError("captured definition source differs from the bound one")
+        if captured:
+            # D1: resolved from the source the reviewer was actually shown.
+            out[symbol] = captured.pop()
+        elif bound is not None:
+            # No review captured yet: the controller's own binding of the same text.
+            out[symbol] = bound
+            self.notes.append({"definition_symbol_resolved_from": "bound definition_source"})
         return out
 
     # ---- assemble
@@ -1136,20 +1282,29 @@ class Projection:
         if terminal is not None:
             trace["terminal"] = terminal
         trace["plan_validations"] = self.plan_validations(role_output)
-        trace["authorizations"] = self.authorizations()
+        authorizations = prp.authorizations(self)
+        if authorizations is not None:
+            trace["authorizations"] = authorizations
         goal_check = self.goal_check()
         if goal_check is not None:
             trace["goal_check"] = goal_check
-        approval = self.active_approval(receipts)
+        approval = prp.active_approval(self, receipts)
         if approval is not None:
             trace["active_approval"] = approval
-        claim_checks = self.claim_checks()
+        claim_checks = prp.claim_checks(self, receipts, role_output)
         if claim_checks is not None:
             trace["claim_checks"] = claim_checks
+        operator_actions = prp.operator_actions(self, receipts)
+        if operator_actions is not None:
+            trace["operator_actions"] = operator_actions
+        olp.project(self, trace)  # transition_requests + ledger records (checked)
         self.pending_lists(trace)
+        frx.rereview_lists(self, trace)
         processes, transport = self.process_receipts(approval)
+        rsp.killed_output_bytes(self, processes)  # OI-04: harness-observed, labelled
         launch_checks = self.launch_checks()
         harness = self.harness_observations()
+        rsp.harness_fields(self, harness)  # onset_partial, controller incarnations
         snapshots, failures = self.review_snapshots(receipts)
         if snapshots is not None:
             harness["review_snapshots"] = snapshots
@@ -1191,8 +1346,9 @@ class Projection:
                         "harness_missing": self.obs["missing"],
                         "tracer_status": self.obs["tracer_status"],
                         "harness_notes": self.obs["harness_notes"],
-                        "declaration": "carried, not declared: CAP-EXHAUSTIVE-WRITES and "
-                        "CAP-SIGNAL-CAPTURE need a reviewed D4 record",
+                        "declaration": "carrying values declares nothing: CAP-EXHAUSTIVE-WRITES, "
+                        "CAP-SIGNAL-CAPTURE and CAP-HARNESS-OBS are declared only by a "
+                        "reviewed D4 record (CAPABILITY-PRODUCERS.json)",
                     }
                 }
             )
@@ -1211,7 +1367,7 @@ class Projection:
             evidence["artifacts"] = artifacts
         if tree is not None:
             evidence["process_tree"] = tree
-        evidence["symbols"] = self.symbols(processes, controller_pid)
+        evidence["symbols"] = self.symbols(processes, controller_pid, snapshots)
         if self.n.finished():
             absent = self.proven_absent(trace["states"], processes)
             self.seq["_absent"] = absent
@@ -1303,7 +1459,87 @@ def project_run(run_dir, harness=None):
     native = NativeRun(run_dir, harness.get("processes_root"))
     path = harness.get("observations_path")
     observations = load_harness_observations(path) if path is not None else None
-    return Projection(native, harness, observations).run()
+    projection = Projection(native, harness, observations).run()
+    from adapter_support import shadow_projection  # imports this module
+
+    shadow_projection.project(projection, native)
+    verdict = write_capture_status(projection)
+    projection["notes"].append({"write_capture": verdict})
+    filesystem = projection["evidence"]["filesystem_snapshot"]
+    if verdict["status"] != "EXHAUSTIVE" and "created_paths" in filesystem:
+        # The scorer reads any created_paths list as exhaustive (frozen score.py all_under,
+        # empty_is_exhaustive): a list the adapter cannot vouch for is withheld, never scored.
+        del filesystem["created_paths"]
+        projection["missing"].append(
+            {
+                "path": "filesystem_snapshot.created_paths",
+                "capability": "CAP-EXHAUSTIVE-WRITES",
+                "reason": "withheld, write capture not exhaustive: " + verdict["reason"],
+            }
+        )
+    return projection
+
+
+def write_capture_status(projection):
+    """CAP-EXHAUSTIVE-WRITES: is ``filesystem_snapshot.created_paths`` exhaustive?
+
+    EXHAUSTIVE only when the container harness observations were merged, the tracer status is
+    OK, the harness reports no trace-derived field missing (any such gap is doubt on the trace;
+    the untraced RAM sampler is not), created_paths was carried, and every present artifact's
+    path is among the created paths (frozen score.py's own cross-check: a miss means the
+    projection is outside the trace's path namespace or the capture has a gap). Otherwise
+    MISSING with the harness's reason. An empty list is exhaustive only through this check,
+    never by being empty (D4).
+    """
+    note = next(
+        (
+            n["harness_observations_input"]
+            for n in projection["notes"]
+            if "harness_observations_input" in n
+        ),
+        None,
+    )
+    if note is None:
+        return {
+            "status": "MISSING",
+            "reason": "no container harness observations supplied "
+            "(container_route_ruling_2026-10-13)",
+        }
+    tracer = note.get("tracer_status")
+    tracer_status = tracer.get("status") if isinstance(tracer, dict) else None
+    if tracer_status != "OK":
+        return {"status": "MISSING", "reason": f"container harness tracer_status {tracer_status}"}
+    gaps = {
+        field: reason
+        for field, reason in note["harness_missing"].items()
+        if field not in HARNESS_UNTRACED_FIELDS
+    }
+    if gaps:
+        field = (
+            "filesystem_snapshot.created_paths"
+            if "filesystem_snapshot.created_paths" in gaps
+            else sorted(gaps)[0]
+        )
+        return {"status": "MISSING", "reason": f"container harness: {field}: {gaps[field]}"}
+    evidence = projection["evidence"]
+    created = evidence["filesystem_snapshot"].get("created_paths")
+    if not isinstance(created, list):
+        return {"status": "MISSING", "reason": "container harness did not carry created_paths"}
+    recorded = set(created)
+    for name, artifact in sorted((evidence.get("artifacts") or {}).items()):
+        if artifact.get("present") is True and artifact.get("path") not in recorded:
+            return {
+                "status": "MISSING",
+                "reason": f"artifact {name} is present at {artifact.get('path')} but not in "
+                "created_paths (projection outside the trace's path namespace, or a capture gap)",
+            }
+    return {
+        "status": "EXHAUSTIVE",
+        "licenses": "empty_is_exhaustive",
+        "created_paths_count": len(created),
+        "tracer_status": tracer_status,
+        "observations_sha256": note["sha256"],
+    }
 
 
 class HarnessLaunchObserver:
@@ -1329,7 +1565,10 @@ class HarnessLaunchObserver:
                     "skill": event["skill"],
                     "request_hash": digest(controller.request),
                     "goal_hash": digest(controller.goal),
-                    "plan_hash": digest(controller.plan),
+                    "plan_hash": plan_version_hash(
+                        controller.plan,
+                        (controller.context.get("review_evidence") or {}).get("plan_claims"),
+                    ),
                     "manifest_hash": digest(runner.build_manifest(controller.repo)),
                     "source_hash": catalog.tree_hash(controller.source),
                 }
@@ -1352,8 +1591,10 @@ class HarnessLaunchObserver:
 # --------------------------------------------------------------------------- run provenance
 
 
-def tag_outputs(run_dir, harness_dir, artifact_paths):
-    """Harness-side output tags (UC-12), written only to the harness directory."""
+def tag_outputs(run_dir, harness_dir, artifact_paths, write=True):
+    """Harness-side output tags (UC-12), written only to the harness directory. ``write``
+    False returns the record without creating a file (traced container route: the record
+    leaves through a harness-opened descriptor instead)."""
     outputs = [Path(run_dir) / "result.json"] + [Path(p) for p in artifact_paths]
     tagged = []
     for path in outputs:
@@ -1366,13 +1607,15 @@ def tag_outputs(run_dir, harness_dir, artifact_paths):
                 {"path": str(path), "content_hash": catalog.tree_hash(path), "tag": "synthetic"}
             )
     record = {"schema": "weather-adapter.output-tags/1", "outputs": tagged}
+    if not write:
+        return record
     target = Path(harness_dir) / "output-tags.json"
     with target.open("x", encoding="utf-8") as stream:
         json.dump(record, stream, indent=2)
     return record
 
 
-def run_provenance(run_dir, harness_dir, markers):
+def run_provenance(run_dir, harness_dir, markers, tags=None):
     """EC:v2_4.run_provenance under owner ruling D3, from harness records and a scan.
 
     outputs_tagged: the harness tag file covers every collected output with a matching hash
@@ -1384,7 +1627,8 @@ def run_provenance(run_dir, harness_dir, markers):
     """
     harness = Path(harness_dir)
     manifest = harness / "manifest.json"
-    tags = _read_json(harness / "output-tags.json")
+    if tags is None:  # ``tags``: the tag record itself when it was not written to a file
+        tags = _read_json(harness / "output-tags.json")
     outputs_tagged = bool(tags["outputs"]) and all(
         (file_sha256(o["path"]) if Path(o["path"]).is_file() else catalog.tree_hash(o["path"]))
         == o["content_hash"]
@@ -1429,3 +1673,10 @@ def run_provenance(run_dir, harness_dir, markers):
         "ruling D3 (UC-12): synthetic CHIRPS-identical input under production admission; it is "
         "not an observed CHIRPS fetch.",
     }
+
+
+# Imported last: pre_review_projection imports EvidenceMappingError from this module.
+from adapter_support import fixture_rereview_projection as frx  # noqa: E402
+from adapter_support import operator_ledger_projection as olp  # noqa: E402
+from adapter_support import pre_review_projection as prp  # noqa: E402
+from adapter_support import resume_projection as rsp  # noqa: E402

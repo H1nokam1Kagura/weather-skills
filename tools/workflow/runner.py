@@ -17,11 +17,20 @@ from . import (
     recovery,
     review_evidence,
     shadow,
+    trace_records,
     write_boundary,
 )
 from .admission import identity as admission_identity
 from .admission import record_for
-from .catalog import build_manifest, child_environment, preflight, safe_path, script, tree_hash
+from .catalog import (
+    build_manifest,
+    child_environment,
+    confined_process,
+    preflight,
+    safe_path,
+    script,
+    tree_hash,
+)
 from .contracts import (
     GATE_REASONS,
     INCOMPLETE_GATES,
@@ -33,8 +42,8 @@ from .contracts import (
     keys,
     needs_info,
     plan_failed_fields,
+    plan_version_hash,
     request_goal,
-    retain_goal,
     tag,
     validate_plan,
 )
@@ -44,6 +53,9 @@ from .profiles import PROFILES, stages
 # CAP-REASON-MAP, call-site half. A refusal raised inside a role transport (agents.py,
 # kong_roles.py, or a custom Roles) without its own gate is tagged with the gate the role serves:
 # the role's output could not be obtained or was not acceptable, so that gate failed.
+# Exception (owner ruling role_cli_resource_gate_2026-10-14): a role CLI process the process
+# manager refused or stopped for its RAM floor or wall-time guard arrives already tagged
+# resource_guard at the raise site (processes.py) and keeps it; tag() never replaces a set gate.
 ROLE_GATES = {
     "compiler": "goal_check",
     "planner": "plan_validation",
@@ -74,7 +86,11 @@ STATE_GATES = {
 CALL_SITE_GATES = {
     "agents": "ROLE_GATES by role (Controller.ask)",
     "kong_roles": "ROLE_GATES by role (Controller.ask)",
-    "processes": "resource_guard (Controller.tool); role CLIs via ROLE_GATES",
+    "processes": (
+        "resource_guard (Controller.tool); RAM/time guard refusals and stops carry "
+        "resource_guard from the raise site for role CLIs too; the output-budget stop of a "
+        "role CLI via ROLE_GATES"
+    ),
     "catalog": "plan_validation for preflight, gate_evidence for artifact hashes",
     "admission": "source_check (inspect_source, integrity)",
     "review_evidence": "review_binding (capture), claim_evidence (plan envelope), else state",
@@ -120,6 +136,7 @@ TRANSITIONS = {
 # approval is active in, and the re-review cap per plan (UC-05: "if >2 then re-plan").
 APPROVED_STATES = ("REVIEW_APPROVED", "AUTHORIZED")
 MAX_REREVIEWS_PER_PLAN = 2
+CURRENT_CLAIMS = object()  # record_plan_validation: hash with the current plan's claims
 
 
 class ReturnToReview(Refused):
@@ -329,8 +346,8 @@ class Controller:
             value = read_checkpoint(root)  # unreadable: no durable place for a decision
         attribution, override, problems = recovery.parse_request(request, supervisor)
         book = recovery.ledger(value["context"])
-        interruption = recovery.latest_unanswered(value["context"])
-        decision = recovery.new_decision(request, attribution, override, interruption)
+        # checkpoint_counters + controller_pid; an observed stop is recorded once (wave 7).
+        decision, interruption = recovery.open_decision(root, value, request, attribution, override)
         verify = "resume_verification"
         checked, failed, refusals = [], [], []
 
@@ -493,14 +510,16 @@ class Controller:
                     gate="gate_evidence",
                 ),
             )
-        if not failed and initiated == "operator_ledger":
+        # Attribution binds pass or fail: a REFUSED operator resume keeps its ledger record.
+        attributable = not problems and "run_directory" not in failed
+        if attributable and initiated == "operator_ledger":
             checked.append("operator_record")
             bound, problem = recovery.check_operator_record(self, attribution["operator_record_id"])
             if problem:
                 fail(problem, Refused("no accepted operator resume record", gate=verify))
             else:
                 decision["operator_record_id"] = bound
-        elif not failed and initiated is None and override is None:
+        elif attributable and initiated is None and override is None:
             # An unattributed request becomes an operator_ledger resume only when the operator
             # channel hands out an accepted user resume record for it (P-01).
             bound, _ = recovery.operator_authorization(self)
@@ -650,7 +669,7 @@ class Controller:
             "reviewer_session_id": reviewers[-1].get("session_id") if reviewers else None,
             "request_hash": self.request_hash,
             "goal_hash": digest(self.goal),
-            "plan_hash": digest(self.plan),
+            "plan_hash": self.plan_hash(),
             "manifest_hash": self.build_hash,
             "source_hash": self.source_hash,
             "binding_hash": self.binding,
@@ -689,13 +708,17 @@ class Controller:
         ):
             return None
         counter = self.context.setdefault(
-            "accepted_approvals", {"occurrence": 0, "initial_binding_hash": None}
+            "accepted_approvals",
+            {"occurrence": 0, "initial_binding_hash": None, "initial_plan_hash": None},
         )
+        plan_hash = self.plan_hash()
         counter["occurrence"] += 1
         if counter["occurrence"] == 1:
             counter["initial_binding_hash"] = self.binding
+            counter["initial_plan_hash"] = plan_hash
         self.checkpoint()
         initial = counter["initial_binding_hash"]
+        initial_plan = counter.get("initial_plan_hash")  # absent in a pre-change checkpoint
         return {
             "role": "reviewer",
             "target": "reviewer",
@@ -705,8 +728,14 @@ class Controller:
             "binding_valid": True,
             "controller_accepted": True,
             "approval_committed": True,
+            # plan_scope is the plan identity (frozen schedule contract: "initial means the
+            # first accepted plan identity"), the plan-version hash, not the binding: a
+            # runtime-manifest or source change re-binds the same plan and stays "initial".
             # No parent-plan binding exists in this controller, so never child_of_initial.
-            "plan_scope": "initial" if self.binding == initial else None,
+            "plan_scope": "initial" if plan_hash == initial_plan else None,
+            "plan_hash": plan_hash,
+            "initial_plan_hash": initial_plan,
+            "parent_plan_hash": None,
             "binding_hash": self.binding,
             "initial_binding_hash": initial,
             "parent_binding_hash": None,
@@ -767,6 +796,8 @@ class Controller:
         try:
             answer = self.roles.ask(role, payload)
         except BaseException as exc:
+            # Untagged role failures take the role's gate; a raise-site gate (resource_guard
+            # from the process manager's RAM/time guard) is kept as raised.
             tag(exc, ROLE_GATES.get(role, "transition"))
             if attempt is None and not isinstance(exc, Exception):
                 raise  # Preserve legacy interruption/checkpoint behavior.
@@ -879,11 +910,14 @@ class Controller:
             "rule": "Candidate t requires observations through t+29 inclusive. Plot dates are color scale bounds, not input subsetting. The derived last eligible onset date is intentionally earlier than the input end date.",
         }
 
-    def repair(self, payload, failure):
+    def repair(self, payload, failure, prior_plan=None):
         """Bounded repair. UC-16 parity: the allowance is consumed only when the repairer is
         actually dispatched (Controller.ask, durably with its pending record). A repair refused
         before dispatch is recorded as refused_before_dispatch and consumes nothing, so
-        repairs_used == repairer receipts + dispatched attempts that returned no receipt."""
+        repairs_used == repairer receipts + dispatched attempts that returned no receipt.
+
+        ``prior_plan`` names the refused candidate when it was never accepted as self.plan
+        (a planner plan refused by validation while its envelope was unpacked)."""
         trigger = "review" if self.state == "PLAN_VALIDATED" else "plan_validation"
         if self.repairs_used >= self.max_repairs:
             raise Refused("bounded plan repair exhausted: " + failure, gate="repair_exhausted")
@@ -897,7 +931,7 @@ class Controller:
                 {
                     **payload,
                     "failure": failure,
-                    "prior_plan": self.plan,
+                    "prior_plan": self.plan if prior_plan is None else prior_plan,
                     "date_contract": self.date_contract(),
                     "instruction": "Repair only within this exact task and profile. Explain a factual correction to review if needed; no changes to authorization or scientific scope. If the request cannot be repaired without a human answer, return only needs_info (your question) and an optional response, with no plan.",
                 },
@@ -938,7 +972,12 @@ class Controller:
         try:
             validate_plan(value["plan"], self.goal)
         except Refused:
-            self.record_plan_validation(value["plan"], "repairer", parser_accepted=False)
+            self.record_plan_validation(
+                value["plan"],
+                "repairer",
+                parser_accepted=False,
+                claims=self.candidate_claims(value),
+            )
             raise
         with gated("claim_evidence"):
             if "review_evidence" in self.context:
@@ -956,9 +995,33 @@ class Controller:
         if question is not None:
             self.stop_needs_info("planner", question, "plan_validation", answer, payload)
             return  # D30: an accepted operator answer re-planned
-        with gated("claim_evidence"):
-            self.accept_plan(answer)
+        try:
+            with gated("claim_evidence"):
+                self.accept_plan(answer)
+        except Refused as exc:
+            refused = self.record_refused_plan(answer, "planner")
+            if refused is not None:
+                exc.refused_plan = refused  # a plan validation refusal: repairable (run loop)
+            raise
         self.record_plan_version("planner")
+
+    def record_refused_plan(self, value, role):
+        """A candidate plan refused while its envelope was unpacked (review_evidence.unpack_plan
+        runs validate_plan before preflight_plan could record it): record its FAIL validation,
+        once, so plan_validations names the refused plan as the repairer path does. A refusal
+        of anything but the plan itself (envelope shape, claims) is not a plan validation.
+        Returns the refused plan when its validation was recorded, else None."""
+        plan = value.get("plan") if isinstance(value, dict) else None
+        if "review_evidence" not in self.context or plan is None:
+            return None
+        try:
+            validate_plan(plan, self.goal)
+        except Refused:
+            self.record_plan_validation(
+                plan, role, parser_accepted=False, claims=self.candidate_claims(value)
+            )
+            return plan
+        return None
 
     def stop_needs_info(self, role, question, gate, answer, planner_payload=None):
         """D9 CP-B3: an explicit NEEDS_INFO stop; no further role or process is started.
@@ -1021,10 +1084,25 @@ class Controller:
     def plan_source(self, role):
         return {"role": role, "occurrence": sum(r.get("role") == role for r in self.roles.receipts)}
 
+    def plan_claims(self):
+        """The claims envelope bound to the current plan (None without review evidence)."""
+        evidence = self.context.get("review_evidence")
+        return evidence.get("plan_claims") if evidence is not None else None
+
+    def plan_hash(self):
+        """The current plan version's hash: the plan plus its claims (plan_version_hash)."""
+        return plan_version_hash(self.plan, self.plan_claims())
+
+    def candidate_claims(self, value):
+        """The claims a candidate planner/repairer envelope carries, as accept_plan binds them."""
+        if "review_evidence" not in self.context or not isinstance(value, dict):
+            return None
+        return value.get("plan_claims", value.get("claims"))
+
     def record_plan_version(self, role):
         self.context["plan_source"] = self.plan_source(role)
         self.context.setdefault("plan_versions", []).append(
-            {"plan_hash": digest(self.plan), **self.context["plan_source"]}
+            {"plan_hash": self.plan_hash(), **self.context["plan_source"]}
         )
         self.checkpoint()
 
@@ -1047,12 +1125,18 @@ class Controller:
             argv[step_id if isinstance(step_id, str) else f"#{index}"] = tokens
         return argv
 
-    def record_plan_validation(self, plan, role, parser_accepted, failed_fields=None):
+    def record_plan_validation(
+        self, plan, role, parser_accepted, failed_fields=None, claims=CURRENT_CLAIMS
+    ):
+        """One plan_validations record and its dispatch event. ``claims`` defaults to the current
+        plan's claims; a candidate that was never accepted passes the claims it carried."""
         failed = plan_failed_fields(plan, self.goal) if failed_fields is None else failed_fields
         if not parser_accepted and not failed:
             failed = ["plan.steps.argv"]
+        if claims is CURRENT_CLAIMS:
+            claims = self.plan_claims()
         try:
-            plan_hash = digest(plan)
+            plan_hash = plan_version_hash(plan, claims)
         except (TypeError, ValueError):
             plan_hash = None
         record = {
@@ -1168,8 +1252,8 @@ class Controller:
                     gate="gate_evidence",
                     reason="artifact_identity_mismatch",
                 )
-        if self.context["active_approval"]["plan_hash"] != digest(self.plan):
-            changes.append({"object": "plan", "to_hash": digest(self.plan)})
+        if self.context["active_approval"]["plan_hash"] != self.plan_hash():
+            changes.append({"object": "plan", "to_hash": self.plan_hash()})
         if changes:
             raise ReturnToReview(
                 "approved binding changed: " + ", ".join(c["object"] for c in changes), changes
@@ -1211,7 +1295,7 @@ class Controller:
         # A request change was recorded where it was detected, just before the others.
         changed = self.context["material_changes"][-len(change.changes) :]
         indexes = [r["index"] for r in changed]
-        plan_hash = digest(self.plan)
+        plan_hash = self.plan_hash()
         # Re-review wait boundary: an accepted attributed operator replan (operator channel,
         # when this controller has one) returns to planning instead; a new plan starts its
         # own re-reviews (UC-05). Same repair and resume budgets either way.
@@ -1335,7 +1419,7 @@ class Controller:
         """
         evidence = self.context["review_evidence"]
         records = evidence["claim_checks"]
-        plan_hash = digest(self.plan)
+        plan_hash = self.plan_hash()
         if records and evidence.get("claim_check_binding") == self.binding:
             record = records[-1]
             if record["decision"] == "ROUTE_TO_REPAIR" or (
@@ -1453,7 +1537,7 @@ class Controller:
         self.emit("before_tool", {"skill": skill, "argv": argv})
         self.integrity()
         self.pending = {"kind": "tool", "skill": skill, "argv": argv}
-        self.checkpoint()
+        write_boundary.pending_checkpoint(self, skill, argv)  # PermissionError: pending cleared
         receipts = {"tool": skill} if "dispatch_evidence" in self.context else {}
         self.process_window = [] if receipts else None
         try:
@@ -1679,7 +1763,14 @@ class Controller:
         atomic_json(self.root / "result.json", result)
 
     def run(self):
+        # Controller-native confinement: the controller process's own HOME-derived caches and
+        # temp files live under run/scratch for the whole run, like its children's.
+        with confined_process(self.root / "scratch"):
+            return self._unconfined_run()
+
+    def _unconfined_run(self):
         try:
+            trace_records.record_initial_state(self)  # event_seq for the initial state
             result = self._supervised_run()
         except NeedsInfo as stop:
             terminal, mapping = self.terminal_for(stop)
@@ -1843,7 +1934,7 @@ class Controller:
             compiles = self.context.setdefault("compiles", [])
             while len(compiles) < 3:
                 candidate = self.ask("compiler", payload)
-                retain_goal(candidate, self.goal)
+                trace_records.retain_compiled_goal(self, candidate)  # goal_check record
                 compiles.append(candidate)
                 self.checkpoint()
             self.save("compiled-goals.json", compiles)
@@ -1877,12 +1968,25 @@ class Controller:
                 "For a repair also include response; retain all envelope fields.",
             }
         if self.state == "GOAL_CHECKED":
+            repaired = False
             if not self.plan:
-                self.accept_planner(plan_payload)
-            try:
-                self.preflight_plan()
-            except Refused as exc:
-                self.repair(plan_payload, str(exc))
+                try:
+                    self.accept_planner(plan_payload)
+                except Refused as exc:
+                    # A planner plan refused by validation (recorded by record_refused_plan) may
+                    # trigger repair like a preflight failure, but only within the allowance:
+                    # otherwise the original refusal stands (failed_gate plan_validation).
+                    # Envelope and claim refusals are not plan validations and are re-raised.
+                    refused = getattr(exc, "refused_plan", None)
+                    if refused is None or self.repairs_used >= self.max_repairs:
+                        raise
+                    self.repair(plan_payload, str(exc), prior_plan=refused)
+                    repaired = True
+            if not repaired:
+                try:
+                    self.preflight_plan()
+                except Refused as exc:
+                    self.repair(plan_payload, str(exc))
             self.binding = self.current_binding()
             self.save("plan.json", {"plan": self.plan, "binding_hash": self.binding})
             self.advance("PLAN_VALIDATED", self.plan)

@@ -1,0 +1,368 @@
+name: simkit-cases
+
+# Frozen SIMKIT v2.7 cases in the traced Linux container (owner ruling
+# container_route_ruling_2026-10-13). Oracles are PROPOSED: every score is diagnostic. Failed
+# cases are never retried automatically; harness failures are recorded as HARNESS_ERROR,
+# distinct from system-under-test failures.
+#
+# Live roles (kong_secret_ruling_2026-10-13): the Kong key is the Actions secret
+# KONG_ANTHROPIC_KEY, exposed ONLY to the step that starts the host-side relay
+# (container_harness/relay_ci.sh relay-start) and to the host-side key-absence scan. Run
+# containers never receive it: a live-role container joins a docker --internal network whose
+# only reachable endpoint is the relay port on the bridge gateway (iptables, proven by the
+# relay-smoke probes) and gets only SIMKIT_RELAY_URL/TOKEN/RUN_ID/MODEL (-e NAME, values in the
+# docker client env). Fixture/substituted containers keep --network none. Synthetic data only;
+# the relay audit carries status/via/request-id/model/usage only.
+on:
+  workflow_dispatch:
+    inputs:
+      selector:
+        description: "'admission' | 'substituted' (runnable offline cases) | 'live' (runnable live-role cases; paid) | 'relay-smoke' (ONE synthetic call container->relay->Kong) | comma-separated case ids"
+        required: true
+        default: admission
+      max_parallel:
+        description: "max concurrent case jobs"
+        required: false
+        default: "8"
+  push:
+    branches: [feat/simkit-gh-cases-snowyowl]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: simkit-cases-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # push = smoke: at most these two cases (one fault/control pair), and only if admitted.
+  SMOKE_IDS: DEV-E2E-V2_7-E02-P1-CTL,DEV-E2E-V2_7-E02-P1-INJ
+
+jobs:
+  relay-smoke:
+    # ONE tiny synthetic verifier call (claude-sonnet-4-6, max_tokens 256) through
+    # container -> host relay -> Kong, with egress probes and a host-side key-absence scan.
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.selector == 'relay-smoke'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}/relay-smoke-out
+      RELAY_DIR: /tmp/simkit-relay  # outside every uploaded path; runner context is not allowed in job env
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Runner Kong client + relay offline tests (pinned SDK, no network, no secret)
+        run: |
+          python -m pip install --quiet -r relay/runner_kit/requirements.txt pytest==9.1.1
+          python -B -m pytest -q -p no:cacheprovider \
+            tools/workflow/tests/test_runner_kong_client.py tools/workflow/tests/test_relay_roles.py
+
+      - name: Build harness image
+        id: build
+        run: |
+          mkdir -p "$OUT"
+          IMG="simkit-harness-ctl:${GITHUB_SHA::12}"
+          python container_harness/launch.py build --tag "$IMG" \
+            --context "$RUNNER_TEMP/harness-ctx" --record "$OUT/build.json"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Relay-only network (docker --internal + iptables)
+        run: bash container_harness/relay_ci.sh net-up "$RELAY_DIR"
+
+      - name: Start host relay (the ONLY step besides the key scan that sees the Kong key)
+        env:
+          KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
+          RELAY_ROLES: verifier
+          RELAY_MAX_REQUESTS: "1"
+          RELAY_MAX_TOKENS: "256"
+          RELAY_RUN_SECONDS: "900"
+        run: bash container_harness/relay_ci.sh relay-start "$RELAY_DIR"
+
+      - name: Smoke container (probes + one role call; no key, no exec, SYS_PTRACE only)
+        run: |
+          python container_harness/launch.py relay-smoke --image "${{ steps.build.outputs.image }}" \
+            --out "$OUT" --relay-dir "$RELAY_DIR"
+
+      - name: Key-absence proof (host-side scan of the exported container + artifacts; counts only)
+        if: always()
+        env:
+          KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
+        run: |
+          c=$(cat "$OUT/container.txt" 2>/dev/null || true)
+          python -I container_harness/kong_key_scan.py ${c:+--container "$c"} \
+            --scan-dir "$OUT" --scan-dir "$RELAY_DIR" --out "$OUT/key-scan.json"
+
+      - name: Tear down relay, rules, network and container
+        if: always()
+        run: |
+          c=$(cat "$OUT/container.txt" 2>/dev/null || true)
+          [ -n "$c" ] && docker rm -f "$c" > /dev/null
+          bash container_harness/relay_ci.sh teardown "$RELAY_DIR"
+          mkdir -p "$OUT/relay"
+          cp "$RELAY_DIR"/*.json "$RELAY_DIR"/*.jsonl "$RELAY_DIR"/*.txt "$RELAY_DIR"/relay.std* "$OUT/relay/" 2>/dev/null || true
+          test ! -e "$RELAY_DIR/secret"
+
+      - name: Assert smoke + summary
+        run: python -I container_harness/relay_smoke_report.py "$OUT" "$OUT/relay"
+
+      - name: Upload relay smoke evidence (no token, no key)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-relay-smoke
+          path: relay-smoke-out
+          retention-days: 30
+
+  admission:
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.selector != 'relay-smoke'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      count: ${{ steps.matrix.outputs.count }}
+      image: ${{ steps.build.outputs.image }}
+    env:
+      OUT: ${{ github.workspace }}/admission-out
+      SELECTOR: ${{ github.event_name == 'push' && 'smoke' || github.event.inputs.selector }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Harness unit tests (analyzer + report; not in ci.yml testpaths)
+        run: |
+          python -m pip install --quiet pytest==9.1.1
+          # test_case_driver_fixture_ops needs the controller stack; ci.yml runs it there.
+          python -B -m pytest -q -p no:cacheprovider container_harness/tests \
+            --ignore=container_harness/tests/test_case_driver_fixture_ops.py
+
+      - name: Verify frozen v2.7 package (committed fixture vs FINAL-PINS) and input pins
+        run: |
+          mkdir -p "$OUT"
+          python -B -c "import sys, json, pathlib, tempfile; sys.path.insert(0, 'tests'); import frozen_v27 as f; root = f.extract_fixture(dest=pathlib.Path(tempfile.mkdtemp())); print(json.dumps({'frozen_root': str(root), 'final_pins_sha256': f.FINAL_PINS_SHA256, 'verified': True}))" | tee "$OUT/frozen-verify.json"
+          python -I container_harness/verify_inputs.py <(python -c "import json; p = json.load(open('container_harness/pinned_inputs.json')); print(json.dumps({'supplement_id': p['supplement_id'], 'files': [{'role': f['role'], 'path': f['repo_path'], 'sha256': f['sha256']} for f in p['files']]}))") --out "$OUT/input-verify.json" > /dev/null
+
+      - name: Build harness image (once)
+        id: build
+        run: |
+          IMG="simkit-harness-ctl:${GITHUB_SHA::12}"
+          python container_harness/launch.py build --tag "$IMG" \
+            --context "$RUNNER_TEMP/harness-ctx" --record "$OUT/build.json"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Frozen-runner capability admission (all 66 cases; never executes a case)
+        run: |
+          python container_harness/launch.py admission --image "${{ steps.build.outputs.image }}" \
+            --out "$OUT/ADMISSION.json" --selector "$SELECTOR" --smoke-ids "$SMOKE_IDS"
+
+      - name: Case matrix
+        id: matrix
+        run: |
+          python - "$OUT/ADMISSION.json" >> "$GITHUB_OUTPUT" <<'EOF'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          print("matrix=" + json.dumps({"include": a["matrix"]}))
+          print("count=" + str(len(a["matrix"])))
+          EOF
+          python -B - "$OUT/ADMISSION.json" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import json, sys
+          sys.path.insert(0, "container_harness")
+          import cases_report
+          a = json.load(open(sys.argv[1]))
+          c = a["counts"]
+          g = cases_report.admission_gate(a)
+          if c["selected"] == 0:
+              print(f"## {g['message']}\n")
+          if g["status"] == "FAIL":
+              print("**This run will FAIL: the selector is meant to execute cases.**\n")
+          print(f"### Admission (frozen runner)\n\nselector `{a['selector']}`: {c['total']} cases, "
+                f"admitted {c['admitted']}, NOT_IMPLEMENTED {c['not_implemented']}, "
+                f"selected {c['selected']}\n\ndispositions: `{json.dumps(c['dispositions'])}`\n")
+          for cap, n in list(a["missing_capability_counts"].items())[:10]:
+              print(f"- {cap}: {n} ({a['missing_capability_reasons'].get(cap)})")
+          EOF
+
+      - name: Save image for the case jobs
+        if: steps.matrix.outputs.count != '0'
+        run: |
+          docker save "${{ steps.build.outputs.image }}" | gzip -1 > "$RUNNER_TEMP/harness-image.tar.gz"
+          ls -l "$RUNNER_TEMP/harness-image.tar.gz"
+
+      - name: Upload image
+        if: steps.matrix.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-harness-image
+          path: ${{ runner.temp }}/harness-image.tar.gz
+          retention-days: 2
+          compression-level: 0
+
+      - name: Upload admission
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-admission
+          path: admission-out
+          retention-days: 30
+
+      - name: Unknown case ids in the selector fail the run (after the admission upload)
+        run: |
+          python -c "import json, sys; a = json.load(open('$OUT/ADMISSION.json')); u = a['unknown_selected_ids']; print('unknown ids:', u); sys.exit(1 if u else 0)"
+
+      - name: A selector meant to execute cases that selects none fails the run (after the admission upload)
+        # 'admission' / 'relay-smoke' / push 'smoke' select nothing by design and pass here; the
+        # report job's execution gate also fails a run whose EXECUTED count is below selected.
+        run: |
+          python -B -c "import json, sys; sys.path.insert(0, 'container_harness'); import cases_report as r; g = r.admission_gate(json.load(open('$OUT/ADMISSION.json'))); print('execution gate (admission):', json.dumps(g)); sys.exit(1 if g['status'] == 'FAIL' else 0)"
+
+  case:
+    needs: admission
+    if: needs.admission.outputs.count != '0' && needs.admission.outputs.count != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '8') }}
+      matrix: ${{ fromJSON(needs.admission.outputs.matrix) }}
+    env:
+      CASE_OUT: ${{ github.workspace }}/case-out/${{ matrix.case_id }}
+      IMG: ${{ needs.admission.outputs.image }}
+      RELAY_DIR: /tmp/simkit-relay  # outside every uploaded path; runner context is not allowed in job env
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: simkit-harness-image
+          path: ${{ runner.temp }}/img
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: simkit-admission
+          path: ${{ runner.temp }}/admission
+
+      - name: Load image and check it is the admission job's build
+        run: |
+          gunzip -c "$RUNNER_TEMP/img/harness-image.tar.gz" | docker load
+          want=$(python -c "import json; print(json.load(open('$RUNNER_TEMP/admission/build.json'))['image_id'])")
+          got=$(docker image inspect -f '{{.Id}}' "$IMG")
+          echo "built=$want loaded=$got"
+          test "$want" = "$got"
+
+      - name: Relay-only network (live-role case)
+        if: matrix.role_mode == 'live'
+        run: bash container_harness/relay_ci.sh net-up "$RELAY_DIR"
+
+      - name: Start host relay (live-role case; the only step that sees the Kong key)
+        if: matrix.role_mode == 'live'
+        env:
+          KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
+          RELAY_ROLES: compiler planner repairer reviewer evidence_checker verifier router
+          RELAY_MAX_REQUESTS: "60"
+          RELAY_MAX_TOKENS: "2048"
+          RELAY_RUN_SECONDS: "2100"
+        run: bash container_harness/relay_ci.sh relay-start "$RELAY_DIR"
+
+      - name: Run case in the traced container (no network; live roles via the relay only)
+        run: |
+          relay=()
+          [ "${{ matrix.role_mode }}" = live ] && relay=(--relay-dir "$RELAY_DIR")
+          python container_harness/launch.py run case --case-id "${{ matrix.case_id }}" \
+            --image "$IMG" --out "$CASE_OUT" "${relay[@]}"
+
+      - name: Tear down relay (live-role case)
+        if: always() && matrix.role_mode == 'live'
+        run: |
+          bash container_harness/relay_ci.sh teardown "$RELAY_DIR"
+          mkdir -p "$CASE_OUT/relay"
+          cp "$RELAY_DIR"/*.json "$RELAY_DIR"/*.jsonl "$RELAY_DIR"/*.txt "$RELAY_DIR"/relay.std* "$CASE_OUT/relay/" 2>/dev/null || true
+          test ! -e "$RELAY_DIR/secret"
+
+      - name: Key-absence scan of the case artifacts (live-role case; counts only)
+        if: always() && matrix.role_mode == 'live'
+        env:
+          KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
+        run: python -I container_harness/kong_key_scan.py --scan-dir "$CASE_OUT" --out "$RUNNER_TEMP/key-scan.json" && cp "$RUNNER_TEMP/key-scan.json" "$CASE_OUT/relay/"
+
+      - name: Pack raw trace separately
+        if: always()
+        run: |
+          mkdir -p "$CASE_OUT"
+          if [ -d "$CASE_OUT/harness-out/trace" ]; then
+            tar -czf "$RUNNER_TEMP/raw-trace.tgz" -C "$CASE_OUT/harness-out" trace
+            rm -rf "$CASE_OUT/harness-out/trace"
+          fi
+
+      - name: Upload case result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: case-${{ matrix.case_id }}
+          path: case-out
+          retention-days: 30
+
+      - name: Upload raw trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-${{ matrix.case_id }}
+          path: ${{ runner.temp }}/raw-trace.tgz
+          retention-days: 7
+          if-no-files-found: ignore
+
+  report:
+    needs: [admission, case]
+    if: always() && needs.admission.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: simkit-admission
+          path: report-in/admission
+
+      - uses: actions/download-artifact@v4
+        # No case artifacts (nothing admitted/selected) is a normal outcome; a selected case
+        # without an artifact is reported HARNESS_ERROR no_case_artifact, never dropped.
+        continue-on-error: true
+        with:
+          pattern: case-*
+          path: report-in/cases
+
+      - name: Aggregate RESULTS.json + RESULTS.md
+        run: |
+          mkdir -p results
+          mkdir -p report-in/cases
+          python -B container_harness/cases_report.py report-in/admission/ADMISSION.json report-in/cases \
+            --out results/RESULTS.json --markdown results/RESULTS.md \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          cp report-in/admission/ADMISSION.json results/
+          cat results/RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simkit-results
+          path: results
+          retention-days: 30
+
+      - name: Execution gate (after the results upload; fails when selected cases did not all EXECUTE)
+        run: python -B container_harness/cases_report.py gate results/RESULTS.json

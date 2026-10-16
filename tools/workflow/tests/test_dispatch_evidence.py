@@ -78,10 +78,13 @@ def test_resume_continues_global_sequence_and_role_occurrence(tmp_path, monkeypa
     resumed = Controller.resume(c.root, c.processes, Roles(c.processes, c.root))
     resumed.ask("compiler", {})
     records = events(c.root)
-    assert [r["sequence"] for r in records] == list(range(1, 9))
-    assert records[4]["kind"] == "resume"
-    assert records[5]["occurrence"] == 2
-    assert records[5]["resume_phase"] == 1
+    # The checkpoint has no terminal record, so the resume first records the stop it observed
+    # (wave 7: one interruption, observed=checkpoint_without_terminal) on the same clock.
+    assert [r["sequence"] for r in records] == list(range(1, 10))
+    assert records[4]["kind"] == "interruption"
+    assert records[5]["kind"] == "resume"
+    assert records[6]["occurrence"] == 2
+    assert records[6]["resume_phase"] == 1
 
 
 @pytest.mark.parametrize("error", [RuntimeError("lost envelope"), KeyboardInterrupt()])

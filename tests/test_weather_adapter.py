@@ -18,7 +18,20 @@ from simkit.runner import run  # noqa: E402 - explicit pinned test/package boots
 from adapter_support.weather_adapter import (  # noqa: E402 - explicit pinned test/package bootstrap
     EvidenceMappingError,
     WeatherAdapter,
+    load_producers,
 )
+
+
+def unsigned_producers():
+    """The committed producer records with every D4 signature removed: these tests pin the
+    adapter's own (P2/P8) declarations, independent of which records are signed."""
+    producers = load_producers()
+    for record in producers["capabilities"].values():
+        if record.get("d4_gated") is True:
+            record.update(reviewer=None, reviewed_at=None, reviewed_commit=None)
+    return producers
+
+
 from tools.workflow.tests.test_review_evidence import (  # noqa: E402 - explicit pinned test/package bootstrap
     ReviewReached,
     make_controller,
@@ -34,7 +47,7 @@ def accepted_controller(tmp_path, monkeypatch, change=None):
 
 def test_direct_accepted_stub_preserves_observed_review_input(tmp_path, monkeypatch):
     controller, process = accepted_controller(tmp_path, monkeypatch)
-    adapter = WeatherAdapter()
+    adapter = WeatherAdapter(producers=unsigned_producers())
     assert isinstance(adapter, Adapter)
     diagnostic = adapter.capture_review_diagnostics(controller)
     assert diagnostic["kind"] == "DIRECT_DIAGNOSTIC_NOT_ADMITTED_SIMKIT_CASE"
@@ -124,7 +137,8 @@ def test_real_simkit_blocks_required_caps_before_run_case():
             self.calls += 1
             raise AssertionError("unsupported case must never dispatch")
 
-    adapter = DispatchSpy()
+    # Unsigned records: the requirements below are then undeclared and must block dispatch.
+    adapter = DispatchSpy(producers=unsigned_producers())
     required = ["CAP-BOUND-SOURCES", "CAP-RECEIPTS", "CAP-HARNESS-OBS"]
     # Fresh structural local request, not a frozen case or a claimed case pass.
     case = {"id": "LOCAL-CAPABILITY-ADMISSION-NEGATIVE", "adapter_requirements": required}
@@ -136,7 +150,7 @@ def test_real_simkit_blocks_required_caps_before_run_case():
 
 
 def test_manifest_only_extension_name_is_not_implemented():
-    adapter = WeatherAdapter()
+    adapter = WeatherAdapter(producers=unsigned_producers())
     declared = copy.deepcopy(adapter.extension_methods)
     assert declared["CAP-BOUND-SOURCES"] == "capture_bound_sources"
     # P8 adds the method; owner ruling D4 keeps it undeclared until its producer record is
@@ -191,7 +205,7 @@ def test_dependency_dispatch_methods_report_observed_dispositions_only():
 
 def test_definition_symbol_resolves_only_exact_reviewed_whole_registry(tmp_path, monkeypatch):
     controller, _ = accepted_controller(tmp_path, monkeypatch)
-    adapter = WeatherAdapter()
+    adapter = WeatherAdapter(producers=unsigned_producers())
     raw = (controller.repo / "skills/onset-date/references/onset_definitions.toml").read_bytes()
     symbol = "HARNESS_SOURCE_HASH:definition.agrhymet-sos-rolling"
     assert adapter.resolve_review_diagnostic_symbol(controller, symbol, 1) == (

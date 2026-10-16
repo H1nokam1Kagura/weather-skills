@@ -16,6 +16,12 @@ Evidence path (opt-in; nothing changes when no new option is passed):
   (stop_reason ``exception:<Type>+stop_failed``). A stopped child's ``process_exit``
   carries ``exit_code`` and ``wall_seconds`` both null (EVIDENCE_CONTRACT v2_5
   process_reconciliation); ``min_free_gib`` is null when no in-run sample was taken.
+* Guard refusals carry ``gate="resource_guard"`` at the raise site (owner ruling
+  role_cli_resource_gate_2026-10-14): the launch-check RAM floor and aggregate time budget,
+  an unmeasurable RAM reading, and an in-run stop by the RAM guard or the wall-time guard
+  (per-process timeout or aggregate deadline). The gate therefore survives every caller's
+  call-site tagging, including Controller.ask for a role CLI. The output-budget stop stays
+  untagged: it is a role-output (or tool) failure that the caller's call site classifies.
 * ``memory_reader`` replaces ``free_gib`` at the launch check and in sampling; its
   readings are reported as-is, with ``reading_source`` ``observed`` or ``injected``.
 * ``signal_capture=True`` (Windows) launches the root suspended inside a census job,
@@ -42,6 +48,11 @@ from .contracts import Refused
 from .persistence import atomic_json
 
 LOG = logging.getLogger(__name__)
+# In-run stop reasons that are the RAM floor or the wall-time guard (resource_guard).
+RAM_GUARD = "RAM guard"
+TIME_GUARD = "time budget exhausted"
+OUTPUT_GUARD = "output budget exhausted"
+RESOURCE_STOPS = frozenset({RAM_GUARD, TIME_GUARD})
 _RECEIPT = re.compile(r"process-(\d+)(?:\.start)?\.json")
 
 
@@ -62,7 +73,7 @@ def free_gib():
     for line in Path("/proc/meminfo").read_text().splitlines():
         if line.startswith("MemAvailable:"):
             return int(line.split()[1]) / 1024**2
-    raise Refused("available RAM cannot be measured")
+    raise Refused("available RAM cannot be measured", gate="resource_guard")
 
 
 def stop(proc, observe=None, reason="unspecified"):
@@ -345,9 +356,9 @@ class Processes:
             },
         )
         if not budget_ok:
-            raise Refused("insufficient free RAM to start a child")
+            raise Refused("insufficient free RAM to start a child", gate="resource_guard")
         if not time_ok:
-            raise Refused("aggregate time budget exhausted")
+            raise Refused("aggregate time budget exhausted", gate="resource_guard")
         self.serial += 1
         serial = self.serial
         samples = []
@@ -411,14 +422,14 @@ class Processes:
                     while proc.poll() is None:
                         samples.append(self._read_memory())
                         if samples[-1] < self.ram_floor:
-                            reason = "RAM guard"
+                            reason = RAM_GUARD
                         if (
                             time.monotonic() - started > self.timeout
                             or time.monotonic() > self.deadline
                         ):
-                            reason = "time budget exhausted"
+                            reason = TIME_GUARD
                         if sum(sizes()) > 4_000_000:
-                            reason = "output budget exhausted"
+                            reason = OUTPUT_GUARD
                         if reason:
                             record = self._stop(proc, reason, capture)
                             killed = True
@@ -460,7 +471,7 @@ class Processes:
             self._observe("process_exit", proc, exit_code=proc.returncode)
             measured = sizes()
             if sum(measured) > 4_000_000:
-                reason = "output budget exhausted"
+                reason = OUTPUT_GUARD
             output.seek(0)
             error.seek(0)
             result = {
@@ -497,6 +508,8 @@ class Processes:
             if reason:
                 deferred[0].add_note(f"process stop reason: {reason}")
             raise deferred[0]
+        if reason in RESOURCE_STOPS:
+            raise Refused(reason, gate="resource_guard")
         if reason:
             raise Refused(reason)
         return result

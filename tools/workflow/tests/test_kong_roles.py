@@ -150,6 +150,38 @@ def test_transport_errors_after_send_are_unknown_never_success(tmp_path, process
     assert agent.unknown_outcomes[0]["outcome"] == "UNKNOWN"
 
 
+class GuardedProcess(Process):
+    """The process manager's RAM/time guard: refused before launch, or stopped after it."""
+
+    def __init__(self, launched):
+        super().__init__()
+        self.serial = 0
+        self.launched = launched
+
+    def run(self, argv, cwd, env, stdin):
+        if self.launched:
+            self.serial += 1
+            raise Refused("time budget exhausted", gate="resource_guard")
+        raise Refused("insufficient free RAM to start a child", gate="resource_guard")
+
+
+@pytest.mark.parametrize("launched", [False, True], ids=["refused_at_launch", "stopped"])
+def test_process_manager_resource_guard_is_resource_guard_never_unknown(tmp_path, launched):
+    """Owner ruling role_cli_resource_gate_2026-10-14: the worker refused or stopped by the
+    RAM floor / wall-time guard raises the Refused with gate resource_guard."""
+    agent = roles(tmp_path, GuardedProcess(launched))
+    with pytest.raises(Refused) as caught:
+        agent.ask("verifier", {})
+    assert caught.value.gate == "resource_guard"
+    assert not isinstance(caught.value, KongOutcomeUnknown) and agent.receipts == []
+    if launched:  # the request may have left: reservation kept, outcome recorded UNKNOWN
+        assert agent.spent == agent.budget
+        (record,) = agent.unknown_outcomes
+        assert record["outcome"] == "UNKNOWN" and record["failed_gate"] == "resource_guard"
+    else:  # nothing launched, so nothing was sent
+        assert agent.spent == 0.0 and agent.unknown_outcomes == []
+
+
 def test_unknown_carries_redacted_gateway_evidence(tmp_path):
     error = {"status": 429, "via": "1.1 kong", "request_id": "r-1", "hint": "rate limited"}
     agent = roles(tmp_path, Process(envelope(ok=False, error=error, error_type="RateLimitError")))

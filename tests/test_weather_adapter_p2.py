@@ -24,7 +24,20 @@ from adapter_support.weather_adapter import (  # noqa: E402 - explicit pinned te
     SOURCE_HASH_ALGORITHM,
     AdapterRefusal,
     WeatherAdapter,
+    load_producers,
 )
+
+
+def unsigned_producers():
+    """The committed producer records with every D4 signature removed: these tests pin the
+    adapter's own (P2/P8) declarations, independent of which records are signed."""
+    producers = load_producers()
+    for record in producers["capabilities"].values():
+        if record.get("d4_gated") is True:
+            record.update(reviewer=None, reviewed_at=None, reviewed_commit=None)
+    return producers
+
+
 from tools.workflow.catalog import tree_hash  # noqa: E402 - explicit pinned test bootstrap
 from tools.workflow.contracts import Refused, digest  # noqa: E402 - explicit pinned test bootstrap
 from tools.workflow.e2e_injections import (  # noqa: E402 - explicit pinned test bootstrap
@@ -68,7 +81,7 @@ def case_by_id(frozen, case_id):
 
 
 def test_implemented_capabilities_gain_exactly_the_p2_set():
-    implemented = WeatherAdapter().implemented_capabilities()
+    implemented = WeatherAdapter(producers=unsigned_producers()).implemented_capabilities()
     assert implemented == IMPLEMENTED
     for absent in ("CAP-SIGNAL-CAPTURE", "CAP-RUN-PROVENANCE", "CAP-PROFILE", "CAP-BOUND-SOURCES"):
         assert absent not in implemented
@@ -85,7 +98,7 @@ def test_implemented_capabilities_gain_exactly_the_p2_set():
         "CAP-REVIEW-APPROVAL-HOOK",
     }
     # P8 adds the method; owner ruling D4 keeps it undeclared until its record is reviewed.
-    assert WeatherAdapter().d4_declared("CAP-BOUND-SOURCES") is False
+    assert WeatherAdapter(producers=unsigned_producers()).d4_declared("CAP-BOUND-SOURCES") is False
     assert WeatherAdapter().can_run() is False
 
 
