@@ -340,6 +340,36 @@ def test_rerun_gate_counts_attempts_from_the_live_section_too():
     assert g["status"] == "FAIL" and g["cases"][0]["prior_attempts"] == 2
 
 
+@pytest.mark.parametrize(
+    "content",
+    ["{not json", "[]", '"RESULTS"', ""],
+    ids=["corrupt", "json-list", "json-string", "empty"],
+)
+def test_rerun_gate_refuses_an_unreadable_original_record_fail_closed(tmp_path, content):
+    a = tmp_path / "ADMISSION.json"
+    a.write_text(json.dumps(adm("L0", live=1, offline=0)), encoding="utf-8")
+    r = tmp_path / "RESULTS.json"
+    r.write_text(content, encoding="utf-8")
+    out = tmp_path / "RERUN-GATE.json"
+    argv = ["rerun-gate", str(a), "--prior-results", str(r), "--rerun-of-run-id", "9"]
+    assert ru.main([*argv, "--out", str(out), "--now", AFTER.isoformat()]) == 1
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    assert rec["status"] == "FAIL" and rec["original_results_present"] is False
+    assert any("no readable simkit-results RESULTS.json" in p for p in rec["problems"])
+
+
+def test_rerun_gate_refuses_an_unreadable_admission(tmp_path):
+    g = ru.rerun_gate(None, prior(attempts={"L0": 1}), "1", AFTER)
+    assert g["status"] == "FAIL" and g["selected"] == []
+    assert any("ADMISSION.json absent or unreadable" in p for p in g["problems"])
+    a = tmp_path / "ADMISSION.json"
+    a.write_text("{not json", encoding="utf-8")
+    r = tmp_path / "RESULTS.json"
+    r.write_text(json.dumps(prior(attempts={"L0": 1})), encoding="utf-8")
+    argv = ["rerun-gate", str(a), "--prior-results", str(r), "--rerun-of-run-id", "9"]
+    assert ru.main([*argv, "--out", str(tmp_path / "g.json"), "--now", AFTER.isoformat()]) == 1
+
+
 def test_rerun_gate_cli(tmp_path, capsys):
     a = tmp_path / "ADMISSION.json"
     a.write_text(json.dumps(adm("L0", live=1, offline=0)), encoding="utf-8")
