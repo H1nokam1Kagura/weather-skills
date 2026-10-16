@@ -31,18 +31,22 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Sharded by testpath (the live wave pushed the single job past its 10-minute limit at
-    # 51089d0, run 38927195399). The shards' union must equal pyproject testpaths: the
-    # coverage step below fails if a testpath is added or dropped without a shard.
+    # Sharded (the live wave pushed the single job past its 10-minute limit at 51089d0, run
+    # 38927195399). skills/ must share a shard with tests/: skills tests import helpers via
+    # `from conftest import ...`, which resolves to tests/conftest.py only when tests/ is
+    # collected (a skills-only shard imports the root conftest.py and fails to collect). So
+    # shard 1 = skills + registry + tests/ minus the HEAVY modules; shard 2 = tools/workflow/tests
+    # + exactly those modules (slowest setups in the first sharded run). The coverage step fails if the
+    # shards stop covering pyproject testpaths or the moved files.
     strategy:
       fail-fast: false
       matrix:
-        shard:
-          - name: tests
-            paths: tests
-          - name: skills-registry-workflow
-            paths: skills registry tools/workflow/tests
-    name: pytest (${{ matrix.shard.name }})
+        shard: [main, workflow-heavy]
+    name: pytest (${{ matrix.shard }})
+    env:
+      HEAVY: >-
+        tests/test_live_roles_adapter.py tests/test_live_wave_adapter.py
+        tests/test_resume_family_adapter.py tests/test_fixture_rereview_adapter.py
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,18 +57,23 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --group dev
-      - name: Shards cover every configured testpath
+      - name: Shards cover every configured testpath and every moved module
         run: |
           uv run python - <<'PY'
-          import tomllib
+          import os, tomllib
+          from pathlib import Path
           testpaths = set(tomllib.load(open("pyproject.toml", "rb"))["tool"]["pytest"]["ini_options"]["testpaths"])
-          shards = {"tests", "skills", "registry", "tools/workflow/tests"}
-          assert testpaths == shards, (sorted(testpaths), sorted(shards))
+          assert testpaths == {"skills", "registry", "tests", "tools/workflow/tests"}, sorted(testpaths)
+          heavy = os.environ["HEAVY"].split()
+          assert heavy and all(Path(h).is_file() and h.startswith("tests/") for h in heavy), heavy
           PY
-      - run: uv run pytest --durations=15 ${{ matrix.shard.paths }}
+      - if: matrix.shard == 'main'
+        run: uv run pytest --durations=15 skills registry tests $(printf -- '--ignore=%s ' $HEAVY)
+      - if: matrix.shard == 'workflow-heavy'
+        run: uv run pytest --durations=15 tools/workflow/tests $HEAVY
       # container_harness/ is outside testpaths (its other tests run in simkit-cases.yml's slim
       # step), but this module needs the controller stack: the CAP-FIXTURE-OP record lists it.
-      - if: matrix.shard.name == 'skills-registry-workflow'
+      - if: matrix.shard == 'workflow-heavy'
         run: uv run pytest -q container_harness/tests/test_case_driver_fixture_ops.py
 
   discover:
