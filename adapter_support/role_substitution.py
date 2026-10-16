@@ -417,10 +417,10 @@ def substitution_plan(case, goal=None):
         name = selector.get("role_or_tool_or_stage")
         if name not in SUBSTITUTABLE_SELECTORS:
             raise AdapterRefusal(f"schedule entry {index}: no substitution channel for {name!r}")
-        if name not in substituted or name in live:
+        if name not in substituted:  # live + substituted: split occurrence (live_roles)
             raise AdapterRefusal(
-                f"schedule entry {index}: {name} is not a substituted-only role in this case; "
-                "a live role's output is never replaced"
+                f"schedule entry {index}: {name} is not a substituted role in this case; "
+                f"a live role's output is never replaced (live here: {sorted(live)})"
             )
         payload, mapping, wrapping = _map_entry(index, spec, goal, pair_of(case))
         native_schedule.append({**copy.deepcopy(spec), "payload": payload})
@@ -461,13 +461,13 @@ def refuse_unsupported_schedule(case):
 class SubstitutedRoles:
     """Controller roles double (agents.Roles attribute contract); no model is called."""
 
-    def __init__(self, case, goal, budget=5):
+    def __init__(self, case, goal, budget=5, allow_live=False):
         AdapterRefusal = _refusal()
         check_goal(goal)
         roles = case.get("agent_roles") if isinstance(case, dict) else None
         if not isinstance(roles, dict) or not roles.get("substituted"):
             raise AdapterRefusal("case lists no substituted roles")
-        if roles.get("live"):
+        if roles.get("live") and not allow_live:  # allow_live: live_roles.CombinedRoles member
             raise AdapterRefusal(
                 "live + substituted roles in one run need a combining transport (not built)"
             )
@@ -690,8 +690,11 @@ def case_hooks(plan, roles, disposable_root):
     """None when the case schedules nothing (the run then keeps the observer alone)."""
     if not plan["native_case"]["injection_schedule"]:
         return None
+    from adapter_support.live_roles import CombinedRoles
+
+    double = roles.double if isinstance(roles, CombinedRoles) else roles
     if plan["entries"] and not (
-        isinstance(roles, SubstitutedRoles) and roles.case_id == plan["case_id"]
+        isinstance(double, SubstitutedRoles) and double.case_id == plan["case_id"]
     ):
         _refuse("scheduled role substitution needs this case's substituted roles factory")
     return CaseScheduleHooks(plan, roles, disposable_root)
