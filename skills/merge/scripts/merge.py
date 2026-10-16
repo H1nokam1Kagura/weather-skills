@@ -85,6 +85,13 @@ def merge(ds, by_year, **kwargs):
     except xr.MergeError as exc:
         found = re.search(r"variable '([^']+)'", str(exc))
         name = found.group(1) if found else "a coordinate"
+        # Bounds differ when one input labels steps [prev, step] (an instant
+        # field such as MSLP) and another [step, next) (an average such as precip).
+        if any(c.attrs.get("bounds") == name for item in dss for c in item.coords.values()):
+            raise UsageError(
+                f"inputs have different {name!r} (e.g. an instant field labelled [prev, step] "
+                "and an averaged one labelled [step, next)); they describe different intervals"
+            ) from None
         raise UsageError(
             f"inputs have different values of {name!r} (e.g. two forecast init dates, or one "
             "station at two locations); merge only inputs that agree on it"

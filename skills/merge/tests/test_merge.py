@@ -89,3 +89,21 @@ def test_errors(tmp_path, merge, capsys):
         with pytest.raises(SystemExit):
             run_skill(merge, *argv, "-o", str(tmp_path / "x.zarr"))
         assert match in capsys.readouterr().err
+
+
+def test_differing_bounds_fail(tmp_path, merge, capsys):
+    """MSLP (instant) labels its steps [prev, step]; precip (avg) [step, next]: refuse."""
+    hour = np.timedelta64(1, "h")
+    steps = np.arange(3) * hour
+
+    def _with_bounds(name, lo):
+        ds = make_forecast(n_step=3, name=name).assign_coords(step=steps)
+        ds = ds.assign_coords(step_bounds=(("step", "nv"), np.stack([lo, lo + hour], axis=1)))
+        ds["step"].attrs["bounds"] = "step_bounds"
+        return ds
+
+    tp = write_zarr(_with_bounds("precip", steps), tmp_path / "tp.zarr")
+    msl = write_zarr(_with_bounds("msl", steps - hour), tmp_path / "msl.zarr")
+    with pytest.raises(SystemExit):
+        run_skill(merge, "-i", str(msl), "-i", str(tp), "-o", str(tmp_path / "out.zarr"))
+    assert "different intervals" in capsys.readouterr().err
