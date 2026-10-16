@@ -406,6 +406,56 @@ class WeatherAdapter(Adapter):
             ],
         }
 
+    def plan_case(self, case, profile_document, repo):
+        """run_case's admission checks and static plans, before any side effect (AdapterRefusal
+        otherwise): {variant, shadow, scheduled, fixture, schedule, max_repairs}. Also read by
+        prepare_before_run_fixture, so fixture preparation plans exactly what run_case runs."""
+        if not self.enable_run_case:
+            raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
+        if not isinstance(case, dict) or not isinstance(case.get("adapter_requirements"), list):
+            raise AdapterRefusal("a case with adapter_requirements is required")
+        missing = sorted(set(case["adapter_requirements"]) - self.implemented_capabilities())
+        if missing:
+            raise AdapterRefusal(f"case requires undeclared capabilities: {missing}")
+        # D21 (CR-05): each scheduled operation's implied capability must be declared too.
+        implied = resume_driver.implied_missing(case, self.implemented_capabilities())
+        if implied:
+            raise AdapterRefusal(f"case schedule implies undeclared capabilities: {implied}")
+        variant = self.select_profile(case, profile_document)
+        # CAP-SHADOW: invocation points, vocabulary and the shadow decision entries (delivered
+        # by shadow_projection, not InjectionHooks), mapped or refused before any side effect.
+        shadow_plan = self.drive_shadow_policy(case)
+        if shadow_plan["configured"] and "CAP-SHADOW" not in self.implemented_capabilities():
+            raise AdapterRefusal("the case configures the shadow policy; CAP-SHADOW is undeclared")
+        scheduled = shadow_projection.schedule_without_shadow(case, shadow_plan)
+        # The schedule is mapped or refused here, before any side effect (CAP-ROLE-SUBSTITUTE);
+        # the mid-process stop form only with a stopper (the forked route, resume_driver).
+        resume_driver.refuse_unsupported_schedule(scheduled, resume_driver.stop_delivery(scheduled))
+        resume_driver.refuse_unsupported_route(scheduled, shadow_plan["configured"])
+        return {
+            "variant": variant,
+            "shadow": shadow_plan,
+            "scheduled": scheduled,
+            "fixture": self.apply_fixture_operation(scheduled, repo),
+            "schedule": self.substitute_role_output(scheduled, variant["goal"]),
+            "max_repairs": self.configure_repair(case),
+        }
+
+    def prepare_before_run_fixture(self, case, prepared, profile_document, repo):
+        """CAP-FIXTURE-OP fixture preparation (container case mode: ``case_driver prepare``,
+        untraced, before the trace baseline): the case's before_run fixture operations on the
+        disposable source copy of a prepare_fixture record, applied before the run starts
+        (fixture_rereview_projection.prestage_before_run). -> the record run_case adopts
+        (prepared["before_run_fixture"]), or None when the case schedules none or run_case
+        would refuse the case (nothing applied; run_case refuses it with the same reason)."""
+        try:
+            plans = self.plan_case(case, profile_document, repo)
+        except AdapterRefusal:
+            return None
+        return fixture_ops.prestage_before_run(
+            plans["fixture"], plans["schedule"]["native_case"], prepared
+        )
+
     def run_case(self, case, profile):
         """CAP-NOT-IMPLEMENTED lifecycle (opt-in). Refuses before any side effect unless every
         capability the case requires is declared; then stages the owned fixture, seeds the
@@ -427,31 +477,10 @@ class WeatherAdapter(Adapter):
 
         Without either (in-process route) everything is staged and written as before.
         """
-        if not self.enable_run_case:
-            raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
-        if not isinstance(case, dict) or not isinstance(case.get("adapter_requirements"), list):
-            raise AdapterRefusal("a case with adapter_requirements is required")
-        missing = sorted(set(case["adapter_requirements"]) - self.implemented_capabilities())
-        if missing:
-            raise AdapterRefusal(f"case requires undeclared capabilities: {missing}")
-        # D21 (CR-05): each scheduled operation's implied capability must be declared too.
-        implied = resume_driver.implied_missing(case, self.implemented_capabilities())
-        if implied:
-            raise AdapterRefusal(f"case schedule implies undeclared capabilities: {implied}")
-        variant = self.select_profile(case, profile["profile_document"])
-        # CAP-SHADOW: invocation points, vocabulary and the shadow decision entries (delivered
-        # by shadow_projection, not InjectionHooks), mapped or refused before any side effect.
-        shadow_plan = self.drive_shadow_policy(case)
-        if shadow_plan["configured"] and "CAP-SHADOW" not in self.implemented_capabilities():
-            raise AdapterRefusal("the case configures the shadow policy; CAP-SHADOW is undeclared")
-        scheduled = shadow_projection.schedule_without_shadow(case, shadow_plan)
-        # The schedule is mapped or refused here, before any side effect (CAP-ROLE-SUBSTITUTE);
-        # the mid-process stop form only with a stopper (the forked route, resume_driver).
-        resume_driver.refuse_unsupported_schedule(scheduled, resume_driver.stop_delivery(scheduled))
-        resume_driver.refuse_unsupported_route(scheduled, shadow_plan["configured"])
-        fixture_plan = self.apply_fixture_operation(scheduled, profile["repo"])
-        schedule_plan = self.substitute_role_output(scheduled, variant["goal"])
-        max_repairs = self.configure_repair(case)
+        plans = self.plan_case(case, profile["profile_document"], profile["repo"])
+        variant, shadow_plan, scheduled = plans["variant"], plans["shadow"], plans["scheduled"]
+        fixture_plan, schedule_plan = plans["fixture"], plans["schedule"]
+        max_repairs = plans["max_repairs"]
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
         channel = profile.get("projection_inputs_channel")
         if profile.get("prepared_fixture") is not None:
@@ -465,6 +494,10 @@ class WeatherAdapter(Adapter):
                 source=profile["source"],
                 generator_provenance=profile["generator_provenance"],
                 presented_fetch_version=profile["presented_fetch_version"],
+            )
+            # In-process route: the same before_run fixture preparation, before the controller.
+            prepared["before_run_fixture"] = fixture_ops.prestage_before_run(
+                fixture_plan, schedule_plan["native_case"], prepared
             )
         run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
         # A copy: a before_run FX-LEDGER-APPEND edits seeded["request"] in place (prepare).
@@ -494,6 +527,14 @@ class WeatherAdapter(Adapter):
             chained=shadow_projection.chain(schedule_hooks, shadow_driver)
         )
         if schedule_hooks is not None:
+            # before_run fixture operations were applied in fixture preparation: adopted here
+            # (re-verified, never re-applied); prepare delivers the remaining before_run entries.
+            fixture_ops.adopt_before_run(
+                prepared.get("before_run_fixture"),
+                fixture_plan,
+                schedule_hooks.injection,
+                prepared,
+            )
             schedule_hooks.prepare(seeded["request"], prepared["source"])
         build = functools.partial(
             Controller,
@@ -638,9 +679,13 @@ class WeatherAdapter(Adapter):
         if manifest != prepared.get("manifest"):
             raise AdapterRefusal("prepared harness manifest differs from the staging record")
         source_pre = prepared.get("source_pre") or {}
+        # After fixture preparation applied before_run operations, the staged source is their
+        # result (fixture_rereview_projection.adopt_before_run re-verifies the chain from
+        # source_pre in run_case).
+        expected = (prepared.get("before_run_fixture") or {}).get("source_after")
         if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(
             layout["source"]
-        ) != source_pre.get("value"):
+        ) != (expected or source_pre.get("value")):
             raise AdapterRefusal("staged source changed since staging")
         return copy.deepcopy(prepared)
 
