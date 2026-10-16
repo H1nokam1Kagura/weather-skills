@@ -1675,9 +1675,18 @@ SIGNED_ADMITTED = {
 }
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
-# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Empty since
-# the wave-7 signing.
-PENDING_D4_REVIEW = set()
+# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. The seven
+# live-role wave records (LIVE-WAVE-BRIEF sub-wave 6). CAP-OPERATOR-NOTIFY-HOOK must stay here
+# until sub-wave 5 opens the notification boundary in run_case (its record's notes).
+PENDING_D4_REVIEW = {
+    "CAP-LIVE-ROLE",
+    "CAP-BINDING-PASSTHROUGH",
+    "CAP-ROLE-INPUT-PATCH",
+    "CAP-METRIC",
+    "CAP-TRANSPORT-RETRY",
+    "CAP-TRANSPORT-RETRY-SETUP",
+    "CAP-OPERATOR-NOTIFY-HOOK",
+}
 # Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
 # by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty

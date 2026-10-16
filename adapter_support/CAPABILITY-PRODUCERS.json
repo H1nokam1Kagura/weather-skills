@@ -1568,6 +1568,347 @@
       "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
       "review_verdict": "APPROVE",
       "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7B.md"
+    },
+    "CAP-LIVE-ROLE": {
+      "d4_gated": true,
+      "method": "invoke_live_role",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": 1194, "symbol": "WeatherAdapter.invoke_live_role (schedule checks at lines 1221-1223)", "emits": "the Controller roles of a case with live roles (live_roles.CombinedRoles, all live or mixed with substituted roles). AdapterRefusal before any live member exists when no relay factory is given (line 1216: a live role never falls back to the substituted double) and when patch_role_input, inject_metric or setup_planner_transport_retry refuse the case's schedule"},
+        {"file": "adapter_support/live_roles.py", "line": 298, "symbol": "live_roles_factory", "emits": "checks substitution_plan(case, goal) and routing_table(case) before relay_factory(run_dir) creates the live member; builds the substituted double (SubstitutedRoles(case, goal, allow_live=True)) only when the case lists substituted roles; AdapterRefusal for a case with no live role"},
+        {"file": "adapter_support/live_roles.py", "line": 85, "symbol": "routing_table", "emits": "{live, substituted, not_invoked, split} in native role names from the frozen agent_roles; split = a role listed both live and substituted, keyed by the occurrences that its after_role replace_role_output / json_patch entries select. AdapterRefusal for compilers split across lists, a not_invoked role that is also listed, a split compiler, or a split role that no entry selects"},
+        {"file": "adapter_support/live_roles.py", "line": 248, "symbol": "CombinedRoles.ask (route at line 225; report at line 289)", "emits": "per invocation: the route by role and the controller's own attempt occurrence (dispatch_context occurrence) to the live member or the double; a not_invoked or unlisted role, or a split role without an occurrence, is Refused with the role's frozen gate before any call (outcome REFUSED_NO_CALL); the member's own receipt objects are appended to the one shared receipts list; routes[] {role, occurrence, attempt_id, route, reason, outcome, receipts}"},
+        {"file": "adapter_support/live_roles.py", "line": 161, "symbol": "CombinedRoles.spent (budget, model at lines 169-182; sessions 185-196; transport_retry_recorder 199-206; processes 209-218)", "emits": "the budget meter, model, sessions, transport retry recorder and process seam delegate to the live member, so the controller's checkpoint spent, budget and model are the live member's"},
+        {"file": "container_harness/case_driver.py", "line": 463, "symbol": "case_profile live branch (roles_factory at line 469)", "emits": "container route: roles_factory(run_dir) = invoke_live_role(case, goal, run_dir, lambda: RelayRoles.from_env(budget=case budget.max_model_usd)); RuntimeError BLOCKED_LIVE_ROLE_TRANSPORT when the adapter has no invoke_live_role of its own (line 466), and in run() also when SIMKIT_RELAY_URL is absent (lines 531-532)"},
+        {"file": "container_harness/case_driver.py", "line": 138, "symbol": "admission live disposition (live_relay_plan at lines 146-152; live_factory at line 696)", "emits": "a live case (all live or mixed) is RUNNABLE only when the adapter overrides invoke_live_role and live_relay_plan maps the case; otherwise BLOCKED_LIVE_ROLE_TRANSPORT, with the refusal kept in the row's live_relay_plan.refused"},
+        {"file": "container_harness/case_driver.py", "line": 814, "symbol": "live_relay_plan (expected_live_calls at line 761, call_token_bound at line 732; matrix_row at line 253)", "emits": "the matrix row fields of a selected live case: live_roles, expected_calls, max_requests = min(24, max(8, 2 x expected_calls)), max_total_tokens = ceil(1.5 x the sum of per-call token bounds), max_model_usd = the case's budget.max_model_usd, plus relay_caps_basis {calls_by_role, interrupt_reasks, token_bound_by_role, rule}"},
+        {"file": "container_harness/relay_usage.py", "line": 116, "symbol": "case_caps (live_gate at line 191)", "emits": "the relay caps a case job passes to its relay, from the matrix row (source matrix, expected_calls or default; max_requests clamped to 24, budget to 5 USD); live_gate fails a dispatch with no explicit live_max_cases, more live cases than it allows, or summed per-case token caps above RUN_TOKEN_CAP 5,000,000"},
+        {"file": "tools/workflow/relay_roles.py", "line": 428, "symbol": "RelayRoles.from_env", "emits": "reads SIMKIT_RELAY_URL / TOKEN / RUN_ID / MODEL and removes every SIMKIT_RELAY_* name from os.environ, so no tool child inherits the run token; the client holds and reads no Kong key"},
+        {"file": "tools/workflow/relay_roles.py", "line": 479, "symbol": "RelayRoles.ask (spend-cap mapping at lines 581-583; receipt checks at lines 590-628)", "emits": "one relay request per ask: the body cap (DEFAULT_MAX_BODY 88,000 bytes, line 80) applies to the body sent, dedup-sha256/1 encoded when values repeat; the remaining budget is reserved before sending and reconciled to the receipt's cost_usd; a receipt is accepted only with exactly the KongRoles fields plus relay_id, transport_encoding, transport_bytes, this payload's input_hash, output_hash = digest(answer), a non-empty model_observed, model_requested equal to the configured model, transport kong-native-anthropic, mode live, and session_id equal to an unseen response_id; reason_code relay_spend_cap -> Refused(gate budget); an UNKNOWN outcome keeps the reservation and records fault_class / fault_kind"},
+        {"file": "relay/kong_relay_host.py", "line": 591, "symbol": "Relay._forward (worst_case at line 370; _cap_refusal at line 536; _charge at line 563)", "emits": "admits a call only if its worst case fits every cap (SpendGuard.admit, line 608), else a relay_spend_cap refusal with nothing forwarded; one KongRoles.ask; observed usage charged after the call (UNKNOWN charged at its worst case); the SUCCESS receipt = the KongRoles receipt plus relay_id, transport_encoding and transport_bytes (lines 704-707); one redacted audit ask line per call with temperature_requested, settings_sent, sent_keys, structured_output, answer_source, charge and the spend snapshot"},
+        {"file": "relay/kong_relay_host.py", "line": 195, "symbol": "SpendGuard", "emits": "per-run caps max_requests, max_total_tokens and budget_usd (a list-price estimate); EXHAUSTED is sticky after the first cap hit, with one spend_cap_reached audit event; refused_by_cap and worst_case_charges counted in the snapshot"},
+        {"file": "relay/kong_relay_host.py", "line": 860, "symbol": "build_roles (CLI defaults at lines 943-946; --ack-not-sensitive required at line 926)", "emits": "the host KongRoles: temperature = --temperature (default 0.0), prices = PINNED_PRICES, role_max_tokens = LIVE_ROLE_MAX_TOKENS (planner and repairer 4096, every other role --max-tokens 2048), session_source response_id, data_policy_ack True, worker env KONG_SDK_MAX_RETRIES=0"},
+        {"file": "tools/workflow/kong_roles.py", "line": 481, "symbol": "KongRoles.ask (session from response_id at lines 606-610; receipt at lines 633-673)", "emits": "the live receipt: model_requested, model_observed (the response's own model field), model_match, settings {max_tokens, temperature, system_prompt_hash, thinking null, retries 0, sdk, structured_output, answer_tool, answer_tool_hash, answer_source}, settings_sent and sent_keys as the worker echoed them, usage, stop_reason, request_id, response_id, via, latency_ms, cost_usd with cost_basis, session_id = response_id, transport kong-native-anthropic, mode live"},
+        {"file": "tools/workflow/kong_roles.py", "line": 684, "symbol": "KongRoles._forced_tool_answer (the worker sends tools + tool_choice at lines 191-194, temperature through extra_body at lines 195-201)", "emits": "forced-tool structured output: the answer is accepted only from a single tool_use block with stop_reason tool_use; a refusal stop, no tool answer or an incomplete answer is refused with the answer_diagnostic"},
+        {"file": "tools/workflow/role_schemas.py", "line": 239, "symbol": "answer_tool (answer_schema at line 230)", "emits": "the single tool per invocation: name submit_<role>_answer, input_schema = the role's answer schema"},
+        {"file": "tools/workflow/kong_roles.py", "line": 148, "symbol": "PINNED_PRICES (COST_BASIS at line 147)", "emits": "claude-sonnet-4-6 at 3 USD input / 15 USD output per million tokens (Anthropic list price); every priced receipt records cost_basis 'Anthropic list-price estimate; Kong billing not observed'"},
+        {"file": "adapter_support/live_roles.py", "line": 319, "symbol": "project_live_receipt (LIVE_RECEIPT_FIELDS at line 58)", "emits": "the live identity of one receipt: mode, transport, model_requested, model_observed, settings, usage, request_id, response_id, relay_id as recorded; absent fields stay absent; a substituted receipt gives only {mode, transport}"},
+        {"file": "adapter_support/evidence_projection.py", "line": 443, "symbol": "Projection.invocation_receipts live branch (lines 443-444; mode at lines 441-442)", "emits": "invocation_receipts[*].live = project_live_receipt(receipt) for each receipt with mode live; invocation_receipts[*].mode for every receipt that carries one"}
+      ],
+      "evidence_fields": [
+        "invocation_receipts[*].mode = live for an invocation the live member answered (substituted for one the double answered)",
+        "invocation_receipts[*].live {mode, transport, model_requested, model_observed, settings {max_tokens, temperature, system_prompt_hash, thinking, retries, sdk, structured_output, answer_tool, answer_tool_hash, answer_source}, usage, request_id, response_id, relay_id} per live receipt, as recorded",
+        "invocation_receipts[*].session_id of a live receipt = the provider's response_id",
+        "budget_ledger.final.consumed_model_usd of a live run = the live member's reconciled spend: a sum of list-price estimates, never a Kong bill",
+        "outside the scored evidence: the full receipt in role-NNN-<role>.json and the checkpoint's role_receipts (cost_usd, cost_basis, settings_sent, sent_keys, stop_reason, via, latency_ms, transport_encoding, transport_bytes, model_match); the host relay's audit log relay-audit.jsonl (per call: temperature_requested, settings_sent, usage, charge, spend snapshot; spend_cap_reached; relay_stop); the admission matrix row's relay caps and relay_caps_basis"
+      ],
+      "missing_fields": [
+        {"field": "a model version beyond the alias", "owner": "not observable: the gateway reports only the alias (claude-sonnet-4-6), so the version on record is model_observed plus the worker's SDK version (settings.sdk); no dated model snapshot is claimed"},
+        {"field": "the Kong bill for a call", "owner": "not observed: cost_usd is observed usage priced at the pinned list price (cost_basis says so); Kong billing is untracked by owner ruling"},
+        {"field": "that the model applied temperature 0", "owner": "not observable: only the sent value is evidenced (settings_sent, the worker's echo of the request body, in the role file receipt and the relay audit line); settings.temperature in the projection is the requested value"},
+        {"field": "settings_sent, sent_keys, cost_usd, cost_basis, transport_encoding, transport_bytes in invocation_receipts[*].live", "owner": "CAP-LIVE-ROLE by choice: the projection carries the identity fields (LIVE_RECEIPT_FIELDS); these stay in the role files, the checkpoint receipts and the relay audit"},
+        {"field": "the per-invocation routing record (CombinedRoles.routes)", "owner": "not written by run_case: kept in memory only; the route of each invocation is recoverable from its receipt mode and the controller's dispatch_attempt events"},
+        {"field": "any live call on the real relay and Kong for a frozen case", "owner": "not yet run (LIVE-WAVE-BRIEF sub-wave 7, after signing): every case-level test drives the zero-cost fake relay (a real RelayRoles client over a fake host that answers from the substituted baselines). Single live calls of the transport are evidenced by the relay smokes: run 38853503911 (temperature 0 in settings_sent, outcome SUCCESS) and relay-dedup-smoke run 38907594095 (forced tool, dedup encoding)"},
+        {"field": "E10-P2-CTL / -INJ (live roles across incarnations) and E11-P2-INJ (budget-override channel)", "owner": "LIVE-WAVE-BRIEF sub-wave 5 (not built). Admission admits them by requirements once this record and the wave-7 records are signed; whether they refuse at run time is unverified, so they are dispatched only by explicit case list, last"},
+        {"field": "E12-P2-CTL / -INJ", "owner": "out of reach in this wave: CAP-DECOY has no case-mode producer and the resource reading is refused (CAP-METRIC is budget meters only)"},
+        {"field": "E09-P2 (shadow_policy the only live role) and the split-occurrence cases E07-P2 and E10-P2 end to end", "owner": "CAP-LIVE-ROLE: routed by the same CombinedRoles code, but no test runs those frozen cases through run_case yet [unverified]. Run through run_case on the fake relay: E12-P1-CTL, E01-P2-CTL/-INJ, E06-P1-CTL/-INJ (split reviewer), E13-P2-INJ, E15-P2-INJ, E08-P2-CTL/-INJ and two LOCAL variants of E12-P1-CTL"}
+      ],
+      "mapping_choices_for_review": [
+        "frozen 'model identifier/version/settings in its receipt': identifier = model_observed (the response's own model field, model_requested and model_match kept beside it); version = that alias plus the worker's SDK version, because the gateway reports only the alias (LIVE-WAVE-BRIEF 'Receipts > Version'); settings = the receipt's settings block (requested values) plus settings_sent / sent_keys (what the worker says it sent)",
+        "settings for every live role: temperature 0 (relay CLI default 0.0; the pinned SDK 1.13 has no typed temperature argument, so it travels in extra_body and settings_sent shows it there), max_tokens 4096 for planner and repairer and 2048 for every other role, thinking not requested, retries 0 (KONG_SDK_MAX_RETRIES=0). Temperature 0 lowers variance and does not make runs deterministic; one run per case and no retries other than the frozen pre-write transport retry (CAP-TRANSPORT-RETRY) and the owner's one re-dispatch after a transient gateway fault (OWNER-RULINGS live_spend_authorization_2026-10-15.rerun_on_gateway_fault, a whole-case rerun outside this record)",
+        "forced-tool structured output (5ad9e3d): each request carries one tool whose input_schema is the role's answer schema (role_schemas, documented as never stricter than the controller's own checks) and tool_choice forces it; the answer is the tool_use input serialised canonically (role_schemas.answer_text) and then the unchanged role parser, so output_hash is the hash of that text. The reviewer schema describes the frozen-only keys as not for use beside binding_hash (8a0f3a6): guidance to the model only; the controller still refuses a mixed shape",
+        "session_id = the provider's response_id, observed after the call (KongRoles session_source response_id; RelayRoles refuses any other), never a uuid minted before the call",
+        "cost: observed input/output tokens priced at the pinned Anthropic list price (3 / 15 USD per million tokens for claude-sonnet-4-6). A response reporting cache tokens is not priced (price_usage: cache token pricing is not pinned), so the client keeps its reservation and the relay charges the whole remaining budget (fail closed): with no cache_control requested this is not expected, and it would end the run after that call",
+        "transport encoding dedup-sha256/1 (live sub-wave 2, live-role-payload-sizes.json): the planner, repairer and reviewer payloads repeat about 55 KB of skill documentation; the client sends each repeated value once in a sha256-referenced shared table, the host verifies that the decode equals both declared hashes (else dedup_mismatch, nothing forwarded), and the model sees the role input with references plus each shared value once. The controller's recorded input and input_hash are of the logical payload; the model-facing text is a verified lossless rendering, not the recorded text (receipt transport_encoding / transport_bytes record its size and hash)",
+        "routing: the frozen agent_roles decide the member; a role both live and substituted goes to the double only at the occurrences an after_role entry selects (the controller's attempt occurrence) and to the live member otherwise; not_invoked roles are refused without a call; one shared receipts list holds the members' own receipt objects, so CaseScheduleHooks.rebind still rebinds the double's receipt and the controller's one-new-receipt check holds",
+        "relay caps (LIVE-WAVE-BRIEF 'Spend guard'; computed in case_driver, not observed): expected_calls is an upper estimate from the frozen roles, budget.max_repair_attempts and the schedule (review rounds R = max(1 + repairs + material fixture changes, the highest reviewer occurrence a schedule entry selects); compilers 3, planner 1, repairer = repairs, evidence_checker R, reviewer R minus the split occurrences routed to the double, verifier 1, shadow_policy one per shadow state plus R - 1, router 1, plus one per scheduled interrupt); a transport retry adds no request (its fault raises before any byte is sent)",
+        "token cap: the per-call bound (call_token_bound) is one token per byte of the longest system prompt plus the largest user message the client can send (the 88,000-byte body cap plus the dedup preamble and marker lines, at most 256 bytes per shared block), framing, forced-tool overhead and the role's max_tokens; max_total_tokens = 1.5 x the sum over expected calls. One token per byte overcounts real tokenisation, so the cap is loose by design: for E12-P1-CTL the bound is about 104,000 tokens per call and max_total_tokens 1,095,813 (computed locally at this commit). That the bound covers the relay's own worst case is argued in call_token_bound's docstring and checked against the fake-relay bodies of two cases (test_relay_caps_bound_the_observed_live_calls), not proven for every encoding. The bound assumes the relay runs with the default per-role max_tokens (RELAY_MAX_TOKENS 2048 in the workflow, planner and repairer 4096)",
+        "consumed_model_usd: the controller's spent for a live run is the live member's reconciled list-price estimate; CAP-METRIC readings can raise it as a floor"
+      ],
+      "notes": "Data classification: every live payload is the controller's role input for a frozen DEV-ONLY synthetic case (case texts, the repository's own skill documentation, the staged test fixture's metadata and hashes): synthetic texts only, Not Sensitive under the Kong kit's data policy (LIVE-WAVE-BRIEF sub-wave 6; OWNER-RULINGS live_call_authorization, kong_secret_ruling_2026-10-13: synthetic / Not Sensitive payloads only). Enforced by acknowledgement and route only (KongRoles refuses without data_policy_ack, the relay CLI requires --ack-not-sensitive, and the controller is the only sender); no content classifier runs. Key isolation: the Kong key lives only in the relay's worker process on the host; the container client holds a per-run relay token, removed from its environment at from_env. Spend: owner-authorized (OWNER-RULINGS live_spend_authorization_2026-10-15), enforced per run by the relay SpendGuard and per dispatch by live_gate. LIVE-WAVE-BRIEF: do not sign before sub-waves 2 and 4b land; both are in this commit (64b8279, aeeb8af).",
+      "tests": [
+        "tests/test_live_wave_adapter.py::test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed",
+        "tests/test_live_wave_adapter.py::test_admission_refuses_every_live_case_while_the_live_records_are_unsigned",
+        "tests/test_live_wave_adapter.py::test_case_driver_admission_runs_mixed_cases_and_matrix_rows_carry_relay_caps",
+        "tests/test_live_wave_adapter.py::test_relay_caps_bound_the_observed_live_calls",
+        "tests/test_live_wave_adapter.py::test_expected_calls_follow_repairs_rereviews_splits_and_interrupts",
+        "tests/test_live_wave_adapter.py::test_case_profile_runs_all_live_and_mixed_cases_through_invoke_live_role",
+        "tests/test_live_wave_adapter.py::test_live_identity_is_projected_per_live_receipt_and_missing_stays_missing",
+        "tests/test_live_wave_adapter.py::test_live_case_without_a_relay_refuses_and_never_substitutes",
+        "tests/test_live_roles_adapter.py::test_every_invocation_is_routed_by_role_and_controller_occurrence",
+        "tests/test_live_roles_adapter.py::test_one_shared_receipts_list_holds_the_members_own_receipt_objects",
+        "tests/test_live_roles_adapter.py::test_rebind_still_applies_to_the_doubles_receipt_on_the_shared_list",
+        "tests/test_live_roles_adapter.py::test_dispatch_observations_are_the_chosen_members_own",
+        "tests/test_live_roles_adapter.py::test_budget_model_and_retry_recorder_delegate_to_the_live_member",
+        "tests/test_live_roles_adapter.py::test_project_live_receipt_carries_live_identity_and_substituted_mode",
+        "tests/test_live_roles_adapter.py::test_payload_sizes_against_the_relay_body_cap",
+        "tests/test_live_roles_adapter.py::test_not_invoked_and_unlisted_roles_are_refused_with_no_call",
+        "tests/test_live_roles_adapter.py::test_dispatch_observation_is_copied_back_on_a_member_exception",
+        "tests/test_live_roles_adapter.py::test_resume_restore_and_meter_writes_reach_the_live_member",
+        "tests/test_live_roles_adapter.py::test_factory_and_table_refusals_happen_before_any_live_member_exists",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_token_cap_refuses_before_forwarding_and_maps_to_budget",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_request_and_budget_caps_refuse_before_forwarding",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_a_call_after_the_request_cap_is_a_spend_cap_refusal_and_a_guard_abort",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_exhausted_is_sticky_and_reported_once",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_unknown_outcome_is_charged_at_its_worst_case",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_a_twelve_call_run_passes_within_caps",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_body_cap_is_88000_under_the_hard_limit_and_the_kit_known_good",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_session_id_is_the_provider_response_id",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_client_refuses_a_minted_session_id",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_from_env_removes_the_relay_token_from_the_child_environment",
+        "tools/workflow/tests/test_kong_roles.py::test_forced_tool_answer_is_required_and_refused_with_diagnostic",
+        "tools/workflow/tests/test_kong_roles.py::test_forced_tool_answer_goes_through_the_unchanged_parser",
+        "tools/workflow/tests/test_kong_roles.py::test_worker_source_forces_the_answer_tool_and_reads_tool_use_input",
+        "tools/workflow/tests/test_kong_roles.py::test_policy_ack_prices_and_prompt_variants_are_enforced",
+        "tools/workflow/tests/test_kong_roles.py::test_pinned_list_price_reconciles_so_a_priced_run_makes_many_calls",
+        "tools/workflow/tests/test_kong_roles.py::test_role_max_tokens_and_temperature_reach_request_and_receipt",
+        "tools/workflow/tests/test_kong_roles.py::test_response_id_session_source_is_observed_and_required",
+        "tools/workflow/tests/test_kong_roles.py::test_real_worker_sends_temperature_through_the_sdk_passthrough",
+        "tools/workflow/tests/test_relay_roles.py::test_host_cli_requires_ack_and_the_kit_interpreter",
+        "tools/workflow/tests/test_relay_roles.py::test_receipt_with_extra_or_missing_fields_is_refused",
+        "tools/workflow/tests/test_relay_roles.py::test_repeated_session_and_wrong_model_are_refused",
+        "tools/workflow/tests/test_relay_dedup.py::test_dedup_call_end_to_end_model_sees_each_block_once",
+        "tools/workflow/tests/test_relay_dedup.py::test_host_refuses_a_mismatched_encoding_deterministically",
+        "tools/workflow/tests/test_role_schemas.py::test_every_prompt_role_has_a_schema_and_a_forced_tool",
+        "container_harness/tests/test_relay_wiring.py::test_live_case_relay_caps_come_from_the_matrix_row"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-BINDING-PASSTHROUGH": {
+      "d4_gated": true,
+      "method": "confirm_binding_passthrough",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": 1226, "symbol": "WeatherAdapter.confirm_binding_passthrough", "emits": "live_roles.confirm_binding_passthrough(run_dir): one record per delivered after_role substitution, read from the controller's own run records only"},
+        {"file": "adapter_support/live_roles.py", "line": 387, "symbol": "confirm_binding_passthrough", "emits": "for each role file whose receipt carries an after_role substitution (in role-file order): {capability, substituted_role, substituted_occurrence, invocation_id, schedule_indexes, confirmed, carrier_role, carrier_occurrence, carrier_mode, delivered_hash, reviewed_hash} plus carrier_record / presented_plan_hash / carrier_paths / not_passed / reason. planner or repairer: confirmed when the next reviewer invocation's review capture (review-capture-NNN.json) presents review_evidence.plan_hash equal to plan_version_hash of the delivered plan and plan_claims; reviewer: confirmed when every proposal item of the delivered review is found verbatim in the recorded input of the next live invocation; any other role: confirmed null with the reason"},
+        {"file": "adapter_support/live_roles.py", "line": 372, "symbol": "review_proposal (REVIEW_DECISION_KEYS at line 71)", "emits": "the proposal a delivered review carries on: each finding, and every other non-empty key except verdict and approved_binding (the controller's own decision inputs)"},
+        {"file": "adapter_support/live_roles.py", "line": 339, "symbol": "find_value", "emits": "the JSON-pointer path at which a proposal value occurs by deep equality inside the recorded input, searching JSON text the controller embedded as a string too (path segment marked (json)), or None"},
+        {"file": "adapter_support/role_substitution.py", "line": 627, "symbol": "CaseScheduleHooks.rebind", "emits": "the receipt's substitutions[] entry {hook after_role, schedule_indexes, operations, pre_substitution_output_hash, delivered_output_hash, adapter_mappings} that marks a substituted invocation for this check"}
+      ],
+      "evidence_fields": [
+        "confirm_binding_passthrough() method output (above); not a contract field and not part of the scored projection",
+        "its inputs, all controller-written: role-NNN-<role>.json {input, output, receipt (substitutions[])} and review-capture-NNN.json {receipt, review_evidence.plan_hash}"
+      ],
+      "missing_fields": [
+        {"field": "a passthrough rule for a substituted compiler, evidence_checker, verifier or shadow_policy output", "owner": "not defined: confirmed null with the reason 'no passthrough rule'"},
+        {"field": "the E01-P2-INJ verification waiver in the verifier's input", "owner": "the controller: it does not hand the reviewer's verification_waiver to the verifier, so the record is confirmed false with not_passed ['verification_waiver'] (observed on the fake relay); nothing is filled"},
+        {"field": "a delivered review whose next consumer is substituted", "owner": "CAP-BINDING-PASSTHROUGH: the carrier of a reviewer substitution is the next LIVE invocation; substituted invocations in between are skipped, not checked"},
+        {"field": "the frozen cases E04-P2, E05-P2, E06-P2, E07-P2, E10-P2 end to end", "owner": "not run by any test yet [unverified]; exercised on E13-P2-INJ (planner -> reviewer, confirmed), E06-P1-INJ (REJECT finding -> live repairer, confirmed), E06-P1-CTL (APPROVE with no proposal, null), E01-P2-INJ (waiver, false)"}
+      ],
+      "mapping_choices_for_review": [
+        "frozen 'the reviewed candidate includes the injected proposal (no hidden proposal outside the review binding)': for an injected plan, the reviewed candidate is the plan version the next reviewer's controller review capture presents (review_evidence.plan_hash, the plan-version hash of plan + plan_claims); for an injected review, the proposal must reach the next live role's recorded input verbatim",
+        "carrier choice: planner/repairer -> the next reviewer invocation in role-file order (live or substituted); reviewer -> the next invocation with mode live (any role). Only after_role substitutions are checked (receipt substitutions[] with hook after_role)",
+        "proposal = every finding (one item each) plus every other non-empty key except verdict and approved_binding; an APPROVE with no findings carries no proposal and is recorded confirmed null, never true",
+        "verbatim = deep equality anywhere in the recorded input, including inside JSON text the controller serialised into a string (e.g. the rejected review in the repairer's failure field, path /failure(json)/findings/0); a paraphrase or partial copy is not a passthrough",
+        "confirmed is true or false only when a check ran; reviewed_hash is set only when the carrier presents the delivered value; nothing is filled"
+      ],
+      "tests": [
+        "tests/test_live_roles_adapter.py::test_binding_passthrough_is_confirmed_or_recorded_as_not_passed_through",
+        "tests/test_live_wave_adapter.py::test_binding_passthrough_method_reads_the_run_records",
+        "tests/test_live_wave_adapter.py::test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-ROLE-INPUT-PATCH": {
+      "d4_gated": true,
+      "method": "patch_role_input",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": 1290, "symbol": "WeatherAdapter.patch_role_input (_live_table at line 1243; _attempt_receipt at line 1273)", "emits": "without run_dir: the plan of every before_role json_patch entry {index, selector, native_role, occurrence, operations, frozen_payload_hash, adapter_mapping}, or AdapterRefusal (payload not an array, an operation outside add/replace/remove/test, a root or non-pointer path, a non-positive occurrence, a target role that is not live or is split by occurrence). With run_dir and run_case's case_schedule report: per entry delivery {status, before_hash, after_hash, adapter_mapping, error}, receipt_mode, invocation_id, receipt_input_hash and received_patched_input = (receipt input_hash == delivery after_hash), null with the reason when not observed"},
+        {"file": "tools/workflow/runner.py", "line": 752, "symbol": "Controller.ask before_role emit (pending input_hash at line 760; dispatch_attempt input_hash at line 784)", "emits": "the controller emits before_role with the payload object it then hashes, sends to the role and records in role-NNN-<role>.json"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 659, "symbol": "InjectionHooks._apply (before_role target at lines 665-666; verifier path mapping at lines 680-681; hashes at line 697)", "emits": "the JSON Patch applied in place to the before_role payload; the schedule record's before_hash / after_hash and status APPLIED"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 821, "symbol": "InjectionHooks._map_verifier_paths (VERIFIER_EVIDENCE_PATH at line 111)", "emits": "a verifier patch path /evidence/verify-run(<artifact>)/... rewritten to /gates/<artifact>/..., recorded as adapter_mapping"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 185, "symbol": "json_patch", "emits": "strict add/replace/remove/test on a copy; a missing parent never materialises (UnsupportedInjection)"},
+        {"file": "adapter_support/role_substitution.py", "line": 607, "symbol": "CaseScheduleHooks.__init__ (InjectionHooks over the native case schedule)", "emits": "run_case delivers the whole case schedule, before_role patches included, through the same InjectionHooks"}
+      ],
+      "evidence_fields": [
+        "the selected live invocation's recorded input (role-NNN-<role>.json input) is the patched payload, and its receipt input_hash and dispatch_attempt input_hash are of the patched payload",
+        "harness case_schedule coverage record of the entry {index, status APPLIED, before_hash, after_hash, adapter_mapping}",
+        "patch_role_input() method output (above); not contract fields. The frozen assertions read the live role's resulting output (e.g. the E08-P2 verifier verdict), not this record"
+      ],
+      "missing_fields": [
+        {"field": "E09-P2's before_role patch of the live shadow_policy question (/context/notes)", "owner": "planned by patch_role_input (policy.shadow_question carries context.notes outside the fingerprinted body), but no test runs E09-P2 through run_case yet [unverified]"},
+        {"field": "the patched input when the selected occurrence was never reached, or the patch was not applied", "owner": "CAP-ROLE-INPUT-PATCH: delivery / receipt fields null with the reason, never filled"},
+        {"field": "a before_role patch for a substituted role, or one split by occurrence", "owner": "refused: a substituted double ignores its input, so the patch would not reach a model"},
+        {"field": "occurrence correlation across a resume (E10-P2)", "owner": "LIVE-WAVE-BRIEF sub-wave 5: not verified across incarnations"}
+      ],
+      "mapping_choices_for_review": [
+        "delivery point = the controller's own before_role emit inside Controller.ask, before the controller hashes the payload: the live role receives exactly the patched payload, and every record of that attempt (pending input_hash, dispatch_attempt input_hash, receipt input_hash, role file input) is of the patched payload. Nothing is patched after hashing",
+        "the frozen verifier path /evidence/verify-run(<artifact>) is mapped to the native verifier payload's /gates/<artifact> (the e2e_injections mapping, adapter_mapping recorded); every other path is applied as written; a path the payload lacks is refused by the strict patch",
+        "received_patched_input compares the receipt's input_hash with the delivery record's after_hash; the selected invocation is the controller's dispatch_attempt of that role with the schedule's occurrence (one before_role emit per controller attempt is assumed)",
+        "an empty patch (the CTL cases) is delivered and changes nothing (before_hash == after_hash); it is reported received_patched_input true"
+      ],
+      "tests": [
+        "tests/test_live_wave_adapter.py::test_e08_verifier_input_patch_reaches_the_live_verifier",
+        "tests/test_live_wave_adapter.py::test_patch_role_input_refuses_what_cannot_reach_a_live_role",
+        "tests/test_live_wave_adapter.py::test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed",
+        "tools/workflow/tests/test_rereview_shadow_v27.py::test_verifier_evidence_path_mapping_patches_input_only"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-METRIC": {
+      "d4_gated": true,
+      "method": "inject_metric",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": 1385, "symbol": "WeatherAdapter.inject_metric (budget-meters-only refusal at lines 1409-1414)", "emits": "without run_dir: {capability, scope 'budget meters only', entries [{index, hook, selector, readings}]}, or AdapterRefusal for any reading that is not a controller budget meter or not immediate. With run_dir: context.budget_readings verbatim, each with schedule_index when run_case's case_schedule report is supplied; status MISSING when the controller recorded none"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 177, "symbol": "metered", "emits": "true only when every reading of the payload names a write_boundary.METERED meter and timing is null or immediate"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 134, "symbol": "unsupported_requirements (inject_metric branch at lines 143-144)", "emits": "a reading that is not metered (a resource reading such as E12-P2's free_ram_gib) is an unsupported-requirement finding: the case is refused before any side effect"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 876, "symbol": "InjectionHooks._inject_metric (dispatched from _apply at lines 724-725)", "emits": "each reading delivered to write_boundary.meter_reading at the scheduled hook; schedule record {injected_reading true, readings [{metric, value, index}]}"},
+        {"file": "tools/workflow/write_boundary.py", "line": 209, "symbol": "meter_reading (METERED at line 198)", "emits": "a monotone floor: consumed_model_usd raises controller.roles.spent; elapsed_seconds raises elapsed_before and moves the process deadline earlier by the same amount; repair_attempts_used is never applied. Record {index, metric, value, native_before, effective, applied, reconciled, state} in context.budget_readings, budget-reading-NNN.json, a budget_reading dispatch event and a checkpoint; Refused(gate budget) for an unknown meter or an invalid value"},
+        {"file": "adapter_support/live_roles.py", "line": 165, "symbol": "CombinedRoles.spent setter", "emits": "with live roles, the consumed_model_usd floor lands on the live member's spent (RelayRoles), so the client's own headroom check sees it"}
+      ],
+      "evidence_fields": [
+        "budget_ledger.final.consumed_model_usd / elapsed_seconds after an applied reading (the controller meter, projected by CAP-RECEIPTS from the checkpoint)",
+        "inject_metric() method output: plan entries and budget_readings (context.budget_readings with schedule_index); not contract fields",
+        "harness case_schedule coverage record of each inject_metric entry {injected_reading true, readings}"
+      ],
+      "missing_fields": [
+        {"field": "resource readings (free_ram_gib and any non-budget metric; E12-P2-CTL / -INJ)", "owner": "refused: no controller meter receives them, and none is approximated. E12-P2 also needs CAP-DECOY and the deferred mid-process form, so it stays out of reach (LIVE-WAVE-BRIEF case group G)"},
+        {"field": "a deferred (non-immediate) reading", "owner": "refused (metered requires timing null or immediate)"},
+        {"field": "context.budget_readings in the scored projection", "owner": "not projected: method output only"},
+        {"field": "an 'injected' label on the controller's own reading", "owner": "not produced: the controller records the reading unlabelled; the label is on the harness schedule record (injected_reading true)"},
+        {"field": "the injected reading at the host relay", "owner": "not delivered: the relay SpendGuard charges observed usage only; an injected consumed_model_usd constrains the controller and the container client, not the relay's own caps"},
+        {"field": "the frozen E11-P2 cases end to end", "owner": "LIVE-WAVE-BRIEF sub-wave 5: E11-P2 also needs the wave-7 interrupt/resume mechanics with live roles and (INJ) the budget-override channel. The reading is exercised only on LOCAL-E12-P1-CTL-METRIC (E12-P1-CTL plus E11-P2-INJ's frozen entry 0)"}
+      ],
+      "mapping_choices_for_review": [
+        "budget meters only (HANDOFF 2026-10-16 decision; LIVE-WAVE-BRIEF sub-wave 3): the frozen 'inject resource/budget readings into the controller's monitor' is implemented for the budget half: readings of the controller's own budget meters (write_boundary.METERED: consumed_model_usd, elapsed_seconds, repair_attempts_used), delivered to write_boundary.meter_reading, the controller's monitor for those meters",
+        "a reading is a monotone floor: it can raise a meter, never lower or reset it; repair_attempts_used is recorded but never applied (reconciled true only when it equals the controller's count)",
+        "elapsed_seconds advances the controller's elapsed_before and moves Processes.deadline earlier by the same delta, so the time budget is consumed, not just reported",
+        "with live roles the consumed_model_usd floor is the live member's spent (CombinedRoles.spent); observed relay costs are then reconciled on top of it (RelayRoles.ask: spent_before + cost)",
+        "schedule_index: a controller reading is attributed to the schedule entry whose delivery record lists that reading's index"
+      ],
+      "tests": [
+        "tests/test_live_wave_adapter.py::test_budget_meter_readings_reach_the_controller_and_the_live_meter",
+        "tests/test_live_wave_adapter.py::test_inject_metric_refuses_resource_readings_and_reports_missing",
+        "tests/test_live_wave_adapter.py::test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed",
+        "tests/test_live_roles_adapter.py::test_resume_restore_and_meter_writes_reach_the_live_member",
+        "tools/workflow/tests/test_rereview_shadow_v27.py::test_budget_meter_readings_raise_accounting_and_stay_unlabelled",
+        "tools/workflow/tests/test_rereview_shadow_v27.py::test_meter_reading_cannot_lower_or_reset_accounting",
+        "tools/workflow/tests/test_rereview_shadow_v27.py::test_ram_readings_stay_unsupported_here"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-TRANSPORT-RETRY": {
+      "d4_gated": true,
+      "method": "record_transport_retry",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": 1449, "symbol": "WeatherAdapter.record_transport_retry (RESUME_EVENT_KINDS at line 1447)", "emits": "controller_trace.transport_retries as projected (resume_projection.trace_report), or MISSING with the reason; plus checks[] per retry {index, step, attempt_id, before_write, attempt_sequence, retry_sequence, outcome, outcome_sequence, inside_attempt, resume_between} from the controller's dispatch clock"},
+        {"file": "tools/workflow/recovery.py", "line": 748, "symbol": "record_transport_retry", "emits": "one durable record per invocation {step, attempt, before_write true, attempt_id, occurrence, invocation_id, input_hash, failure_class, error_type} + index and sequence (_append: transport_retry dispatch event, checkpoint); refused (no record, no retry) after RELEASED, without a pending model attempt of that role, without an invocation id, or for a second fault of the same invocation"},
+        {"file": "tools/workflow/recovery.py", "line": 779, "symbol": "transport_call", "emits": "retry once inside the same attempt only on ConnectionResetError / ConnectionAbortedError with processes.serial unchanged (nothing launched or written) and the recorder's durable record; anything else re-raised"},
+        {"file": "tools/workflow/relay_roles.py", "line": 342, "symbol": "_transport_call (RelayTransport.serial at line 360)", "emits": "the container client's mirror of recovery.transport_call (parity-tested); RelayTransport.serial moves only after connect, before the first request byte, so an unchanged serial proves nothing was sent"},
+        {"file": "tools/workflow/runner.py", "line": 1843, "symbol": "Controller.bind_recovery (recorder bound at line 1846)", "emits": "roles.transport_retry_recorder = record_transport_retry bound to this controller, for every run (CombinedRoles passes it to the live member, live_roles.py:203)"},
+        {"file": "adapter_support/evidence_projection.py", "line": 76, "symbol": "PENDING_TRACE_LISTS transport_retries (RECOVERY_LEDGER_LISTS at line 85; Projection.pending_lists at line 641)", "emits": "controller_trace.transport_retries verbatim from the recovery ledger ([] when it holds none; MISSING when the ledger is absent or malformed); no event_seq key per record"},
+        {"file": "adapter_support/resume_projection.py", "line": 361, "symbol": "trace_report", "emits": "controller_trace.<name> with its event keys and gaps, or MISSING with the reason"}
+      ],
+      "evidence_fields": [
+        "controller_trace.transport_retries[*] {step, attempt, before_write, attempt_id, occurrence, invocation_id, input_hash, failure_class, error_type, index, sequence}",
+        "record_transport_retry() method output: checks[] (inside_attempt, resume_between); not contract fields"
+      ],
+      "missing_fields": [
+        {"field": "controller_trace.transport_retries when the recovery ledger is absent or malformed", "owner": "CAP-TRANSPORT-RETRY (MISSING with the reason, never [])"},
+        {"field": "event_seq keys for transport_retries", "owner": "not emitted: the list has no identity key in PENDING_TRACE_LISTS; each record carries its own dispatch sequence"},
+        {"field": "a retry at the host relay or in the Kong worker", "owner": "none by design: the relay's KongRoles has no retry recorder and the worker runs with KONG_SDK_MAX_RETRIES=0, so only the container client's pre-write retry exists"},
+        {"field": "the frozen E14-P3 cases end to end", "owner": "LIVE-WAVE-BRIEF sub-wave 5 (wave-7 interrupt/resume with live roles, CAP-OPERATOR-NOTIFY-HOOK); exercised on LOCAL-E12-P1-CTL-RETRY (E12-P1-CTL plus E14-P3-INJ's frozen planner-retry entry, its requires cleared)"}
+      ],
+      "mapping_choices_for_review": [
+        "frozen 'transport-level retries inside one step before any write': inside one step = inside one controller dispatch attempt (same attempt_id, between its dispatch_attempt and its single outcome event); before any write = the transport's serial did not move (no relay request byte, or no worker launch, happened); checked from the controller's own records in checks[]",
+        "frozen 'they are not resumes': resume_between is true when an interruption or resume event falls inside the attempt span; the record is still the controller's, and the check reports it rather than reclassifying it",
+        "attempt = the per-step count of retry records (1 for the first retry of that role in the run), not the controller's attempt occurrence (kept as occurrence)"
+      ],
+      "tests": [
+        "tests/test_live_wave_adapter.py::test_planner_transport_fault_is_retried_once_inside_the_attempt",
+        "tests/test_live_wave_adapter.py::test_transport_retry_reports_without_a_retry_and_setup_refusals",
+        "tests/test_live_roles_adapter.py::test_budget_model_and_retry_recorder_delegate_to_the_live_member",
+        "tools/workflow/tests/test_recovery_v27.py::test_pre_write_fault_is_retried_once_inside_the_same_attempt",
+        "tools/workflow/tests/test_recovery_v27.py::test_fault_after_launch_is_not_retried",
+        "tools/workflow/tests/test_recovery_v27.py::test_second_fault_gets_no_second_retry_and_no_receipt",
+        "tools/workflow/tests/test_recovery_v27.py::test_no_transport_retry_after_release_or_without_a_recorder",
+        "tools/workflow/tests/test_recovery_v27.py::test_kong_transport_retries_a_pre_write_fault_once",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_transport_retry_matches_recovery_transport_call",
+        "tools/workflow/tests/test_relay_spend_guard.py::test_relay_roles_retries_one_pre_write_reset_through_the_recorder"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-TRANSPORT-RETRY-SETUP": {
+      "d4_gated": true,
+      "method": "setup_planner_transport_retry",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": 1511, "symbol": "WeatherAdapter.setup_planner_transport_retry", "emits": "without run_dir: the plan of every FX-TRANSPORT-RETRY entry {index, id, native_role planner, occurrence, failure_class}, or AdapterRefusal (hook other than before_role, a role other than the planner, args other than exactly {role planner, failure_class connection_reset, failures 1, max_retries 1, before_write true, occurrence}, a selector occurrence differing from args.occurrence, or a planner that is not live). With run_dir and schedule: per entry delivery, the controller's transport_retries for that attempt, answered_by_live_transport (receipt mode live with relay_id and response_id) and confirmed (exactly one before-write retry and a live answer), or null with the reason"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 786, "symbol": "InjectionHooks._arm_transport_fault (dispatched from _apply at lines 726-731)", "emits": "wraps the role transport's run() once: the next call raises one ConnectionResetError before anything is launched or sent and restores the real run(); record {effect, failure_class connection_reset, before_write true, delivery ARMED -> DELIVERED}; UnsupportedInjection for any other arguments, a missing transport or one already wrapped"},
+        {"file": "adapter_support/live_roles.py", "line": 209, "symbol": "CombinedRoles.processes", "emits": "the live member's process seam (RelayRoles' RelayTransport) is the one wrapped; with no live member it raises, so the fault cannot be armed"},
+        {"file": "tools/workflow/relay_roles.py", "line": 342, "symbol": "_transport_call", "emits": "the retry itself: once, inside the same ask, only because RelayTransport.serial did not move and the controller's recorder recorded it durably; the second call is a real relay exchange"}
+      ],
+      "evidence_fields": [
+        "controller_trace.transport_retries[*] (CAP-TRANSPORT-RETRY) for the planner attempt",
+        "harness case_schedule coverage record of the entry {effect, failure_class, before_write, delivery}",
+        "setup_planner_transport_retry() method output; not contract fields"
+      ],
+      "missing_fields": [
+        {"field": "a transport fault for a substituted planner", "owner": "refused: a substituted double has no transport to fault"},
+        {"field": "the frozen E14-P3 cases end to end", "owner": "LIVE-WAVE-BRIEF sub-wave 5; exercised on LOCAL-E12-P1-CTL-RETRY only"}
+      ],
+      "mapping_choices_for_review": [
+        "frozen 'inject one connection-reset in planner transport before any response/output write': the fault is raised by the wrapped run() of the live member's transport before the HTTP exchange starts, so no request byte is written and no response or output exists (stronger than 'before any response/output write')",
+        "frozen 'allow one transport retry inside the same logical invocation': the retry is the transport's own (RelayRoles._transport_call, mirroring recovery.transport_call), inside the same ask and controller attempt, after the controller's durable record",
+        "frozen 'never manufacture a successful result': the answer after the retry is the relay's real response (answered_by_live_transport requires mode live, a relay_id and an observed response_id); the harness writes no envelope, receipt or retry record",
+        "the frozen args are delivered only exactly as frozen; any variant is refused rather than adapted"
+      ],
+      "tests": [
+        "tests/test_live_wave_adapter.py::test_planner_transport_fault_is_retried_once_inside_the_attempt",
+        "tests/test_live_wave_adapter.py::test_transport_retry_reports_without_a_retry_and_setup_refusals",
+        "tools/workflow/tests/test_recovery_v27.py::test_transport_retry_setup_injects_once_before_launch"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
+    },
+    "CAP-OPERATOR-NOTIFY-HOOK": {
+      "d4_gated": true,
+      "method": "dispatch_after_operator_notification",
+      "status": "PRODUCER_MAPPED",
+      "producers": [
+        {"file": "adapter_support/weather_adapter.py", "line": 1616, "symbol": "WeatherAdapter.dispatch_after_operator_notification", "emits": "{capability, notifications_seen, entries} with the after_operator_notification dispositions (DELIVERED / INACTIVE / NOT_IMPLEMENTED / HARNESS_ERROR) from the dependent dispatcher; AdapterRefusal for hooks other than InjectionHooks, a schedule without ids/requires, or hooks whose notification boundary is closed (lines 1647-1658, run_case's case schedule today)"},
+        {"file": "tools/workflow/recovery.py", "line": 680, "symbol": "notify (after_operator_notification emitted at lines 730-739)", "emits": "the controller emits after_operator_notification only after the notification is recorded and emitted (delivered to its run-local outbox), with recorded true, emitted true and its occurrence"},
+        {"file": "tools/workflow/e2e_injections.py", "line": 546, "symbol": "InjectionHooks._dispatch_dependent (notification counting at lines 551-566; notification_boundary at line 264)", "emits": "an occurrence is counted only for an event with recorded and emitted true, once per native notification index; an occurrence that disagrees with the controller's stops the dispatcher (HARNESS_ERROR); without notification_boundary=True the hook is NOT_IMPLEMENTED ('controller emits no boundary')"},
+        {"file": "adapter_support/role_substitution.py", "line": 607, "symbol": "CaseScheduleHooks.__init__", "emits": "run_case's case schedule builds InjectionHooks without notification_boundary, so the boundary is closed in every run_case run today"}
+      ],
+      "evidence_fields": [
+        "dispatch_after_operator_notification() method output (above); not contract fields",
+        "the notification itself is CAP-OPERATOR-NOTIFY's controller_trace.operator_notifications"
+      ],
+      "missing_fields": [
+        {"field": "any after_operator_notification delivery in a run_case run (E14-P3-CTL / -INJ)", "owner": "LIVE-WAVE-BRIEF sub-wave 5: run_case does not open the notification boundary yet; until it does, this method refuses run_case's hooks and E14-P3 stays refused"}
+      ],
+      "mapping_choices_for_review": [
+        "frozen 'emit only after the controller actually records and emits the operator notification, never merely on AUTHORIZED or on an intention to notify': the controller is the emitter (recovery.notify emits only after recorded and a DELIVERED outbox write); the dispatcher additionally ignores any event without recorded and emitted true, and counts each native notification once",
+        "only the dependent dispatcher (a schedule with ids / requires) delivers this hook, because only it checks recorded and emitted"
+      ],
+      "notes": "Not deliverable through run_case until LIVE-WAVE-BRIEF sub-wave 5 opens the notification boundary (InjectionHooks(notification_boundary=True)) in run_case. Do NOT sign this record before sub-wave 5 lands (HANDOFF 2026-10-16 decision): signing it now would admit E14-P3 by requirements while every run_case run refuses the hook. The positive test drives InjectionHooks directly with a stand-in controller, not a run_case run.",
+      "tests": [
+        "tests/test_live_wave_adapter.py::test_notification_hook_fires_only_on_a_recorded_and_emitted_notification",
+        "tests/test_live_wave_adapter.py::test_notification_hook_refuses_a_closed_boundary_or_another_dispatcher",
+        "tests/test_live_wave_adapter.py::test_case_driver_admission_runs_mixed_cases_and_matrix_rows_carry_relay_caps",
+        "tools/workflow/tests/test_recovery_v27.py::test_notification_hook_fires_once_after_durable_recorded_and_emitted",
+        "tools/workflow/tests/test_recovery_v27.py::test_notification_delivery_failure_is_not_emitted_and_hook_does_not_fire",
+        "tools/workflow/tests/test_recovery_v27.py::test_hook_adapter_counts_only_recorded_and_emitted_native_notifications",
+        "tools/workflow/tests/test_recovery_v27.py::test_hook_adapter_default_keeps_notification_hook_unproduced"
+      ],
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null
     }
   }
 }
