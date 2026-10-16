@@ -1,6 +1,6 @@
 ---
 name: kenya-forecast-fetch
-description: Fetch a forecast grid from the public Kenya forecasts archive (gs://kenya-forecasting-data/<date>/data/). Native ECMWF S2S is the low-resolution Zarr (`--dataset precip`, ~1.5°); the CHIRPS-resolution weekly downscale is `--dataset precip_downscaled` (~0.05°, data_weekly_Kenya_downscaled.nc, 101 ensemble members on `number` for inits from 2026-09-07); the daily downscale is `--dataset precip_downscaled_daily` (~0.05°, daily_downscaled_kenya.tif, ensemble mean). Also GEFS, medium-range precip, temps, and winds. Use for clipping, aggregation, comparison, or plotting via plot / plot-timeseries / plot-mediogram.
+description: Fetch a forecast grid from the public Kenya forecasts archive (gs://kenya-forecasting-data/<date>/data/). Native ECMWF S2S is the low-resolution Zarr (`--dataset precip`, ~1.5°); the CHIRPS-resolution weekly downscale is `--dataset precip_downscaled` (~0.05°, data_weekly_Kenya_downscaled.nc, 101 ensemble members on `number` for inits from 2026-09-07); the daily downscale is `--dataset precip_downscaled_daily` (~0.05°, daily_downscaled_kenya.tif, ensemble mean). Also GEFS, medium-range precip, temps, and winds. Use for clipping, aggregation, comparison, or plotting via plot / plot-mediogram.
 license: MIT
 compatibility: Requires Python 3.12 and uv. Opens public consolidated Zarr (native S2S / GEFS / medium-range), the weekly downscaled NetCDF, or the daily downscaled GeoTIFF over HTTPS from Google Cloud Storage bucket kenya-forecasting-data; no credentials required. Older init folders may only have GRIB/NetCDF under data/ and no Zarr.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
@@ -38,7 +38,7 @@ By default the skill takes the **most recent** init date that has the requested
 `--dataset`. Pass `--date` to pin an init.
 
 This skill does **not** plot. For flexible figures, chain to `plot`,
-`plot-timeseries`, `plot-mediogram`, `summarize-dim`, `clip-region`, etc.
+`plot-mediogram`, `summarize-dim`, `clip-region`, etc.
 Recreate KMSA / Sheerwater product figures from the data this way rather
 than downloading the archive's pre-rendered PNGs.
 
