@@ -1961,8 +1961,14 @@ class Controller:
                 "schema": review_evidence.SCHEMA,
                 "sources": self.context["review_evidence"]["sources"],
                 "instruction": "Return schema, plan (the unchanged typed plan), and nonempty "
-                "plan_claims. Each claim contains claim_id, text, citations (source_id, "
-                "source_hash, verbatim quote), and your boolean derivable declaration. "
+                "plan_claims. Each claim contains exactly claim_id, text, citations and "
+                "derivable, plus computes only when derivable is true. Each citation contains "
+                "exactly source_id, source_hash and quote; quote is copied character for "
+                "character from that source, including markdown such as backticks. Set "
+                "derivable true only for a fact the controller computes itself, and then add "
+                "computes {fact, value} with fact one of: "
+                + ", ".join(sorted(claim_gates.DERIVABLE_FACTS))
+                + "; every other claim is derivable false. "
                 "Use only these bound documentation sources; never invent a source. "
                 "Declarations and citations are not controller support verdicts. "
                 "For a repair also include response; retain all envelope fields.",

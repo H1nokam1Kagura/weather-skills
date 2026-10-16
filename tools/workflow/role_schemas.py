@@ -84,6 +84,37 @@ FINDING = {
     ]
 }
 FINDINGS = {"type": "array", "items": FINDING}
+# Review claims, exactly as review_evidence.validate_claims and claim_gates.validate_claim_shape
+# accept them: {claim_id, text, citations, derivable[, computes]}, each citation exactly
+# {source_id, source_hash, quote} (strings). Run 38922536742: with plan_claims untyped the live
+# planner and repairer wrote "verbatim_quote", which both validators refuse.
+CITATION = _object(
+    {
+        "source_id": STRING,
+        "source_hash": STRING,
+        "quote": {
+            "type": "string",
+            "description": "copied character for character from the source, markdown included",
+        },
+    },
+    ("source_id", "source_hash", "quote"),
+    closed=True,
+)
+CLAIM = _object(
+    {
+        "claim_id": STRING,
+        "text": STRING,
+        "citations": {"type": "array", "items": CITATION},
+        "derivable": {
+            "type": "boolean",
+            "description": "true only for a fact the controller computes (then add computes)",
+        },
+        "computes": {"description": "{fact, value}; only when derivable is true"},
+    },
+    ("claim_id", "text", "citations", "derivable"),
+    closed=True,
+)
+CLAIMS = {"type": "array", "items": CLAIM}
 FROZEN_ONLY = (
     "Do not use. Only for the native frozen reviewer shape, which has no binding_hash; your "
     "answer is exactly verdict, binding_hash and findings, and adding this key makes it invalid."
@@ -119,8 +150,8 @@ def _planner(payload):
         properties = {
             "schema": {"type": "string", "enum": [REVIEW_ENVELOPE_SCHEMA]},
             "plan": OBJECT,
-            "plan_claims": ARRAY,
-            "claims": ARRAY,
+            "plan_claims": CLAIMS,
+            "claims": CLAIMS,
             "rationale": STRING,
         }
     else:  # the bare typed plan (contracts.expected_plan)
@@ -132,7 +163,7 @@ def _repairer(payload):
     properties = {"plan": OBJECT, "response": STRING}
     if "review_evidence_request" in payload:
         properties.update(
-            schema={"type": "string", "enum": [REVIEW_ENVELOPE_SCHEMA]}, plan_claims=ARRAY
+            schema={"type": "string", "enum": [REVIEW_ENVELOPE_SCHEMA]}, plan_claims=CLAIMS
         )
     return _object({**properties, "needs_info": NEEDS_INFO})
 

@@ -352,3 +352,20 @@ def test_router_and_verifier_schemas_follow_their_validators():
         assert verifier_accepts(value) and schema_errors(answer_schema("verifier", {}), value) == []
     for value in ({"verdict": "PASS"}, {"verdict": "OK", "binding_hash": "b", "scope": "s"}):
         assert not verifier_accepts(value) and schema_errors(answer_schema("verifier", {}), value)
+
+
+def test_claim_schema_names_the_controller_citation_fields():
+    """Run 38922536742: with plan_claims untyped the live planner and repairer wrote
+    "verbatim_quote"; both controller validators refuse it, and the schema now does too."""
+    good = {"source_id": "s", "source_hash": "h", "quote": "q"}
+    claim = {"claim_id": "c1", "text": "t", "citations": [good], "derivable": False}
+    wrong = {**claim, "citations": [{"source_id": "s", "source_hash": "h", "verbatim_quote": "q"}]}
+    with pytest.raises(Refused, match=r"review citation: expected exactly"):
+        claim_gates.validate_claim_shape([wrong])
+    for role in ("planner", "repairer"):
+        schema = answer_schema(role, REQUEST)
+        assert schema_errors(schema, {"plan_claims": [claim]}) == []
+        assert schema_errors(schema, {"plan_claims": [{**claim, "computes": "x"}]}) == []
+        assert schema_errors(schema, {"plan_claims": [wrong]}), role
+        assert schema_errors(schema, {"plan_claims": [{**claim, "derivable": "no"}]}), role
+    assert schema_errors(answer_schema("planner", REQUEST), {"claims": [wrong]})
