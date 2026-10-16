@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from test_evidence_projection_v27 import MAP_GOAL, producers_with, rewrite_run, score
+from test_evidence_projection_v27 import MAP_GOAL, resigned, rewrite_run, score
 from test_role_substitution_adapter import PREFIX, frozen, lab  # noqa: F401 - shared fixtures
 
 from adapter_support import evidence_projection as ep
@@ -35,13 +35,14 @@ UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
 
 
 def signed():
-    """The committed producer file with this task's three records signed (test-local)."""
-    return producers_with(**{cap: SIGN for cap in CAPS})
+    """resigned() (the committed file, rereview flags cleared test-locally) with this task's
+    three records signed (test-local)."""
+    return resigned(**{cap: SIGN for cap in CAPS})
 
 
 def unsigned():
-    """The committed producer file with only this task's three records' signatures stripped."""
-    return producers_with(**{cap: UNSIGN for cap in CAPS})
+    """resigned() with only this task's three records' signatures stripped."""
+    return resigned(**{cap: UNSIGN for cap in CAPS})
 
 
 def execute(lab, case):  # noqa: F811 - lab is the shared module fixture
@@ -96,7 +97,11 @@ def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
         assert record["tests"] and record["producers"] and record["evidence_fields"]
-        assert cap in WeatherAdapter().implemented_capabilities()
+        # Flagged rereview_required by wave 7: undeclared in the committed file until the
+        # batch re-review; the test-local re-signed copy declares it.
+        assert record["rereview_required"].strip()
+        assert cap not in WeatherAdapter().implemented_capabilities()
+        assert cap in WeatherAdapter(producers=resigned()).implemented_capabilities()
     stripped = WeatherAdapter(producers=unsigned())
     assert not set(CAPS) & stripped.implemented_capabilities()
     implemented = WeatherAdapter(producers=signed()).implemented_capabilities()

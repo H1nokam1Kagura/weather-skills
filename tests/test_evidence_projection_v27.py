@@ -1706,6 +1706,20 @@ def producers_with(**changes):
     return producers
 
 
+def resigned(**changes):
+    """The committed producer file with every rereview_required flag cleared (then ``changes``
+    applied, as producers_with): a test-local stand-in for the batch D4 re-review of the
+    records wave 7's code changes flagged (sub-wave E). Never written back:
+    CAPABILITY-PRODUCERS.json is the coordinator's, and the committed flags keep those records
+    undeclared (test_committed_d4_signatures_are_complete_and_pinned)."""
+    producers = producers_with()
+    for record in producers["capabilities"].values():
+        record.pop("rereview_required", None)
+    for capability, fields in changes.items():
+        producers["capabilities"][capability].update(fields)
+    return producers
+
+
 def unsigned_producers(load_producers):
     """The committed producer records with every D4 signature removed (review fields null,
     and any rereview_required flag with them: an unsigned record has nothing to re-review)."""

@@ -47,6 +47,7 @@ from test_evidence_projection_v27 import (
     SIGNED_ADMITTED,
     TOOL_SCRIPT,
     Lab,
+    resigned,
     score,
 )
 from test_role_substitution_adapter import PREFIX, frozen  # noqa: F401 - shared fixture
@@ -57,7 +58,6 @@ from adapter_support.weather_adapter import (
     PROJECTION_INPUTS_FILE,
     AdapterRefusal,
     WeatherAdapter,
-    load_producers,
 )
 from tools.workflow import runner
 from tools.workflow.persistence import read_checkpoint
@@ -143,16 +143,6 @@ def lab(tmp_path_factory):
             path = built.repo / "skills" / skill / "scripts" / script
             path.write_text(zarr_tool_script(), encoding="utf-8")
         yield built
-
-
-def resigned():
-    """The committed producer file with every rereview_required flag cleared: a test-local
-    stand-in for the batch D4 re-review of the records wave 7's code changes flagged (sub-wave
-    E). Never written back: CAPABILITY-PRODUCERS.json is the coordinator's."""
-    producers = load_producers()
-    for record in producers["capabilities"].values():
-        record.pop("rereview_required", None)
-    return producers
 
 
 def signed(*caps):

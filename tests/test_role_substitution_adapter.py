@@ -23,8 +23,8 @@ from test_evidence_projection_v27 import (
     TEST_FREE_RAM_GIB,
     Lab,
     ledger,
-    producers_with,
     profile_document,
+    resigned,
     write_source,
 )
 
@@ -73,7 +73,9 @@ def lab(tmp_path_factory):
 
 
 def execute(lab, case):
-    adapter = WeatherAdapter(enable_run_case=True)
+    # resigned(): the committed file flags this module's records rereview_required (wave 7),
+    # so they are undeclared there; the test-local re-signed copy admits the frozen cases.
+    adapter = WeatherAdapter(enable_run_case=True, producers=resigned())
     profile = lab.profile(MAP_GOAL, case, stub=None)
     built = []
 
@@ -567,8 +569,9 @@ def test_run_case_refuses_unsupported_schedules_before_side_effects(
 ):
     # Wave 7: E11-P1-INJ's interrupt implies CAP-INTERRUPT and its mid-process form
     # CAP-MIDPROCESS (D21), so both are signed test-locally here; without a stopper (no
-    # os.fork: no forked stop route) the mid-process stop stays refused as before.
-    producers = producers_with()
+    # os.fork: no forked stop route) the mid-process stop stays refused as before. The base
+    # is resigned() (the wave-7 rereview flags cleared test-locally).
+    producers = resigned()
     for cap in ("CAP-INTERRUPT", "CAP-MIDPROCESS"):
         producers["capabilities"][cap] = {
             "d4_gated": True,
@@ -593,7 +596,9 @@ def test_run_case_refuses_unsupported_schedules_before_side_effects(
         assert not profile["case_root"].exists()
     # Without the two records the same case is refused earlier, by D21.
     with pytest.raises(AdapterRefusal, match="implies undeclared capabilities"):
-        WeatherAdapter(enable_run_case=True).run_case(local_case(frozen, "E11-P1-INJ"), profile)
+        WeatherAdapter(enable_run_case=True, producers=resigned()).run_case(
+            local_case(frozen, "E11-P1-INJ"), profile
+        )
     plan = adapter.substitute_role_output(local_case(frozen, "E02-P1-INJ"), MAP_GOAL)
     with pytest.raises(AdapterRefusal, match="substituted roles factory"):
         rs.case_hooks(plan, SimpleNamespace(receipts=[]), tmp_path)
