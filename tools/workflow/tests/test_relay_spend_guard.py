@@ -148,15 +148,23 @@ def client(url, **kwargs):
 # ------------------------------------------------------------------ caps refuse before send
 
 
-def test_token_cap_refuses_before_forwarding_and_maps_to_budget(tmp_path, served):
+def test_token_cap_refuses_before_forwarding_and_maps_to_budget(tmp_path, served, monkeypatch):
     process = Process(envelope())
     relay = make_relay(tmp_path, process, max_total_tokens=500)  # below any verifier call
+    order = []
+    send = host.Handler._send
+    monkeypatch.setattr(host.Handler, "_send", lambda h, *a: (send(h, *a), order.append("sent")))
+    responded = relay.responded
+    monkeypatch.setattr(relay, "responded", lambda: (order.append("responded"), responded()))
     agent = client(served(relay))
     with pytest.raises(Refused, match="relay spend cap") as caught:
         agent.ask("verifier", PAYLOAD)
     assert caught.value.gate == "budget" and agent.spent == 0  # nothing forwarded: released
     assert process.calls == [] and relay.guard.state == "EXHAUSTED"
-    assert relay.asks_done.is_set()  # the relay stops after writing the refusal
+    # The stop is signalled on the handler thread only AFTER the refusal was written, so the
+    # client can hold the full refusal before the signal exists: wait for it, never poll once.
+    assert relay.asks_done.wait(5)
+    assert order == ["sent", "responded"]  # the refusal is on the wire before the stop
     lines = audit_lines(tmp_path)
     (cap,) = [x for x in lines if x["event"] == "spend_cap_reached"]
     assert cap["kind"] == "spend_cap_reached" and cap["cap"] == "max_total_tokens"
