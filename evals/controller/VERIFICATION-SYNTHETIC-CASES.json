@@ -1,0 +1,26 @@
+{
+  "schema": "verification.synthetic-case-index/1",
+  "status": "LOCAL_TESTS_NOT_INDEPENDENTLY_REVIEWED",
+  "test_module": "tests/test_verification_profiles.py",
+  "execution": "pytest using real scientific skills, deterministic synthetic inputs and substituted roles",
+  "simkit_admission": "NOT_REGISTERED",
+  "production_release": false,
+  "cases": [
+    {"id": "WINDOW-ALL", "tests": ["test_real_skills_all_windows"], "oracle": "2/5/10-day MAE equals 0.5 times window length, baseline zero, exact paired counts"},
+    {"id": "WINDOW-PARTIAL", "tests": ["test_real_skills_all_windows"], "oracle": "21-day inputs report each window's excluded tail"},
+    {"id": "WINDOW-MISMATCH", "tests": ["test_support_refuses_before_scoring"], "oracle": "wrong interval bounds or aggregation period block before tool execution"},
+    {"id": "SUPPORT-MISMATCH", "tests": ["test_support_refuses_before_scoring"], "oracle": "units, initialization, grid and duplicate members block before tool execution"},
+    {"id": "BASELINE-MASK", "tests": ["test_common_daily_mask", "test_pooled_rmse_and_paired_mask", "test_global_missing_day_excludes_whole_window_and_brier_boundary"], "oracle": "forecast/reference/baseline share daily and full-window support; RMSE pools squared errors"},
+    {"id": "THRESHOLD-BOUNDARY", "tests": ["test_request_binding_and_threshold", "test_global_missing_day_excludes_whole_window_and_brier_boundary"], "oracle": "Brier uses strictly greater than; equality is false; unsupported comparator is refused"},
+    {"id": "UNCERTAINTY-SUPPORT", "tests": ["test_insufficient_uncertainty_is_partial"], "oracle": "one complete window cannot produce an estimated bootstrap interval or complete verdict"},
+    {"id": "FOLLOW-THROUGH", "tests": ["test_real_skills_all_windows", "test_pause_resume_reuses_only_verified"], "oracle": "every requested window finishes after authorized continuation"},
+    {"id": "PRODUCT-UNAVAILABLE", "tests": ["test_unavailable_initialization_explicit"], "oracle": "every unavailable requested window stays in the ledger and verdict is partial"},
+    {"id": "HISTORY-PROBE", "tests": ["test_real_skills_all_windows"], "scope": "cached synthetic probe only; no remote acquisition test"},
+    {"id": "HISTORY-GAP", "tests": ["test_unavailable_initialization_explicit", "test_support_refuses_before_scoring"], "oracle": "missing historical initialization is never substituted with latest"},
+    {"id": "REUSE-EXACT", "tests": ["test_pause_resume_reuses_only_verified", "test_source_tamper_and_wrong_resume_request"], "oracle": "verified first product is unchanged on resume; altered request is refused"},
+    {"id": "REUSE-TAMPER", "tests": ["test_pause_resume_reuses_only_verified", "test_source_tamper_and_wrong_resume_request", "test_checkpoint_digest_rejected"], "oracle": "changed output, source or checkpoint is refused"},
+    {"id": "WORKER-DEATH", "tests": ["test_bounded_worker_retry"], "scope": "injected typed backend failure, not an OS-killed process", "oracle": "one retry in a fresh path; second failure blocks"},
+    {"id": "OPERATOR-PAUSE", "tests": ["test_pause_resume_reuses_only_verified", "test_pause_before_review_does_not_bypass_gates", "test_unclean_checkpoint_requires_resume_and_retains_budget"], "scope": "cooperative synchronous boundaries", "oracle": "no auto continuation, review cannot be skipped, exhausted budget survives recovery"},
+    {"id": "FINAL-GATE", "tests": ["test_failed_gate_cannot_complete"], "oracle": "rejected reviewer or verifier prevents complete and blocks resume"}
+  ]
+}

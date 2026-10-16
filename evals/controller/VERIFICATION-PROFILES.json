@@ -1,6 +1,7 @@
 {
   "schema": "workflow.profile-proposal/1",
-  "status": "PROPOSED_NOT_EXECUTABLE",
+  "status": "EXPERIMENTAL_SYNTHETIC_SUBSET_ONLY",
+  "implementation": "tools/verification_profiles; see tools/verification-profiles.md for executable subset and limitations. Not registered in the production controller or frozen SIMKIT adapter.",
   "purpose": "Executable-controller extensions for short-window rainfall verification and historical GEFS verification",
   "activation_gate": "Implement and review the contracts, controller transitions, evidence projection and new synthetic cases before registering either profile. This document grants no capability or live authority.",
   "profiles": [
