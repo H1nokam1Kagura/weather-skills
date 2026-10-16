@@ -553,6 +553,7 @@ def record_refused(root, value, decision, refusal, request=None):
         event = _payload_event(root, value, "transition_request", transition_request=dict(record))
         record["event_seq"] = event["sequence"] if event else None
         requests.append(record)
+        save_transition_request(root, value["evidence"], record)
     terminal = refusal_terminal(refusal)
     mapping = {"source": "resume_refusal", "resume_index": decision["index"]}
     value["context"]["terminal"] = {**terminal, "mapping": mapping}
@@ -594,6 +595,7 @@ def record_accepted(controller, decision, request=None):
         event = controller.dispatch_event("transition_request", transition_request=dict(record))
         record["event_seq"] = event["sequence"] if event else None
         requests.append(record)
+        controller.save(transition_request_name(record), record)
     controller.checkpoint()
     return decision
 
@@ -892,9 +894,86 @@ def open_decision(root, value, request, attribution, override):
       controller_pid       os.getpid() of the process deciding (one per incarnation)
     """
     counters = checkpoint_counters(value)
+    adopt_unrecorded_events(root, value)
     record_observed_stop(root, value)
     interruption = latest_unanswered(value["context"])
     decision = new_decision(request, attribution, override, interruption)
     decision["checkpoint_counters"] = counters
     decision["controller_pid"] = os.getpid()
     return decision, interruption
+
+
+# ------------------------------------------------------------------ resume evidence (wave 7f)
+#
+# Two controller defects found by sub-wave C, fixed here so producer line pins above stay put.
+
+DISPATCH_EVENT_FILE = "dispatch-event-{:06}.json"
+
+
+def transition_request_name(record):
+    """The per-record evidence file every transition request is written to (the same name
+    operator_ledger.submit_transition_request uses), numbered by its stream ``sequence``."""
+    return f"transition-request-{record['sequence']:03}.json"
+
+
+def save_transition_request(root, evidence, record):
+    """Controller.save on a checkpoint payload (no live controller: refused resume)."""
+    name = transition_request_name(record)
+    atomic_json(root / name, record)
+    evidence[name] = tree_hash(root / name)
+    return name
+
+
+def _on_disk_event_numbers(root):
+    numbers = []
+    for path in root.glob("dispatch-event-*.json"):
+        stem = path.name[len("dispatch-event-") : -len(".json")]
+        if stem.isdigit() and path.name == DISPATCH_EVENT_FILE.format(int(stem)):
+            numbers.append(int(stem))
+    return sorted(numbers)
+
+
+def adopt_unrecorded_events(root, value):
+    """Keep the dispatch events a killed incarnation wrote after its last checkpoint.
+
+    A controller killed mid-run (e.g. between process_launch and process_exit) has durable
+    dispatch-event files beyond the checkpoint's recorded ``sequence``: dispatch_event writes
+    each file at once and the checkpoint only follows at the next durable step. Evidence is
+    never overwritten: the resumed sequence continues after the HIGHEST event on disk.
+
+    Each contiguous event after the checkpoint whose identity (schema, run_id, sequence) is the
+    controller's own is adopted into the checkpoint evidence as written (hash of the bytes on
+    disk). An event that is not (unreadable, foreign identity, or past a gap) is left as is and
+    unrecorded, so the projection refuses it rather than this resume vouching for it.
+    Returns the adopted file names. Mutates ``value`` (persisted by the decision's checkpoint).
+    """
+    context = value["context"].get("dispatch_evidence")
+    if context is None:
+        return []
+    numbers = _on_disk_event_numbers(root)
+    adopted = []
+    expected = context["sequence"] + 1
+    for number in numbers:
+        if number < expected:
+            continue
+        if number != expected:
+            break
+        name = DISPATCH_EVENT_FILE.format(number)
+        try:
+            record = json.loads((root / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            break
+        if not (
+            isinstance(record, dict)
+            and record.get("sequence") == number
+            and record.get("run_id") == context["run_id"]
+            and record.get("schema") == context["schema"]
+        ):
+            break
+        value["evidence"][name] = tree_hash(root / name)
+        adopted.append(name)
+        expected += 1
+    context["sequence"] = max([context["sequence"], *numbers])
+    if adopted:
+        context["adopted_after_checkpoint"] = context.get("adopted_after_checkpoint", []) + adopted
+    return adopted
