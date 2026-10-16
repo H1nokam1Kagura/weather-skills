@@ -8,7 +8,7 @@ usage:
     python container_harness/launch.py admission --image TAG --out ADMISSION.json
                                        [--selector S] [--smoke-ids A,B]
     python container_harness/launch.py relay-smoke --image TAG --out DIR --relay-dir RDIR
-                                       [--client relay_smoke|relay_dedup_smoke]
+                                       [--client relay_smoke|relay_dedup_smoke|relay_role_smoke]
 
 Live roles (owner ruling container_route_ruling_2026-10-13.live_roles): with ``--relay-dir``
 (written by ``relay_ci.sh net-up`` + ``relay-start``) the container joins the docker
@@ -73,7 +73,7 @@ RELAY_ENV_NAMES = (
 )
 FORBIDDEN_ENV_MARKERS = ("KONG", "ANTHROPIC", "OPENAI")
 # relay-smoke in-container clients (container_harness/<client>.py), same run conditions.
-SMOKE_CLIENTS = ("relay_smoke", "relay_dedup_smoke")
+SMOKE_CLIENTS = ("relay_smoke", "relay_dedup_smoke", "relay_role_smoke")
 
 
 def relay_settings(relay_dir, probe_targets=False):
@@ -390,7 +390,7 @@ def relay_smoke(args):
     client = getattr(args, "client", "relay_smoke")
     if client not in SMOKE_CLIENTS:
         raise SystemExit(f"unknown smoke client {client!r}")
-    stem = client.replace("_", "-")  # relay-smoke | relay-dedup-smoke
+    stem = client.replace("_", "-")  # relay-smoke | relay-dedup-smoke | relay-role-smoke
     name = f"simkit-{stem}-{uuid.uuid4().hex[:8]}"
     run_args, env, net = relay_settings(args.relay_dir, probe_targets=True)
     cmd = [
@@ -496,9 +496,10 @@ def main(argv):
         "--client",
         choices=SMOKE_CLIENTS,
         default="relay_smoke",
-        help="in-container client: relay_smoke (one tiny verifier call) or relay_dedup_smoke "
-        "(one reviewer-sized dedup-sha256/1 call whose binding sits only in a shared block); "
-        "writes "
+        help="in-container client: relay_smoke (one tiny verifier call), relay_dedup_smoke "
+        "(one reviewer-sized dedup-sha256/1 call whose binding sits only in a shared block) or "
+        "relay_role_smoke (one call per live role and payload variant, each answer judged by "
+        "the controller's own acceptance); writes "
         "OUT/<client, dashed>.container.json",
     )
     args = ap.parse_args(argv[1:])
