@@ -144,7 +144,9 @@ def run_lab(lab, case, relay_cls=FakeRelay, producers=None):  # noqa: F811
     relays, built = [], []
 
     def relay_factory(run_dir):
-        relays.append(relay_cls(case, goal, budget=case["budget"]["max_model_usd"]))
+        relays.append(
+            relay_cls(case, goal, budget=case["budget"]["max_model_usd"], allow_gateway_mock=True)
+        )
         return relays[-1]
 
     def factory(run_dir):
@@ -208,7 +210,9 @@ def run_driver(lab, frozen, short, tmp_path_factory, monkeypatch):  # noqa: F811
 
     def fake_relay_roles(**kwargs):
         budgets.append(kwargs.get("budget"))
-        relays.append(FakeRelay(case, goal_of(case), budget=kwargs["budget"]))
+        relays.append(
+            FakeRelay(case, goal_of(case), budget=kwargs["budget"], allow_gateway_mock=True)
+        )
         return relays[-1]
 
     monkeypatch.setattr(cd, "_relay_roles", fake_relay_roles)
@@ -440,6 +444,10 @@ def test_live_identity_is_projected_per_live_receipt_and_missing_stays_missing(d
                 assert live["model_requested"] == live["model_observed"] == MODEL
                 assert live["settings"]["temperature"] == 0 and live["settings"]["sdk"]
                 assert live["relay_id"] and live["response_id"] == record["session_id"]
+                # B-LR-1: the zero-cost fake relay is a mock gateway and the projection says
+                # so; it is never indistinguishable from a real model call.
+                assert live["gateway_mock"] is True
+                assert live["cost_basis"] == "fake relay (test): zero cost, no model called"
             else:
                 assert "live" not in record  # a substituted receipt carries no live identity
 

@@ -45,6 +45,12 @@ reported ALONGSIDE the original: the case's attempts list holds the original att
 then this run's; the original is never replaced. Offline runs get an empty ``live`` section
 and nothing else changes.
 
+Every EXECUTED case whose projected invocation_receipts include live receipts carries a
+``gateway_mock`` record (gateway_mock_record): GATEWAY_MOCK when any live receipt shows
+gateway_mock true (a mock gateway answered, no model was called), GATEWAY_UNOBSERVED when one
+lacks the field. Either is flagged in its detail cell and in a prominent RESULTS.md line, listed
+under ``live.gateway_mock_cases`` / ``live.gateway_unobserved_cases``, and is never a live result.
+
     attempts: [{"attempt": 1, "run_url", "status", "relay_outcome_label", "relay_usage":
                 {requests, input_tokens, output_tokens, est_usd, cap_state}, "fault_kinds",
                 "dimensions"?, "terminal"?, "harness_error_source"?}, {"attempt": 2, ...,
@@ -227,6 +233,61 @@ def harness_error_detail(entry):
     return " - ".join(p for p in parts if p)
 
 
+GATEWAY_MOCK = "GATEWAY_MOCK"
+GATEWAY_UNOBSERVED = "GATEWAY_UNOBSERVED"
+GATEWAY_MOCK_NOTE = (
+    "a projected live receipt carries gateway_mock true: a mock gateway answered and no model "
+    "was called. Such a case is NEVER a live result, whatever its dimensions say"
+)
+
+
+def gateway_mock_record(projection):
+    """B-LR-1: what the projected live receipts of one EXECUTED case say about the gateway.
+
+    None when the case has no live receipt. Otherwise {status, mock, unobserved, real, note}:
+    mock lists the invocation ids whose live.gateway_mock is true (status GATEWAY_MOCK);
+    unobserved those whose gateway_mock is missing or not a boolean (GATEWAY_UNOBSERVED when no
+    receipt is a mock: MISSING stays MISSING, never read as a real call); real the rest (status
+    null). live_result is True only when every live receipt shows gateway_mock false."""
+    evidence = (projection.get("projection") or {}).get("evidence") or {}
+    mock, unobserved, real = [], [], []
+    for record in evidence.get("invocation_receipts") or []:
+        if not isinstance(record, dict) or record.get("mode") != "live":
+            continue
+        value = (record.get("live") or {}).get("gateway_mock")
+        ident = record.get("invocation_id")
+        if value is True:
+            mock.append(ident)
+        elif value is False:
+            real.append(ident)
+        else:
+            unobserved.append(ident)
+    if not (mock or unobserved or real):
+        return None
+    status = GATEWAY_MOCK if mock else (GATEWAY_UNOBSERVED if unobserved else None)
+    return {
+        "status": status,
+        "live_result": status is None,
+        "mock": mock,
+        "unobserved": unobserved,
+        "real": real,
+        "note": GATEWAY_MOCK_NOTE if mock else None,
+    }
+
+
+def gateway_mock_lines(cases):
+    """Prominent RESULTS.md lines naming every case flagged by gateway_mock_record."""
+    lines = []
+    for status, text in (
+        (GATEWAY_MOCK, "GATEWAY MOCK, no model called, NOT a live result"),
+        (GATEWAY_UNOBSERVED, "GATEWAY UNOBSERVED (gateway_mock missing), NOT a live result"),
+    ):
+        ids = [e["case_id"] for e in cases if (e.get("gateway_mock") or {}).get("status") == status]
+        if ids:
+            lines += [f"> **{text}: {', '.join(ids)}**", ""]
+    return lines
+
+
 def live_attempted(row):
     """A live-role case this run dispatched (so a relay audit is expected)."""
     return (
@@ -329,6 +390,19 @@ def live_section(per_case, prior):
         "prior_run_url": prior["run_url"],
         "reruns_not_authorized_by_prior": unauthorized,
         "reruns_before_earliest_time": too_early,
+        # B-LR-1: EXECUTED cases whose projected live receipts do not show a real model call
+        # (gateway_mock_record); none of them is ever a live result.
+        "gateway_mock_note": GATEWAY_MOCK_NOTE,
+        "gateway_mock_cases": [
+            e["case_id"]
+            for e in per_case
+            if (e.get("gateway_mock") or {}).get("status") == GATEWAY_MOCK
+        ],
+        "gateway_unobserved_cases": [
+            e["case_id"]
+            for e in per_case
+            if (e.get("gateway_mock") or {}).get("status") == GATEWAY_UNOBSERVED
+        ],
     }
 
 
@@ -427,6 +501,9 @@ def build(admission, cases_dir, run_url=None, prior_results=None, ratification_p
             # Labelled counterfactual, computed on a COPY: never written back into entry's
             # frozen dimensions/terminal/assertions or into scored_all.
             projection = load(arts[row["case_id"]] / "projection.json") or {}
+            gateway = gateway_mock_record(projection)
+            if gateway is not None:
+                entry["gateway_mock"] = gateway
             if projection.get("status") != "OK":
                 entry[wcf.JSON_KEY] = wcf.not_computed(
                     f"projection {projection.get('status', 'ABSENT')}"
@@ -558,6 +635,7 @@ def markdown(res):
         f"> {res['header']}",
         "",
         *gate_lines(res.get("execution_gate")),
+        *gateway_mock_lines(res["cases"]),
         f"- Run: {res['run_url'] or 'n/a'}",
         f"- GS1: **{res['gs1']}**",
         f"- Adapter: `{res['adapter']}`; selector `{res['selector']}`",
@@ -608,6 +686,11 @@ def markdown(res):
             detail = e.get("demoted", "")
         if e.get("relay_outcome_label"):
             detail += f"; relay {e['relay_outcome_label']}"
+        gateway = (e.get("gateway_mock") or {}).get("status")
+        if gateway == GATEWAY_MOCK:
+            detail += "; GATEWAY MOCK: no model called, NOT a live result"
+        elif gateway == GATEWAY_UNOBSERVED:
+            detail += "; GATEWAY UNOBSERVED: gateway_mock missing, NOT a live result"
         if e.get("attempt", 1) > 1:
             detail += f"; attempt {e['attempt']} (rerun; earlier attempts under Live relay usage)"
         cf = _cell(wcf.summary_cell(e.get(wcf.JSON_KEY)), limit=600)
