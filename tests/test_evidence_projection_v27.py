@@ -1709,19 +1709,9 @@ LIVE_SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E15-P2-CTL",
     "DEV-E2E-V2_7-E15-P2-INJ",
 }
-# What the committed file admits with every rereview flag cleared (resigned()): the 31 offline
-# cases plus the 30 live ones, as signed at d6c2809 / dd19936 (D4-REVIEW-LW-B / -C,
-# D4-CONFIRM-LW-A).
-RESIGNED_ALL_ADMITTED = set(RESIGNED_ADMITTED) | LIVE_SIGNED_ADMITTED
 # The frozen cases the committed producer file admits. A change to this set is a change to what
-# is runnable and must be made here deliberately. Empty since the controller fixes after the
-# first live frozen-case runs (DIAGNOSIS-LIVE-1: claim-gate fix 4790afe, setup-timing fix
-# 8647ad5 / dbb1444 / f2af31a, integrated at 2fb9dda): they changed producer files of 33 signed
-# records (CAP-RECEIPTS among them, which every frozen case requires), so those records are
-# flagged rereview_required below and undeclared, and nothing is admitted until the D4 re-review
-# re-signs them. The 61 cases admitted before (RESIGNED_ALL_ADMITTED) return when the flags are
-# cleared.
-SIGNED_ADMITTED = set()
+# is runnable and must be made here deliberately: the 31 offline cases plus the 30 live ones.
+SIGNED_ADMITTED = set(RESIGNED_ADMITTED) | LIVE_SIGNED_ADMITTED
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
 # it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Six of the
@@ -1730,46 +1720,12 @@ SIGNED_ADMITTED = set()
 PENDING_D4_REVIEW = {"CAP-OPERATOR-NOTIFY-HOOK"}
 # Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
-# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. The 33
-# signed records whose producer files the claim-gate fix (claim_gates.py, runner.py) or the
-# setup-timing fix (e2e_injections.py, weather_adapter.py, fixture_rereview_projection.py,
-# case_driver.py) changed after their reviewed_commit (d6c2809 / dd19936); only CAP-HARNESS-OBS,
-# CAP-PROFILE and CAP-SIGNAL-CAPTURE kept their signatures valid.
-REREVIEW_REQUIRED = {
-    "CAP-AUTO-RESUME",
-    "CAP-BINDING-PASSTHROUGH",
-    "CAP-BOUND-SOURCES",
-    "CAP-DENY-WRITE",
-    "CAP-DIAGNOSIS",
-    "CAP-EVIDENCE-CHECKER",
-    "CAP-EXHAUSTIVE-WRITES",
-    "CAP-FIXTURE-OP",
-    "CAP-INTERRUPT",
-    "CAP-LEDGER-APPEND",
-    "CAP-LEDGER-SEED",
-    "CAP-LIVE-ROLE",
-    "CAP-MECHANICAL-REPAIR",
-    "CAP-METRIC",
-    "CAP-MIDPROCESS",
-    "CAP-OPERATOR-ACTIONS",
-    "CAP-OPERATOR-NOTIFY",
-    "CAP-OPERATOR-RECORD-SETUP",
-    "CAP-PRE-REVIEW-GATES",
-    "CAP-REASON-MAP",
-    "CAP-RECEIPTS",
-    "CAP-REREVIEW",
-    "CAP-RESUME",
-    "CAP-RESUME-ATTRIBUTION",
-    "CAP-ROLE-INPUT-PATCH",
-    "CAP-ROLE-OUTPUT-SCHEMA",
-    "CAP-ROLE-SUBSTITUTE",
-    "CAP-RUN-PROVENANCE",
-    "CAP-SHADOW",
-    "CAP-SYMBOLS",
-    "CAP-TRANSITION-REQUEST",
-    "CAP-TRANSPORT-RETRY",
-    "CAP-TRANSPORT-RETRY-SETUP",
-}
+# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty
+# since the 33 records flagged by the controller fixes after the first live frozen-case runs
+# (claim-gate 4790afe, setup-timing 8647ad5 / dbb1444 / f2af31a, N-PRG-1 55b1305, N-PRG-6
+# f50f9f4) were re-signed from D4-REVIEW-LW2-LS (91cd4b3), D4-REVIEW-LW3-SHIFT / -GATE
+# (55b1305) and D4-REVIEW-LW3B-CONFIRM (f50f9f4).
+REREVIEW_REQUIRED = set()
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
@@ -1785,13 +1741,6 @@ def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
         if not missing:
             admitted.add(case["id"])
     assert admitted == SIGNED_ADMITTED
-    # Re-signing the flagged records (test-local: every flag cleared) restores exactly the
-    # admission they had when last signed; the flags alone are why SIGNED_ADMITTED shrank.
-    implemented = WeatherAdapter(producers=resigned()).implemented_capabilities()
-    readmitted = {
-        c["id"] for c in frozen["cases"] if not set(c["adapter_requirements"]) - implemented
-    }
-    assert readmitted == RESIGNED_ALL_ADMITTED
 
 
 def producers_with(**changes):
