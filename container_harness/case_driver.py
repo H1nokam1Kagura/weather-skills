@@ -327,8 +327,10 @@ def prepare(case_id, work):
     """Untraced (uid 1000, after ``stage``): the adapter's own prepare_fixture stages the case
     root (source/source.zarr, harness/manifest.json, empty run/) BEFORE the trace starts, so
     none of it is a created path of the traced run (frozen all_under HARNESS_RUN_DIR). The
-    record goes to /work/prepared-fixture.json; the traced ``run`` passes it to run_case,
-    which re-verifies it (adopt_prepared_fixture) and stages nothing."""
+    case's before_run fixture operations on the source copy are applied here too
+    (prepare_before_run_fixture, record prepared["before_run_fixture"]). The record goes to
+    /work/prepared-fixture.json; the traced ``run`` passes it to run_case, which re-verifies
+    it (adopt_prepared_fixture, verify_before_run) and stages and applies nothing."""
     work = Path(work)
     root, _ = frozen_root()
     from adapter_support.weather_adapter import WeatherAdapter
@@ -336,17 +338,27 @@ def prepare(case_id, work):
     cases, _ratified = load_cases(root)
     case = next(c for c in cases if c["id"] == case_id)
     spec, pins = _pins()
-    prepared = WeatherAdapter(enable_run_case=True).prepare_fixture(
+    adapter = WeatherAdapter(enable_run_case=True)
+    prepared = adapter.prepare_fixture(
         case,
         work / "case",
         source=work / "gen" / "fixture-nc" / "precip.nc",
         generator_provenance=_generator_provenance(spec, pins),
         presented_fetch_version=_fetch_version(),
     )
+    # The case's before_run fixture operations on the disposable source copy (e.g.
+    # FX-SRC-META-ATTR) are fixture preparation: applied here, untraced, so their writes are not
+    # created paths of the traced run; run_case adopts the record and applies nothing.
+    document = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+    prepared["before_run_fixture"] = adapter.prepare_before_run_fixture(
+        case, prepared, document, CTL
+    )
     (work / PREPARED_NAME).write_text(json.dumps(prepared, indent=1) + "\n", encoding="utf-8")
     repo_copy = prepare_repo_copy(case, work)
     summary = {k: prepared[k] for k in ("case_id", "case_root", "run", "source_pre")}
     summary["repo_copy"] = repo_copy["repo"] if repo_copy is not None else None
+    before_run = prepared["before_run_fixture"]
+    summary["before_run_fixture"] = before_run["delivery"]["indices"] if before_run else None
     print(json.dumps(summary))
     return 0
 

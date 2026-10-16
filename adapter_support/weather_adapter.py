@@ -406,27 +406,11 @@ class WeatherAdapter(Adapter):
             ],
         }
 
-    def run_case(self, case, profile):
-        """CAP-NOT-IMPLEMENTED lifecycle (opt-in). Refuses before any side effect unless every
-        capability the case requires is declared; then stages the owned fixture, seeds the
-        ledger, runs the real controller in dispatch + review evidence mode, and returns the
-        projected evidence. The projection report is persisted beside the harness manifest.
-
-        ``profile`` is the harness mapping: profile_document, source_ledger, case_root,
-        source, generator_provenance, presented_fetch_version, definition_source, repo,
-        roles_factory(run_dir), processes_factory(run_dir), input_supplement, and optionally:
-
-        * prepared_fixture: the prepare_fixture record of a fixture the harness already
-          staged (container case mode stages it untraced, before the trace starts); it is
-          re-verified (adopt_prepared_fixture) and nothing is staged here.
-        * projection_inputs_channel: a harness-opened text stream. With it, run_case creates
-          NO file outside the run directory: the seeded ledger, output tags, projection inputs
-          and the in-process projection report leave as one record on the channel
-          (persist_projection_inputs) instead of harness/*.json. Frozen v2.7 confines
-          filesystem_snapshot.created_paths to HARNESS_RUN_DIR (all_under, every case).
-
-        Without either (in-process route) everything is staged and written as before.
-        """
+    def plan_case(self, case, profile):
+        """run_case's admission checks and static plans, before any side effect (AdapterRefusal
+        otherwise): {variant, shadow, scheduled, fixture, schedule, max_repairs}. ``profile`` is
+        read only after the capability refusals (profile_document, repo). Also read by
+        prepare_before_run_fixture, so fixture preparation plans exactly what run_case runs."""
         if not self.enable_run_case:
             raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
         if not isinstance(case, dict) or not isinstance(case.get("adapter_requirements"), list):
@@ -449,9 +433,55 @@ class WeatherAdapter(Adapter):
         # the mid-process stop form only with a stopper (the forked route, resume_driver).
         resume_driver.refuse_unsupported_schedule(scheduled, resume_driver.stop_delivery(scheduled))
         resume_driver.refuse_unsupported_route(scheduled, shadow_plan["configured"])
-        fixture_plan = self.apply_fixture_operation(scheduled, profile["repo"])
-        schedule_plan = self.substitute_role_output(scheduled, variant["goal"])
-        max_repairs = self.configure_repair(case)
+        return {
+            "variant": variant,
+            "shadow": shadow_plan,
+            "scheduled": scheduled,
+            "fixture": self.apply_fixture_operation(scheduled, profile["repo"]),
+            "schedule": self.substitute_role_output(scheduled, variant["goal"]),
+            "max_repairs": self.configure_repair(case),
+        }
+
+    def prepare_before_run_fixture(self, case, prepared, profile_document, repo):
+        """CAP-FIXTURE-OP fixture preparation (container case mode: ``case_driver prepare``,
+        untraced, before the trace baseline): the case's before_run fixture operations on the
+        disposable source copy of a prepare_fixture record, applied before the run starts
+        (fixture_rereview_projection.prestage_before_run). -> the record run_case adopts
+        (prepared["before_run_fixture"]), or None when the case schedules none or run_case
+        would refuse the case (nothing applied; run_case refuses it with the same reason)."""
+        try:
+            plans = self.plan_case(case, {"profile_document": profile_document, "repo": repo})
+        except AdapterRefusal:
+            return None
+        return fixture_ops.prestage_before_run(
+            plans["fixture"], plans["schedule"]["native_case"], prepared
+        )
+
+    def run_case(self, case, profile):
+        """CAP-NOT-IMPLEMENTED lifecycle (opt-in). Refuses before any side effect unless every
+        capability the case requires is declared; then stages the owned fixture, seeds the
+        ledger, runs the real controller in dispatch + review evidence mode, and returns the
+        projected evidence. The projection report is persisted beside the harness manifest.
+
+        ``profile`` is the harness mapping: profile_document, source_ledger, case_root,
+        source, generator_provenance, presented_fetch_version, definition_source, repo,
+        roles_factory(run_dir), processes_factory(run_dir), input_supplement, and optionally:
+
+        * prepared_fixture: the prepare_fixture record of a fixture the harness already
+          staged (container case mode stages it untraced, before the trace starts); it is
+          re-verified (adopt_prepared_fixture) and nothing is staged here.
+        * projection_inputs_channel: a harness-opened text stream. With it, run_case creates
+          NO file outside the run directory: the seeded ledger, output tags, projection inputs
+          and the in-process projection report leave as one record on the channel
+          (persist_projection_inputs) instead of harness/*.json. Frozen v2.7 confines
+          filesystem_snapshot.created_paths to HARNESS_RUN_DIR (all_under, every case).
+
+        Without either (in-process route) everything is staged and written as before.
+        """
+        plans = self.plan_case(case, profile)
+        variant, shadow_plan, scheduled = plans["variant"], plans["shadow"], plans["scheduled"]
+        fixture_plan, schedule_plan = plans["fixture"], plans["schedule"]
+        max_repairs = plans["max_repairs"]
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
         channel = profile.get("projection_inputs_channel")
         if profile.get("prepared_fixture") is not None:
@@ -466,6 +496,13 @@ class WeatherAdapter(Adapter):
                 generator_provenance=profile["generator_provenance"],
                 presented_fetch_version=profile["presented_fetch_version"],
             )
+            # In-process route: the same before_run fixture preparation, before the controller.
+            prepared["before_run_fixture"] = fixture_ops.prestage_before_run(
+                fixture_plan, schedule_plan["native_case"], prepared
+            )
+        before_run = fixture_ops.verify_before_run(
+            prepared.get("before_run_fixture"), fixture_plan, prepared
+        )
         run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
         # A copy: a before_run FX-LEDGER-APPEND edits seeded["request"] in place (prepare).
         harness_files = {"seeded-ledger.json": copy.deepcopy(seeded)}
@@ -494,6 +531,8 @@ class WeatherAdapter(Adapter):
             chained=shadow_projection.chain(schedule_hooks, shadow_driver)
         )
         if schedule_hooks is not None:
+            if before_run is not None:  # applied in fixture preparation: adopted, never re-applied
+                schedule_hooks.injection.adopt_before_run(before_run["delivery"])
             schedule_hooks.prepare(seeded["request"], prepared["source"])
         build = functools.partial(
             Controller,
@@ -638,9 +677,13 @@ class WeatherAdapter(Adapter):
         if manifest != prepared.get("manifest"):
             raise AdapterRefusal("prepared harness manifest differs from the staging record")
         source_pre = prepared.get("source_pre") or {}
-        if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(
-            layout["source"]
-        ) != source_pre.get("value"):
+        # After fixture preparation applied before_run operations, the staged source is their
+        # result (fixture_rereview_projection.verify_before_run re-verifies the chain from
+        # source_pre in run_case).
+        expected = (prepared.get("before_run_fixture") or {}).get("source_after")
+        if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(layout["source"]) != (
+            expected or source_pre.get("value")
+        ):
             raise AdapterRefusal("staged source changed since staging")
         return copy.deepcopy(prepared)
 

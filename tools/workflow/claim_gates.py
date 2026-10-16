@@ -162,15 +162,63 @@ def citation_verdict(claim, bound):
 # --------------------------------------------------------------------------- derivable facts
 
 
-def _last_eligible_onset_date(date_contract):
-    return date_contract["eligible_onset_window"]["end"]
+# Every producer reads ONLY the controller's own bound state -- the date contract it derives
+# from the trusted goal, the trusted goal itself (Controller.goal, which every retained
+# compiled goal must equal), and the validated plan (Controller.plan) -- and returns
+# {fact name: value}. None of them ever reads a claim: a claim names a fact and states a
+# value, and the controller compares that value with its own.
+
+
+def _last_eligible_onset_date(date_contract, goal, plan):
+    if not isinstance(date_contract, dict):
+        return {}
+    return {"last_eligible_onset_date": date_contract["eligible_onset_window"]["end"]}
+
+
+def _goal_fields(date_contract, goal, plan):
+    """goal.<field>: the value of that field of the controller's goal."""
+    if not isinstance(goal, dict):
+        return {}
+    return {f"goal.{field}": value for field, value in goal.items()}
+
+
+def _plan_step_args(date_contract, goal, plan):
+    """plan.<step id>.<argument>: that argument's value in the controller's plan."""
+    steps = plan.get("steps") if isinstance(plan, dict) else None
+    facts = {}
+    for step in steps if isinstance(steps, list) else ():
+        if (
+            not isinstance(step, dict)
+            or not isinstance(step.get("id"), str)
+            or not isinstance(step.get("args"), dict)
+        ):
+            continue
+        for arg, value in step["args"].items():
+            facts[f"plan.{step['id']}.{arg}"] = value
+    return facts
 
 
 # CLOSED registry. Adding a fact is a reviewed code change, never a model declaration.
-DERIVABLE_FACTS = {"last_eligible_onset_date": _last_eligible_onset_date}
+DERIVABLE_FACTS = {
+    "last_eligible_onset_date": _last_eligible_onset_date,
+    "goal_field": _goal_fields,
+    "plan_step_arg": _plan_step_args,
+}
 
 
-def compute(claim, date_contract):
+def derivable_facts(date_contract, goal, plan):
+    """{fact name: controller value} for every registered fact the bound state defines."""
+    facts = {}
+    for producer in DERIVABLE_FACTS.values():
+        for name, value in producer(date_contract, goal, plan).items():
+            if name in facts:
+                raise Refused(f"derivable fact defined twice: {name}", gate="claim_evidence")
+            facts[name] = value
+    # Detached: a comparison can never alias (or later edit) the controller's own records.
+    return json.loads(json.dumps(facts))
+
+
+def compute(claim, date_contract, goal, plan):
     """MATCH / MISMATCH from the controller's own computation, or None when not computable.
 
     None (no computes block, or a fact outside the closed registry) can never yield
@@ -179,10 +227,10 @@ def compute(claim, date_contract):
     spec = claim.get("computes")
     if not isinstance(spec, dict) or set(spec) != {"fact", "value"}:
         return None
-    producer = DERIVABLE_FACTS.get(spec["fact"]) if isinstance(spec["fact"], str) else None
-    if producer is None:
+    facts = derivable_facts(date_contract, goal, plan)
+    if not isinstance(spec["fact"], str) or spec["fact"] not in facts:
         return None
-    expected = producer(date_contract)
+    expected = facts[spec["fact"]]
     value = spec["value"]
     return "MATCH" if type(value) is type(expected) and value == expected else "MISMATCH"
 
@@ -251,10 +299,16 @@ def build_record(
     claims,
     sources,
     date_contract,
+    goal,
+    plan,
     checker_occurrence=None,
     checker_verdicts=None,
 ):
-    """One controller_trace.claim_checks record, exactly the v2_4 field set."""
+    """One controller_trace.claim_checks record, exactly the v2_4 field set.
+
+    date_contract, goal and plan are the controller's own bound state (Controller.date_contract(),
+    Controller.goal, Controller.plan); derivable claims are computed against them only.
+    """
     bound = registry(sources)
     checker_verdicts = checker_verdicts or {}
     if checker_occurrence is None and checker_verdicts:
@@ -264,7 +318,7 @@ def build_record(
         citation = citation_verdict(claim, bound)
         checker = checker_verdicts.get(claim["claim_id"])
         if claim["derivable"]:
-            computed = compute(claim, date_contract)
+            computed = compute(claim, date_contract, goal, plan)
             verdict = {"MATCH": "SUPPORTED", "MISMATCH": "CONTRADICTED"}.get(
                 computed, "INSUFFICIENT"
             )
