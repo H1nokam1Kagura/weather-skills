@@ -1386,9 +1386,11 @@ def test_run_case_persists_projection_inputs_for_the_post_trace_projection(relea
     inputs = json.loads(inputs_path.read_text(encoding="utf-8"))
     assert inputs["schema"] == "weather-adapter.evidence-projection-inputs/1"
     assert inputs["case_id"] == "RELEASED-MAP" and inputs["run_dir"] == str(released.run)
-    # fixture_operations is carried only for a case that schedules a fixture operation.
-    assert set(project_in_container.INPUT_KEYS) - {"fixture_operations"} <= set(inputs)
-    assert "fixture_operations" not in inputs
+    # fixture_operations is carried only for a case that schedules a fixture operation, and
+    # resume_route only for a harness_stop_controller case (resume_driver's route record).
+    only_some = {"fixture_operations", "resume_route"}
+    assert set(project_in_container.INPUT_KEYS) - only_some <= set(inputs)
+    assert not only_some & set(inputs)
     adapter = WeatherAdapter()
     observations = write_observations(
         tmp_path, harness_observations(adapter.capture_evidence(released.run))
