@@ -18,7 +18,7 @@ Datasets are opened with [`dynamical-catalog`](https://github.com/dynamical-org/
 import dynamical_catalog
 
 dynamical_catalog.list()  # -> list of dataset id strings
-ds = dynamical_catalog.open(id)  # -> lazy, icechunk-backed xarray.Dataset
+ds = dynamical_catalog.open(id, chunks=None)  # lazy backend indexing, no Dask graph
 ```
 
 `open()` reads only metadata until values are computed, so shape detection,

@@ -64,6 +64,13 @@ here, not for drawing the two fields: `plot` with two heatmap traces
 keeps each on its own grid. Run `step-to-time` on a classic forecast first. For a precip
 threshold in `mm`, run `aggregate-temporal` then `convert-to-totals` first.
 
+Use the same complete interval on both inputs. If either variable records
+`aggregation_period`, both must record equivalent durations; verification
+rejects a 2-day total against a 5-day total even if their start dates match.
+Equivalent units such as `48 hour` and `2 day` are accepted. Legacy inputs
+without this metadata on either side remain supported; this does not establish
+their interval bounds, which the caller still needs to check.
+
 ## Usage
 
 ```
