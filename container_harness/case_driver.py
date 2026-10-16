@@ -32,7 +32,6 @@ in-process evidence for scoring; missing evidence stays missing.
 
 import hashlib
 import json
-import math
 import os
 import re
 import sys
@@ -52,9 +51,6 @@ SUBST = "CAP-ROLE-SUBSTITUTE"
 BLOCKED_LIVE = "BLOCKED_LIVE_ROLE_TRANSPORT"
 BLOCKED_SUBST = "BLOCKED_SUBSTITUTED_ROLE_WIRING"
 SUBST_FACTORY = "substituted_roles_factory"  # adapter hook the driver needs: (case, goal, run_dir)
-# Live-role hook (CAP-LIVE-ROLE): (case, goal, run_dir, relay_factory) -> the combined roles, all
-# live or mixed live + substituted (adapter_support/live_roles.py CombinedRoles).
-LIVE_FACTORY = "invoke_live_role"
 
 
 def sha256(path):
@@ -93,149 +89,6 @@ def role_mode(case):
 
 def pair_id(case):
     return case.get("pair_id") or case["id"].rsplit("-", 1)[0]
-
-
-def live_factory(adapter):
-    """The adapter's own invoke_live_role (an override of the frozen base method), or None."""
-    from simkit.adapter import Adapter
-
-    method = getattr(type(adapter), LIVE_FACTORY, None)
-    if not callable(method) or method is getattr(Adapter, LIVE_FACTORY, None):
-        return None
-    return getattr(adapter, LIVE_FACTORY)
-
-
-# ------------------------------------------------------------------------------- relay caps
-# LIVE-WAVE-BRIEF.md "Spend guard": admission computes each live case's relay caps from the
-# frozen roles, repair limits and re-review count, and the matrix row carries them
-# (container_harness/relay_usage.py case_caps reads them; the relay enforces them):
-#   expected_calls; max_requests = min(24, max(8, 2 x expected));
-#   max_total_tokens = 1.5 x sum over expected calls of (input bound + per-role max_tokens);
-#   max_model_usd = the case's frozen budget.max_model_usd.
-MAX_REQUESTS_CEILING, MAX_REQUESTS_FLOOR = 24, 8
-TOKEN_CAP_FACTOR = 1.5
-# Fixture-operation targets (fixture_rereview_projection.FIXTURE_TARGETS) whose change after the
-# run starts can return the run to review: each may add one review round.
-REREVIEW_TARGETS = frozenset({"repo_copy", "source"})
-RELAY_HOST = Path(__file__).resolve().parents[1] / "relay" / "kong_relay_host.py"
-
-
-def _relay_host():
-    """The host relay module (relay/ is not a package): its worst-case input constants are the
-    ones the relay's own admission uses, read here rather than copied."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("kong_relay_host_caps", RELAY_HOST)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def call_token_bound(role, relay=None):
-    """Upper bound of the tokens the relay can charge one call of ``role`` at admission
-    (kong_relay_host.worst_case: one token per byte of system prompt and user message, plus the
-    framing, forced-tool and output bounds), for the largest request the client sends.
-
-    The user message is bounded by the client body cap (relay_roles.DEFAULT_MAX_BODY: every
-    body sent is at most that). A plain body's user message is json.dumps(payload), inside the
-    body. A dedup-sha256/1 body's model-facing message adds the fixed preamble and headers plus
-    two marker lines per shared block (bounded here at 256 bytes each), and a shared block is
-    at least DEDUP_MIN_BYTES of the body, so there are at most DEFAULT_MAX_BODY //
-    DEDUP_MIN_BYTES blocks."""
-    from tools.workflow.agents import role_prompt
-    from tools.workflow.kong_roles import DEFAULT_MAX_TOKENS, LIVE_ROLE_MAX_TOKENS
-    from tools.workflow.relay_roles import DEDUP_MIN_BYTES, DEFAULT_MAX_BODY
-    from tools.workflow.role_schemas import request_overhead_bytes
-
-    relay = relay or _relay_host()
-    user = (
-        DEFAULT_MAX_BODY
-        + len(relay.MODEL_INPUT_PREAMBLE.encode("utf-8"))
-        + 256
-        + 256 * (DEFAULT_MAX_BODY // DEDUP_MIN_BYTES)
-    )
-    prompt = len(role_prompt(role, relay._ALL_SUFFIXES).encode("utf-8"))
-    tokens_in = prompt + user + relay.INPUT_FRAMING_TOKENS
-    tokens_in += request_overhead_bytes(role) + relay.TOOL_USE_SYSTEM_TOKENS
-    return tokens_in + LIVE_ROLE_MAX_TOKENS.get(role, DEFAULT_MAX_TOKENS)
-
-
-def expected_live_calls(case):
-    """{native role: upper bound of its live relay calls} for one live case, from the frozen
-    agent_roles, budget.max_repair_attempts and the schedule. Over-counting only loosens the
-    caps; under-counting would let the relay stop a legitimate run, so every rule rounds up:
-
-    * review rounds R = max(1 + repairs + material changes, the highest reviewer occurrence a
-      schedule entry selects); a material change is a scheduled source / repository fixture
-      operation after the run starts;
-    * compiler 3 (compiler_1..3), planner 1, repairer = repairs, evidence_checker R,
-      reviewer R minus the occurrences routed to the substituted double (split occurrence),
-      verifier 1, shadow_policy one per shadow state plus one per extra round;
-    * plus one call per scheduled interrupt (a resume may re-ask the interrupted role).
-    A transport retry adds no relay request: the injected fault raises before any byte is sent.
-    """
-    from adapter_support import live_roles
-    from adapter_support.fixture_rereview_projection import FIXTURE_TARGETS
-    from tools.workflow.policy import SHADOW_STATES
-
-    table = live_roles.routing_table(case)
-    repairs = case["budget"]["max_repair_attempts"]
-    schedule = case.get("injection_schedule") or []
-    material, interrupts, reviewer_occurrence = 0, 0, 1
-    for spec in schedule:
-        payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
-        operation = spec.get("operation")
-        if operation == "interrupt":
-            interrupts += 1
-        if (
-            operation == "mutate_fixture"
-            and spec.get("hook") != "before_run"
-            and FIXTURE_TARGETS.get(payload.get("fixture_operation")) in REREVIEW_TARGETS
-        ):
-            material += 1
-        selector = spec.get("selector") or {}
-        if selector.get("role_or_tool_or_stage") == "reviewer":
-            occurrence = selector.get("occurrence", 1)
-            if type(occurrence) is int:
-                reviewer_occurrence = max(reviewer_occurrence, occurrence)
-    rounds = max(1 + repairs + material, reviewer_occurrence)
-    per_role = {
-        "compiler": 3,
-        "planner": 1,
-        "repairer": repairs,
-        "evidence_checker": rounds,
-        "reviewer": rounds - len(table["split"].get("reviewer", [])),
-        "verifier": 1,
-        "shadow_policy": len(SHADOW_STATES) + rounds - 1,
-    }
-    calls = {role: per_role.get(role, 1) for role in table["live"]}
-    calls = {role: n for role, n in calls.items() if n > 0}
-    return calls, interrupts
-
-
-def live_relay_plan(case):
-    """The matrix fields of one live case: live_roles (native relay role names),
-    expected_calls, max_requests, max_total_tokens, max_model_usd, and how each was derived."""
-    calls, interrupts = expected_live_calls(case)
-    expected = sum(calls.values()) + interrupts
-    relay = _relay_host()
-    bounds = {role: call_token_bound(role, relay) for role in calls}
-    # A re-asked role after an interrupt is bounded by the largest per-call bound.
-    worst = sum(n * bounds[role] for role, n in calls.items())
-    worst += interrupts * max(bounds.values(), default=0)
-    return {
-        "live_roles": sorted(calls),
-        "expected_calls": expected,
-        "max_requests": min(MAX_REQUESTS_CEILING, max(MAX_REQUESTS_FLOOR, 2 * expected)),
-        "max_total_tokens": math.ceil(TOKEN_CAP_FACTOR * worst),
-        "max_model_usd": case["budget"]["max_model_usd"],
-        "relay_caps_basis": {
-            "calls_by_role": calls,
-            "interrupt_reasks": interrupts,
-            "token_bound_by_role": bounds,
-            "rule": "LIVE-WAVE-BRIEF Spend guard; container_harness/case_driver.py",
-        },
-    }
 
 
 # ------------------------------------------------------------------------------- admission
@@ -832,6 +685,157 @@ def score(case_id, record_path, evidence_path, projection_path, out_path):
     Path(out_path).write_text(json.dumps(result, indent=1, default=str) + "\n", encoding="utf-8")
     print(json.dumps({k: result.get(k) for k in ("case_id", "run_status", "harness_error_source")}))
     return 0
+
+
+# ------------------------------------------------------------------------------- live roles
+# Live-role hook (CAP-LIVE-ROLE): (case, goal, run_dir, relay_factory) -> the combined roles, all
+# live or mixed live + substituted (adapter_support/live_roles.py CombinedRoles).
+LIVE_FACTORY = "invoke_live_role"
+
+
+def live_factory(adapter):
+    """The adapter's own invoke_live_role (an override of the frozen base method), or None."""
+    from simkit.adapter import Adapter
+
+    method = getattr(type(adapter), LIVE_FACTORY, None)
+    if not callable(method) or method is getattr(Adapter, LIVE_FACTORY, None):
+        return None
+    return getattr(adapter, LIVE_FACTORY)
+
+
+# ------------------------------------------------------------------------------- relay caps
+# LIVE-WAVE-BRIEF.md "Spend guard": admission computes each live case's relay caps from the
+# frozen roles, repair limits and re-review count, and the matrix row carries them
+# (container_harness/relay_usage.py case_caps reads them; the relay enforces them):
+#   expected_calls; max_requests = min(24, max(8, 2 x expected));
+#   max_total_tokens = 1.5 x sum over expected calls of (input bound + per-role max_tokens);
+#   max_model_usd = the case's frozen budget.max_model_usd.
+MAX_REQUESTS_CEILING, MAX_REQUESTS_FLOOR = 24, 8
+TOKEN_CAP_FACTOR = 1.5
+# Fixture-operation targets (fixture_rereview_projection.FIXTURE_TARGETS) whose change after the
+# run starts can return the run to review: each may add one review round.
+REREVIEW_TARGETS = frozenset({"repo_copy", "source"})
+RELAY_HOST = Path(__file__).resolve().parents[1] / "relay" / "kong_relay_host.py"
+
+
+def _relay_host():
+    """The host relay module (relay/ is not a package): its worst-case input constants are the
+    ones the relay's own admission uses, read here rather than copied."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("kong_relay_host_caps", RELAY_HOST)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def call_token_bound(role, relay=None):
+    """Upper bound of the tokens the relay can charge one call of ``role`` at admission
+    (kong_relay_host.worst_case: one token per byte of system prompt and user message, plus the
+    framing, forced-tool and output bounds), for the largest request the client sends.
+
+    The user message is bounded by the client body cap (relay_roles.DEFAULT_MAX_BODY: every
+    body sent is at most that). A plain body's user message is json.dumps(payload), inside the
+    body. A dedup-sha256/1 body's model-facing message adds the fixed preamble and headers plus
+    two marker lines per shared block (bounded here at 256 bytes each), and a shared block is
+    at least DEDUP_MIN_BYTES of the body, so there are at most DEFAULT_MAX_BODY //
+    DEDUP_MIN_BYTES blocks."""
+    from tools.workflow.agents import role_prompt
+    from tools.workflow.kong_roles import DEFAULT_MAX_TOKENS, LIVE_ROLE_MAX_TOKENS
+    from tools.workflow.relay_roles import DEDUP_MIN_BYTES, DEFAULT_MAX_BODY
+    from tools.workflow.role_schemas import request_overhead_bytes
+
+    relay = relay or _relay_host()
+    user = (
+        DEFAULT_MAX_BODY
+        + len(relay.MODEL_INPUT_PREAMBLE.encode("utf-8"))
+        + 256
+        + 256 * (DEFAULT_MAX_BODY // DEDUP_MIN_BYTES)
+    )
+    prompt = len(role_prompt(role, relay._ALL_SUFFIXES).encode("utf-8"))
+    tokens_in = prompt + user + relay.INPUT_FRAMING_TOKENS
+    tokens_in += request_overhead_bytes(role) + relay.TOOL_USE_SYSTEM_TOKENS
+    return tokens_in + LIVE_ROLE_MAX_TOKENS.get(role, DEFAULT_MAX_TOKENS)
+
+
+def expected_live_calls(case):
+    """{native role: upper bound of its live relay calls} for one live case, from the frozen
+    agent_roles, budget.max_repair_attempts and the schedule. Over-counting only loosens the
+    caps; under-counting would let the relay stop a legitimate run, so every rule rounds up:
+
+    * review rounds R = max(1 + repairs + material changes, the highest reviewer occurrence a
+      schedule entry selects); a material change is a scheduled source / repository fixture
+      operation after the run starts;
+    * compiler 3 (compiler_1..3), planner 1, repairer = repairs, evidence_checker R,
+      reviewer R minus the occurrences routed to the substituted double (split occurrence),
+      verifier 1, shadow_policy one per shadow state plus one per extra round;
+    * plus one call per scheduled interrupt (a resume may re-ask the interrupted role).
+    A transport retry adds no relay request: the injected fault raises before any byte is sent.
+    """
+    from adapter_support import live_roles
+    from adapter_support.fixture_rereview_projection import FIXTURE_TARGETS
+    from tools.workflow.policy import SHADOW_STATES
+
+    table = live_roles.routing_table(case)
+    repairs = case["budget"]["max_repair_attempts"]
+    schedule = case.get("injection_schedule") or []
+    material, interrupts, reviewer_occurrence = 0, 0, 1
+    for spec in schedule:
+        payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+        operation = spec.get("operation")
+        if operation == "interrupt":
+            interrupts += 1
+        if (
+            operation == "mutate_fixture"
+            and spec.get("hook") != "before_run"
+            and FIXTURE_TARGETS.get(payload.get("fixture_operation")) in REREVIEW_TARGETS
+        ):
+            material += 1
+        selector = spec.get("selector") or {}
+        if selector.get("role_or_tool_or_stage") == "reviewer":
+            occurrence = selector.get("occurrence", 1)
+            if type(occurrence) is int:
+                reviewer_occurrence = max(reviewer_occurrence, occurrence)
+    rounds = max(1 + repairs + material, reviewer_occurrence)
+    per_role = {
+        "compiler": 3,
+        "planner": 1,
+        "repairer": repairs,
+        "evidence_checker": rounds,
+        "reviewer": rounds - len(table["split"].get("reviewer", [])),
+        "verifier": 1,
+        "shadow_policy": len(SHADOW_STATES) + rounds - 1,
+    }
+    calls = {role: per_role.get(role, 1) for role in table["live"]}
+    calls = {role: n for role, n in calls.items() if n > 0}
+    return calls, interrupts
+
+
+def live_relay_plan(case):
+    """The matrix fields of one live case: live_roles (native relay role names),
+    expected_calls, max_requests, max_total_tokens, max_model_usd, and how each was derived."""
+    import math
+
+    calls, interrupts = expected_live_calls(case)
+    expected = sum(calls.values()) + interrupts
+    relay = _relay_host()
+    bounds = {role: call_token_bound(role, relay) for role in calls}
+    # A re-asked role after an interrupt is bounded by the largest per-call bound.
+    worst = sum(n * bounds[role] for role, n in calls.items())
+    worst += interrupts * max(bounds.values(), default=0)
+    return {
+        "live_roles": sorted(calls),
+        "expected_calls": expected,
+        "max_requests": min(MAX_REQUESTS_CEILING, max(MAX_REQUESTS_FLOOR, 2 * expected)),
+        "max_total_tokens": math.ceil(TOKEN_CAP_FACTOR * worst),
+        "max_model_usd": case["budget"]["max_model_usd"],
+        "relay_caps_basis": {
+            "calls_by_role": calls,
+            "interrupt_reasks": interrupts,
+            "token_bound_by_role": bounds,
+            "rule": "LIVE-WAVE-BRIEF Spend guard; container_harness/case_driver.py",
+        },
+    }
 
 
 def main(argv):
