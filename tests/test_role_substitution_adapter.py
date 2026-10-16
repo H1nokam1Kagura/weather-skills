@@ -594,9 +594,12 @@ def test_run_case_refuses_unsupported_schedules_before_side_effects(
         with pytest.raises(AdapterRefusal, match=message):
             adapter.run_case(case, profile)
         assert not profile["case_root"].exists()
-    # Without the two records the same case is refused earlier, by D21.
+    # Without the two records (signed since the D4 w7 review; stripped test-locally) the same
+    # case is refused earlier, by D21.
+    unsign = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
+    without = resigned(**{"CAP-INTERRUPT": unsign, "CAP-MIDPROCESS": unsign})
     with pytest.raises(AdapterRefusal, match="implies undeclared capabilities"):
-        WeatherAdapter(enable_run_case=True, producers=resigned()).run_case(
+        WeatherAdapter(enable_run_case=True, producers=without).run_case(
             local_case(frozen, "E11-P1-INJ"), profile
         )
     plan = adapter.substitute_role_output(local_case(frozen, "E02-P1-INJ"), MAP_GOAL)
