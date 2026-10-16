@@ -29,6 +29,7 @@ for _path in (str(HERE.parent), str(REPO)):
 import launch  # noqa: E402
 import relay_dedup_smoke as smoke  # noqa: E402
 import relay_dedup_smoke_report as report  # noqa: E402
+import relay_smoke  # noqa: E402
 import relay_smoke_report  # noqa: E402
 
 from relay import kong_relay_host as host  # noqa: E402
@@ -301,8 +302,12 @@ def record_offline_run(tmp_path, resolve=True, override=None):
     relay_dir.mkdir()
     out.mkdir()
     audit = host.AuditLog(relay_dir / "relay-audit.jsonl")
-    relay = host.Relay(roles, run_id=RUN, token=TOKEN, allowed_roles=["reviewer"], audit=audit)
+    guard = host.SpendGuard(budget_usd=1, max_requests=1)  # the workflow's RELAY_MAX_REQUESTS
+    relay = host.Relay(
+        roles, run_id=RUN, token=TOKEN, allowed_roles=["reviewer"], audit=audit, guard=guard
+    )
     (server,) = host.serve(relay, ["127.0.0.1"], 0)
+    probe = None
     try:
         client = RelayRoles(f"http://127.0.0.1:{server.server_address[1]}", TOKEN, RUN, budget=1)
         payload = smoke.build_payload(NONCE)
@@ -313,10 +318,13 @@ def record_offline_run(tmp_path, resolve=True, override=None):
             value, refused = client.ask("reviewer", payload), None
         except Refused as exc:
             value, refused = None, smoke.refused_fields(client, exc)
+        if refused is None:  # what relay_dedup_smoke.main does after a successful call
+            probe = relay_smoke.cap_probe(client, Refused, role="reviewer", payload=payload)
     finally:
         server.shutdown()
         server.server_close()
-    audit.write("relay_stop", run_id=RUN, reason="max_requests reached")
+    if relay.asks_done.is_set():  # kong_relay_host.main writes the stop line only once EXHAUSTED
+        audit.write("relay_stop", run_id=RUN, reason=f"spend cap reached: {guard.exhausted_by}")
     receipt = client.receipts[-1] if client.receipts else {}
     (call,) = worker.calls
     assert call["user"] == user and call["system"] == system  # prediction is exact
@@ -345,9 +353,10 @@ def record_offline_run(tmp_path, resolve=True, override=None):
         "receipt": {k: receipt.get(k) for k in smoke.RECEIPT_KEEP},
         "gateway_body_bytes": smoke.gateway_body_bytes(system, user, receipt.get("settings_sent")),
         "gateway_body_basis": "reconstructed",
+        "cap_probe": probe,
     }
     if refused is not None:  # what relay_dedup_smoke.main records for a refused call
-        for key in ("answer", "receipt", "gateway_body_bytes", "gateway_body_basis"):
+        for key in ("answer", "receipt", "gateway_body_bytes", "gateway_body_basis", "cap_probe"):
             container.pop(key)
         container.update(refused)
     launch_rec = {
@@ -405,6 +414,42 @@ def test_report_passes_on_recorded_evidence(recorded):
     assert result["checks"]["no_instruction_text_in_payload"]["observed"]["found"] == []
     # the audit never holds the content or the binding
     assert binding not in (relay_dir / "relay-audit.jsonl").read_text()
+    probe = result["checks"]["request_cap_refused_before_forwarding"]["observed"]["probe"]
+    assert probe == {"outcome": "REFUSED", "gate": "budget", "requests": 1, "max_requests": 1}
+    assert result["checks"]["relay_stopped_itself"]["observed"] == [
+        "spend cap reached: max_requests"
+    ]
+
+
+def test_report_fails_when_no_cap_probe_stopped_the_relay(recorded):
+    """Run 38868687714's shape: one paid call, no probe, so the relay (which keeps serving at a
+    full cap) never stopped itself and teardown's kill wrote no stop line."""
+    out, relay_dir = recorded
+    edit(out / report.CONTAINER_JSON, lambda c: c.pop("cap_probe"))
+    path = relay_dir / "relay-audit.jsonl"
+    lines = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+    kept = [
+        x
+        for x in lines
+        if x.get("event") not in ("relay_stop", "spend_cap_reached")
+        and not (x.get("event") == "ask" and x.get("reason_code") == "relay_spend_cap")
+    ]
+    assert len(kept) < len(lines)
+    path.write_text("\n".join(json.dumps(x) for x in kept) + "\n")
+    assert report.main(["x", str(out), str(relay_dir)]) == 1
+    checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
+    failed = sorted(n for n, c in checks.items() if not c["passed"])
+    assert failed == ["relay_stopped_itself", "request_cap_refused_before_forwarding"]
+
+
+def test_report_fails_when_the_relay_stopped_for_another_reason(recorded):
+    out, relay_dir = recorded
+    path = relay_dir / "relay-audit.jsonl"
+    text = path.read_text().replace("spend cap reached: max_requests", "run_seconds elapsed")
+    path.write_text(text)
+    assert report.main(["x", str(out), str(relay_dir)]) == 1
+    checks = json.loads((out / "RELAY-DEDUP-SMOKE.json").read_text())["checks"]
+    assert checks["relay_stopped_itself"]["passed"] is False
 
 
 EMPTY_ANSWER = {  # the shape smoke 1 (run 38855128796) is consistent with: 0 output tokens

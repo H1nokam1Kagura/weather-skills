@@ -229,8 +229,9 @@ def main():
     return 0
 
 
-def cap_probe(roles, refused_type):
-    """One ask past a FULL request cap; must be refused before forwarding (step 4)."""
+def cap_probe(roles, refused_type, role="verifier", payload=None):
+    """One ask past a FULL request cap; must be refused before forwarding (step 4). ``role``
+    must be one the relay allows, or the role gate refuses it before the cap is tested."""
     try:
         spend = roles.health().get("spend") or {}
     except refused_type as exc:
@@ -241,7 +242,7 @@ def cap_probe(roles, refused_type):
     if type(cap) is not int or type(used) is not int or used < cap:
         return {"outcome": "SKIPPED", "reason": "request cap not full", **seen}
     try:
-        roles.ask("verifier", PAYLOAD)
+        roles.ask(role, PAYLOAD if payload is None else payload)
     except refused_type as exc:
         return {"outcome": "REFUSED", "gate": exc.gate, "reason": str(exc), **seen}
     except Exception as exc:  # noqa: BLE001 - recorded, the report fails it

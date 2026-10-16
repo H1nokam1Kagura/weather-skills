@@ -605,6 +605,9 @@ def main():
             "message plus the worker-echoed settings_sent; exact when the receipt's "
             "model_facing_hash and system_prompt_hash equal the prediction",
         )
+        # The relay keeps serving at a full request cap and stops only once EXHAUSTED; this
+        # probe exhausts it (refused before forwarding, so unpaid), as in relay_smoke.
+        out["cap_probe"] = relay_smoke.cap_probe(roles, Refused, role=ROLE, payload=payload)
     out["client_spent_reserved"] = roles.spent
     print(json.dumps(out))
     return 0

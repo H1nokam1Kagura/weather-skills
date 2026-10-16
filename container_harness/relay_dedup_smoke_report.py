@@ -361,11 +361,21 @@ def evaluate(out, relay):
         receipt.get("settings_sent"),
     )
     asks = [a for a in audit if a.get("event") == "ask"]
-    ask = asks[0] if len(asks) == 1 else {}
+    # Exactly one ask may reach the gateway, and it succeeded; the only other ask allowed is
+    # the request-cap probe, refused before forwarding (relay_smoke_report's rule).
+    capped = [
+        a
+        for a in asks[1:]
+        if a.get("outcome") == "REFUSED"
+        and a.get("sent_to_gateway") is False
+        and a.get("reason_code") == "relay_spend_cap"
+    ]
+    one_paid = bool(asks) and asks[0].get("outcome") == "SUCCESS" and len(capped) == len(asks) - 1
+    ask = asks[0] if one_paid or len(asks) == 1 else {}  # a lone refused ask is still diagnosed
     check(
         "audit_one_successful_ask",
-        len(asks) == 1 and ask.get("outcome") == "SUCCESS",
-        [a.get("outcome") for a in asks],
+        one_paid,
+        [(a.get("outcome"), a.get("sent_to_gateway"), a.get("reason_code")) for a in asks],
     )
     check(
         "audit_dedup_encoded_reviewer",
@@ -420,11 +430,26 @@ def evaluate(out, relay):
         ),
         {k: refused[k] for k in ("reason_code", "audit_usage", "audit_stop_reason")},
     )
+    # Past the request cap the relay answers with a spend-cap refusal (client gate "budget"),
+    # never by having already stopped; that refusal exhausts the guard.
+    probe = smoke.get("cap_probe") or {}
+    caps_reached = [a.get("cap") for a in audit if a.get("event") == "spend_cap_reached"]
     check(
-        "relay_stopped_itself",
-        any(a.get("event") == "relay_stop" for a in audit),
-        [a.get("reason") for a in audit if a.get("event") == "relay_stop"],
+        "request_cap_refused_before_forwarding",
+        probe.get("outcome") == "REFUSED"
+        and probe.get("gate") == "budget"
+        and "relay spend cap" in str(probe.get("reason"))
+        and len(capped) == 1
+        and caps_reached == ["max_requests"],
+        {
+            "probe": {k: probe.get(k) for k in ("outcome", "gate", "requests", "max_requests")},
+            "spend_cap_reached": caps_reached,
+        },
     )
+    # The relay stops itself only once EXHAUSTED or after --run-seconds; here the cap probe
+    # exhausted it, so the stop must name the request cap (teardown's kill writes no stop line).
+    stops = [a.get("reason") for a in audit if a.get("event") == "relay_stop"]
+    check("relay_stopped_itself", stops == ["spend cap reached: max_requests"], stops)
 
     usage = receipt.get("usage") or {}
     measured = {
