@@ -23,6 +23,14 @@ consolidated Zarr store. One skill covers the whole catalog — the dataset is
 selected with `--dataset` and validated at runtime against
 `dynamical_catalog.list()`.
 
+Catalog stores use direct lazy reads (`chunks=None`), consistent with the
+CHIRPS fetcher and pressure-level path. The selected init/date range, bbox
+and variables are applied before writing; opening the catalog does not load
+the archive. This avoids a Dask graph for small subsets, but is not a measured
+speed guarantee for every product. For historical work, time one bounded
+representative request before scaling, retain valid per-init artifacts and
+resume only missing work. Never launch an unbounded full-archive pull.
+
 ## When to use
 
 Prefer this fetcher whenever the [dynamical.org catalog](https://dynamical.org/catalog/)

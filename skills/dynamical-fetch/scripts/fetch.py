@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cftime",
 #   "dynamical-catalog==1.0.1",
 #   "xarray",
@@ -220,7 +220,10 @@ def _open_dataset(state, dataset) -> dict:
             raise UsageError(
                 f"unknown dataset {dataset!r}. Available datasets:\n  " + "\n  ".join(catalog)
             )
-        ds = dynamical_catalog.open(dataset)
+        # Match CHIRPS and the pressure-level path: retain lazy backend indexing
+        # without constructing a Dask graph for the archive. Date/bbox/variable
+        # selection below happens before the selected fields are materialized.
+        ds = dynamical_catalog.open(dataset, chunks=None)
 
         if "latitude" not in ds.dims or "longitude" not in ds.dims:
             raise UsageError(

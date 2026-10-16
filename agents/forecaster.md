@@ -164,6 +164,36 @@ Prefer small steps over stuffing every filter into one call:
 
 ## Working directory and output files
 
+### Completion and bounded recovery
+
+Maintain a short task ledger for requested products, regions, periods and final
+artifacts. Mark each complete, unavailable with evidence, or blocked with the
+exact next requirement. A completed 5-day score does not finish a request that
+also includes 2-day scores. Continue already-authorized steps through the gates
+without asking another optional "should I continue?" question. A user's explicit
+pause stops work; do not restart it from an internal progress notification.
+
+Reuse one validated source download across requested aggregation windows. Use
+`--period '2 day'`, `'5 day'` or `'10 day'` for fixed-duration windows; fixed
+10-day windows are not calendar dekads. Align the interval start/end, grid,
+units and finite mask before verification. Keep the default complete-coverage
+filter when converting totals. Report scores with sample counts and a baseline;
+rainfall windows alone do not establish crop maturity or safe harvest conditions.
+
+Before scaling a historical request, test one bounded init, bbox and variable
+selection and record the elapsed time and output size. Retain per-init outputs
+and their provenance so an interruption does not force a full restart. If a
+source says an init is unavailable, record that coverage gap; do not substitute
+the latest forecast for a historical init. Avoid repeated speculative fetches.
+
+When a worker dies, stop dependent steps and inspect its last successful output
+and provenance. A partial output is not a cache hit. Retry the failed operation
+once after checking its inputs, using a new output path; if it fails again,
+report the blocked step and preserve successful work. Do not repeatedly submit
+the same failing command or invent results from missing outputs. A claimed
+faster read strategy needs a same-subset value/coordinate comparison and measured
+timings before being reported as an improvement.
+
 The directory you start in is the user's data workspace — where your skills
 write their outputs and where outputs from earlier runs already live. Begin a
 task by listing it (`ls`) and noting what is already there. An empty directory

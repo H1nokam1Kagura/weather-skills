@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@a4110e30c8637ea99d79f752499d00e4cd65fafb",
 #   "cftime>=1.6",
 #   "numpy>=2.4",
 #   "xarray>=2026.4",
@@ -18,7 +18,9 @@ from weather_skills_core.cf import auto_variable
 from weather_skills_core.standard_dataset import ALIASES, MEMBER, PREDICTION_TIMEDELTA
 from weather_skills_core.standard_utils import latitude_weights
 from weather_skills_core.units import (
+    AGGREGATION_PERIOD_ATTR,
     format_units_for_display,
+    parse_aggregation_period,
     units_equal,
     variable_units,
 )
@@ -132,6 +134,21 @@ def verify(forecast, obs, variable, metric, threshold, reduce, crps_estimator, *
             )
 
     fc, truth = forecast[fc_name], obs[obs_name]
+    # Equal timestamps and amount units do not establish equal time support:
+    # a two-day total and a five-day total may share the same start date.
+    fc_period = fc.attrs.get(AGGREGATION_PERIOD_ATTR)
+    obs_period = truth.attrs.get(AGGREGATION_PERIOD_ATTR)
+    if fc_period is not None or obs_period is not None:
+        if not fc_period or not obs_period:
+            raise UsageError(
+                "aggregation_period must be present on both forecast and observation; "
+                "aggregate both inputs to the same complete intervals before verify."
+            )
+        if parse_aggregation_period(fc_period) != parse_aggregation_period(obs_period):
+            raise UsageError(
+                f"aggregation_period mismatch: forecast {fc_period!r}, observation "
+                f"{obs_period!r}; aggregate both inputs to the same intervals before verify."
+            )
     lead = _lead_dim(fc)
     if lead and "time" not in fc.dims and "time" in truth.dims:
         raise UsageError(
