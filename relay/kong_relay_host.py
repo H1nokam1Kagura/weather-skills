@@ -96,9 +96,11 @@ from tools.workflow.kong_roles import (  # noqa: E402
     KIT_PYTHON,
     LIVE_ROLE_MAX_TOKENS,
     MIN_HEADROOM_USD,
+    OBSERVED_KEYS,
     PINNED_PRICES,
     KongOutcomeUnknown,
     KongRoles,
+    answer_shape,
 )
 from tools.workflow.relay_roles import (  # noqa: E402
     ASK_PATH,
@@ -628,6 +630,17 @@ class Relay:
             kind = "kong_pre_send" if not sent else "invalid_answer"
             if exc.gate == "resource_guard":
                 kind = "resource_guard"
+            # An answer came back and did not validate: audit what the gateway reported (usage,
+            # stop_reason, ...) and the answer's non-content shape; the bounded excerpt goes
+            # only to the caller (synthetic content), never to this audit.
+            diagnostic = last.get("answer_diagnostic") if kind == "invalid_answer" else None
+            observed = (
+                {"usage": last.get("usage"), "cost_usd": cost}
+                | {k: last.get(k) for k in OBSERVED_KEYS}
+                | {"answer_shape": answer_shape(diagnostic)}
+                if kind == "invalid_answer"
+                else {}
+            )
             self.audit.write(
                 "ask",
                 **base,
@@ -641,10 +654,11 @@ class Relay:
                 reason_code=kind,
                 **classify_fault(kind=kind),
                 wall_ms=round((time.monotonic() - started) * 1000),
+                **observed,
                 charge=charge,
                 spend=self.guard.snapshot(),
             )
-            return 422, {
+            refusal = {
                 "outcome": "REFUSED",
                 "relay_id": relay_id,
                 "sent_to_gateway": sent,
@@ -652,6 +666,9 @@ class Relay:
                 "reason": reason,
                 "reason_code": kind,
             }
+            if diagnostic is not None:
+                refusal["answer_diagnostic"] = diagnostic
+            return 422, refusal
         except Exception as exc:  # anything else: the call may have left, never a success
             _, _, charge = self._charge(worst, None)
             evidence = {k: None for k in UNKNOWN_EVIDENCE}

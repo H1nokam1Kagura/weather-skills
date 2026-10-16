@@ -8,6 +8,7 @@ usage:
     python container_harness/launch.py admission --image TAG --out ADMISSION.json
                                        [--selector S] [--smoke-ids A,B]
     python container_harness/launch.py relay-smoke --image TAG --out DIR --relay-dir RDIR
+                                       [--client relay_smoke|relay_dedup_smoke]
 
 Live roles (owner ruling container_route_ruling_2026-10-13.live_roles): with ``--relay-dir``
 (written by ``relay_ci.sh net-up`` + ``relay-start``) the container joins the docker
@@ -71,6 +72,8 @@ RELAY_ENV_NAMES = (
     "SIMKIT_PROBE_TARGETS",
 )
 FORBIDDEN_ENV_MARKERS = ("KONG", "ANTHROPIC", "OPENAI")
+# relay-smoke in-container clients (container_harness/<client>.py), same run conditions.
+SMOKE_CLIENTS = ("relay_smoke", "relay_dedup_smoke")
 
 
 def relay_settings(relay_dir, probe_targets=False):
@@ -384,7 +387,11 @@ def relay_smoke(args):
     """
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    name = f"simkit-relay-smoke-{uuid.uuid4().hex[:8]}"
+    client = getattr(args, "client", "relay_smoke")
+    if client not in SMOKE_CLIENTS:
+        raise SystemExit(f"unknown smoke client {client!r}")
+    stem = client.replace("_", "-")  # relay-smoke | relay-dedup-smoke
+    name = f"simkit-{stem}-{uuid.uuid4().hex[:8]}"
     run_args, env, net = relay_settings(args.relay_dir, probe_targets=True)
     cmd = [
         "docker",
@@ -404,7 +411,7 @@ def relay_smoke(args):
         "python",
         args.image,
         "-B",
-        "/opt/ctl/container_harness/relay_smoke.py",
+        f"/opt/ctl/container_harness/{client}.py",
     ]
     check_cmd(cmd)
     sh(cmd, capture_output=True, env=env)
@@ -412,6 +419,7 @@ def relay_smoke(args):
     observed, checks = conditions_from_inspect(name, net)
     record = {
         "schema": "simkit.relay-smoke-launch/1",
+        "client": client,
         "image": args.image,
         "container": name,
         "docker_create": cmd,
@@ -444,7 +452,7 @@ def relay_smoke(args):
         (out / "container.stdout.unparsed").write_text(stdout[-4000:], encoding="utf-8")
     record["smoke_parsed"] = smoke is not None
     if smoke is not None:
-        (out / "relay-smoke.container.json").write_text(
+        (out / f"{stem}.container.json").write_text(
             json.dumps(smoke, indent=1) + "\n", encoding="utf-8"
         )
     (out / "launch.json").write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
@@ -484,6 +492,15 @@ def main(argv):
     s.add_argument("--out", required=True)
     s.add_argument("--relay-dir", required=True)
     s.add_argument("--timeout", type=int, default=600)
+    s.add_argument(
+        "--client",
+        choices=SMOKE_CLIENTS,
+        default="relay_smoke",
+        help="in-container client: relay_smoke (one tiny verifier call) or relay_dedup_smoke "
+        "(one reviewer-sized dedup-sha256/1 call whose binding sits only in a shared block); "
+        "writes "
+        "OUT/<client, dashed>.container.json",
+    )
     args = ap.parse_args(argv[1:])
     commands = {"build": build, "run": run, "admission": admission, "relay-smoke": relay_smoke}
     return commands[args.cmd](args)

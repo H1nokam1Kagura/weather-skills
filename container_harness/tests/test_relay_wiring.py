@@ -52,7 +52,7 @@ def test_kong_secret_is_scoped_to_relay_start_and_key_scan_steps_only():
         ("relay" in name.lower() and "start" in name.lower()) or "key-absence" in name.lower()
         for _, name in holders
     ), holders
-    assert {job for job, _ in holders} == {"relay-smoke", "case"}
+    assert {job for job, _ in holders} == {"relay-smoke", "relay-dedup-smoke", "case"}
     for _, _, body in steps(text):
         for line in body.splitlines():
             if "secrets." in line:
@@ -181,6 +181,14 @@ def test_kong_secret_steps_by_parsed_yaml():
             ),
             (
                 "relay-smoke",
+                "Key-absence proof (host-side scan of the exported container + artifacts; counts only)",
+            ),
+            (
+                "relay-dedup-smoke",
+                "Start host relay (the ONLY step besides the key scan that sees the Kong key)",
+            ),
+            (
+                "relay-dedup-smoke",
                 "Key-absence proof (host-side scan of the exported container + artifacts; counts only)",
             ),
             ("case", "Start host relay (live-role case; the only step that sees the Kong key)"),
