@@ -138,11 +138,12 @@ jobs:
           retention-days: 30
 
   relay-dedup-smoke:
-    # ONE reviewer-sized synthetic reviewer call (claude-sonnet-4-6, max_tokens 512, temperature
-    # 0) through container -> host relay -> Kong, dedup-sha256/1-encoded by RelayRoles (~68 KB
-    # body for a ~124 KB payload). The answer must quote a random canary that exists only in the
-    # shared block, so the model provably resolved the $shared reference. Same isolation,
-    # secret scoping, probes and key-absence scan as relay-smoke.
+    # ONE reviewer-sized synthetic reviewer call (claude-sonnet-4-6, max_tokens 2048 as in the
+    # live case jobs, temperature 0) through container -> host relay -> Kong, dedup-sha256/1-
+    # encoded by RelayRoles (~68 KB body for a ~182 KB payload). The answer's binding_hash must
+    # equal a per-run binding that exists only in a shared block, so the model provably resolved
+    # the $shared reference; nothing in the data addresses the model. Same isolation, secret
+    # scoping, probes and key-absence scan as relay-smoke.
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.selector == 'relay-dedup-smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -181,7 +182,7 @@ jobs:
           KONG_ANTHROPIC_KEY: ${{ secrets.KONG_ANTHROPIC_KEY }}
           RELAY_ROLES: reviewer
           RELAY_MAX_REQUESTS: "1"
-          RELAY_MAX_TOKENS: "512"
+          RELAY_MAX_TOKENS: "2048"
           RELAY_MAX_TOTAL_TOKENS: "150000"
           RELAY_BUDGET: "1"
           RELAY_RUN_SECONDS: "900"

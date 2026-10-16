@@ -679,13 +679,21 @@ def test_dedup_job_secret_scoping_is_identical_to_relay_smoke():
         assert d.get("if") == b.get("if") and d["run"] == b["run"]
         assert "secrets." not in d["run"]
         assert [k for k, v in d["env"].items() if "secrets." in v] == ["KONG_ANTHROPIC_KEY"]
-    # the relay serves only the reviewer, one request, small output, and a USD 1 cap
+    # the relay serves only the reviewer, one request, the live reviewer's output ceiling (no
+    # length request in the data, so the answer is not squeezed), and a USD 1 cap
     start = step(dedup, "Start host relay")
     assert start["env"]["RELAY_ROLES"] == "reviewer"
     assert start["env"]["RELAY_MAX_REQUESTS"] == "1"
-    assert start["env"]["RELAY_MAX_TOKENS"] == "512"
+    assert start["env"]["RELAY_MAX_TOKENS"] == "2048"
+    case_relay = [
+        s
+        for j in jobs.values()
+        for s in j.get("steps", [])
+        if (s.get("env") or {}).get("RELAY_MAX_TOKENS") and s is not start and j is not base
+    ]
+    assert {s["env"]["RELAY_MAX_TOKENS"] for s in case_relay} == {"2048"}  # live case ceiling
     assert start["env"]["RELAY_BUDGET"] == "1"
-    assert int(start["env"]["RELAY_MAX_TOTAL_TOKENS"]) >= 100_000  # worst case ~71k
+    assert int(start["env"]["RELAY_MAX_TOTAL_TOKENS"]) >= 100_000  # worst case ~74k
 
 
 def test_dedup_job_reuses_relay_smoke_isolation_and_teardown():

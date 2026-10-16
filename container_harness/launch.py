@@ -497,7 +497,8 @@ def main(argv):
         choices=SMOKE_CLIENTS,
         default="relay_smoke",
         help="in-container client: relay_smoke (one tiny verifier call) or relay_dedup_smoke "
-        "(one reviewer-sized dedup-sha256/1 call with a shared-block canary); writes "
+        "(one reviewer-sized dedup-sha256/1 call whose binding sits only in a shared block); "
+        "writes "
         "OUT/<client, dashed>.container.json",
     )
     args = ap.parse_args(argv[1:])
