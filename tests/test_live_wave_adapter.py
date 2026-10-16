@@ -27,6 +27,7 @@ from test_evidence_projection_v27 import (
     GENERATOR,
     LIVE_SIGNED_ADMITTED,
     MAP_GOAL,
+    SIGNED_ADMITTED,
     TEST_FREE_RAM_GIB,
     ledger,
     profile_document,
@@ -294,10 +295,12 @@ def test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed():
         else:
             assert WeatherAdapter.extension_methods[cap] == method
     # Six live records are signed (D4-CONFIRM-LW-A); CAP-OPERATOR-NOTIFY-HOOK stays unsigned until
-    # sub-wave 5 opens the notification boundary in run_case.
+    # sub-wave 5 opens the notification boundary in run_case. All six signed ones are flagged
+    # rereview_required by the setup-timing fix (weather_adapter.py; CAP-LIVE-ROLE also
+    # case_driver.py), so the committed file declares none of them until they are re-signed.
     held = {"CAP-OPERATOR-NOTIFY-HOOK"}
     committed = WeatherAdapter().implemented_capabilities()
-    assert set(LIVE_WAVE) & committed == set(LIVE_WAVE) - held
+    assert set(LIVE_WAVE) & committed == set()
     assert set(LIVE_WAVE) & WeatherAdapter(producers=resigned()).implemented_capabilities() == (
         set(LIVE_WAVE) - held
     )
@@ -313,10 +316,16 @@ def test_admission_refuses_every_live_case_while_the_live_records_are_unsigned(f
     cases = list(frozen.values())
     live = {c["id"] for c in cases if "CAP-LIVE-ROLE" in c["adapter_requirements"]}
     assert len(live) == 34
-    # The committed file (six live records signed) admits exactly LIVE_SIGNED_ADMITTED; E14-P3
-    # needs the held CAP-OPERATOR-NOTIFY-HOOK and E12-P2 needs CAP-DECOY.
+    # The committed file (six live records signed, all six flagged rereview_required by the
+    # setup-timing fix) admits the live cases of SIGNED_ADMITTED: none.
     records = simkit_run(cases, WeatherAdapter(enable_run_case=True), profile={})
     by_id = {r["case_id"]: r for r in records}
+    admitted_live = {c for c in live if by_id[c]["status"] != "NOT_IMPLEMENTED"}
+    assert admitted_live == LIVE_SIGNED_ADMITTED & SIGNED_ADMITTED
+    # Re-signed (every flag cleared, test-local) it admits exactly LIVE_SIGNED_ADMITTED; E14-P3
+    # needs the held CAP-OPERATOR-NOTIFY-HOOK and E12-P2 needs CAP-DECOY.
+    adapter = WeatherAdapter(enable_run_case=True, producers=resigned())
+    by_id = {r["case_id"]: r for r in simkit_run(cases, adapter, profile={})}
     assert {c for c in live if by_id[c]["status"] != "NOT_IMPLEMENTED"} == LIVE_SIGNED_ADMITTED
     for short in ("E14-P3-CTL", "E14-P3-INJ"):
         missing = by_id[PREFIX + short]["missing_capabilities"]
@@ -344,12 +353,20 @@ def admission_with(monkeypatch, producers, selector="live"):
 
 
 def test_case_driver_admission_runs_mixed_cases_and_matrix_rows_carry_relay_caps(monkeypatch):
-    committed = cd.admission("live")
-    committed_live = {
-        r["case_id"] for r in committed["cases"] if r["role_mode"] == "live" and r["admitted"]
-    }
-    assert committed_live == LIVE_SIGNED_ADMITTED
-    assert set(committed["selected"]) == LIVE_SIGNED_ADMITTED
+    # The committed file admits the live cases of SIGNED_ADMITTED (none while the claim-gate and
+    # setup-timing flags stand); with every flag cleared (test-local) exactly LIVE_SIGNED_ADMITTED.
+    for producers, expected in (
+        (None, LIVE_SIGNED_ADMITTED & SIGNED_ADMITTED),
+        (resigned(), LIVE_SIGNED_ADMITTED),
+    ):
+        result = (
+            cd.admission("live") if producers is None else admission_with(monkeypatch, producers)
+        )
+        admitted_live = {
+            r["case_id"] for r in result["cases"] if r["role_mode"] == "live" and r["admitted"]
+        }
+        assert admitted_live == expected
+        assert set(result["selected"]) == expected
     signed = admission_with(monkeypatch, signed_producers())
     rows = {r["case_id"][len(PREFIX) :]: r for r in signed["cases"]}
     # Group A (all live) and group B/C (mixed, through the combining hook) are runnable.

@@ -35,8 +35,12 @@ WAVE7_CASES = ("E10-P1-CTL", "E10-P1-INJ", "E11-P1-CTL", "E11-P1-INJ")
 # Live cases that also need these records (live-role records signed, D4-CONFIRM-LW-A); admitted
 # by them, not executed here (live cases run only through the relay, by explicit case list).
 LIVE_CASES = ("E10-P2-CTL", "E10-P2-INJ", "E11-P2-CTL", "E11-P2-INJ", "E15-P2-CTL")
-# Flagged rereview_required by the live-role wave (LIVE-WAVE-BRIEF sub-wave 6).
-LIVE_WAVE_FLAGGED = ()  # all three re-signed after the live-role wave (D4-REVIEW-LW-B / -C)
+# Flagged rereview_required by a producer change after their last signature. All three were
+# re-signed after the live-role wave (D4-REVIEW-LW-B / -C) and are flagged again by the setup-
+# timing fix (e2e_injections.py: all three; weather_adapter.py: CAP-LEDGER-APPEND and
+# CAP-OPERATOR-RECORD-SETUP) and the claim-gate fix (runner.py: CAP-TRANSITION-REQUEST and
+# CAP-OPERATOR-RECORD-SETUP).
+LIVE_WAVE_FLAGGED = ("CAP-TRANSITION-REQUEST", "CAP-LEDGER-APPEND", "CAP-OPERATOR-RECORD-SETUP")
 
 
 UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
@@ -105,8 +109,8 @@ def test_only_these_records_admit_the_four_frozen_cases(frozen):  # noqa: F811
         assert record["d4_gated"] is True and record["status"] == "PRODUCER_MAPPED"
         assert record["reviewer"] and record["reviewed_at"] and record["reviewed_commit"]
         assert record["tests"] and record["producers"] and record["evidence_fields"]
-        # Re-signed after the live-role wave (D4-REVIEW-LW-B / -C at d6c2809): declared as
-        # committed. LIVE_WAVE_FLAGGED names any record a later producer change flags again.
+        # Re-signed after the live-role wave (D4-REVIEW-LW-B / -C at d6c2809). LIVE_WAVE_FLAGGED
+        # names the records a later producer change flagged again (undeclared as committed).
         if cap in LIVE_WAVE_FLAGGED:
             assert record["rereview_required"].strip()
             assert cap not in WeatherAdapter().implemented_capabilities()
