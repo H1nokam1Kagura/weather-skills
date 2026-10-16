@@ -2,7 +2,7 @@
   "schema": "weather-adapter.capability-producers/1",
   "authority": "Owner ruling D4 (CR-09): every declared capability requires a reviewed capability-to-producer record; an empty signal list is never emitted as exhaustive evidence. Source: simkit/handoffs/completion-20261012/decisions/OWNER-RULINGS.json.",
   "container_route": "OWNER-RULINGS container_route_ruling_2026-10-13: the container harness analyzer (container_harness/analyze_trace.py, run by entry.sh after the traced tree exits) supplies filesystem_snapshot.created_paths, process_tree, controller_trace.signalled_pids, symbols.HARNESS_CONTROLLER_PID, harness_observations.{max_concurrent_children, shell_launches, data_fetch_attempts, signal_capture_exhaustive, tracer_status} and the harness RAM sampler's min_free_ram_while_running_gib as a harness-observations input file (observations_path). The projection merges it, checked against the controller's own records. CAP-EXHAUSTIVE-WRITES, CAP-SIGNAL-CAPTURE and CAP-HARNESS-OBS are PRODUCER_MAPPED on that route but declared only when a reviewer signs the record; carrying values declares nothing.",
-  "base": "live-role wave sub-wave 6 (feat/simkit-lw6-records-snowyowl): every line number in every record (producer lines and the line references inside symbol/emits/notes text) refers to the commit that carries this text; the code is unchanged from 8654227 (live integration: sub-waves 1-4b and 8, signed wave 7)",
+  "base": "live-role wave sub-wave 6 (feat/simkit-lw6-records-snowyowl): every line number in every record (producer lines and the line references inside symbol/emits/notes text) refers to the commit that carries this text; the code is that of the live-wave integration branch at the record's reviewed_commit (sub-waves 1-4b and 8, signed wave 7, the relay-role-smoke fixes ff9cfad / 51089d0, reviewed at d6c2809 by D4-REVIEW-LW-A/B/C)",
   "gate_rule": "A capability with d4_gated=true is declared by WeatherAdapter.implemented_capabilities() only when its method exists, status is PRODUCER_MAPPED, and reviewer, reviewed_at and reviewed_commit are all non-empty strings (the signature pins the commit the independent review read; a later change to the record's code needs a re-review and a new pin). PARTIAL and NOT_DECLARED records can never be declared by review alone: the status must change with new producers.",
   "frozen_shapes": "casesets/cached-onset-e2e-v2_7/EVIDENCE_CONTRACT.json structures (frozen v2.7, read-only)",
   "tests_file": "tests/test_evidence_projection_v27.py",
@@ -89,12 +89,11 @@
         "tools/workflow/tests/test_resume_family_v27.py::test_accepted_resume_continues_after_unrecorded_events",
         "tools/workflow/tests/test_resume_family_v27.py::test_unverifiable_event_beyond_the_checkpoint_is_kept_but_never_adopted"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); tools/workflow/agents.py (live findings 70a273a / 69879fb: the reviewer prompt names the frozen finding shape and offers only APPROVE/REJECT; sub-wave 8, 0c1fc16: the rubric_grader prompt; lines after the PROMPTS table moved +11); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:24:31Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-SYMBOLS": {
       "d4_gated": true,
@@ -154,12 +153,11 @@
         "HARNESS_PLAN_HASH:current and :vN are plan-version hashes (contracts.plan_version_hash: the plan plus its claims envelope, else the plan's own digest), not digest(plan): a claims-only repair is a new plan version with its own :vN, as v2_5.plan_symbols and v2_4.claim_checks (one per plan version) require",
         "HARNESS_CONTROLLER_PID with two controller incarnations (stop-and-resume route, OI-05): the traced root, the parent of incarnation 1 and itself incarnation 2, accepted only when each of the controller's own incarnation pids is declared by the harness (a one-way subset check, stated in CAP-INTERRUPT: an extra declared incarnation is accepted, and the root is not required to be a controller pid). On the in-process route, several incarnations without a route record give HARNESS_CONTROLLER_PID MISSING (the value is honest) but with the single-process reason 'no launched process names the controller as parent and no harness observation' (evidence_projection.py:1249); the real reason is the controller_incarnations_unattributed note. The project_in_container tests use a project_run stand-in that copies the observed_signal_capture rule, so the composition of the real Projection with apply_route_disclosures is untested [UNVERIFIED until a container run]. On the scored container route the harness route record is an input of project_in_container (INPUT_KEYS resume_route), so the analyzer's value is cross-checked there too; a stop case whose route record was not carried has HARNESS_CONTROLLER_PID withheld as MISSING (project_in_container.apply_route_disclosures), never taken unchecked"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:44:57Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-REASON-MAP": {
       "d4_gated": true,
@@ -181,15 +179,15 @@
         "owner ruling role_cli_resource_gate_2026-10-14: a role CLI the process manager refuses (launch-check RAM floor / aggregate time budget, unmeasurable RAM) or stops (RAM guard, wall-time guard) ends on failed_gate resource_guard, outcome INCOMPLETE (contracts.INCOMPLETE_GATES), reason resource_guard_failed, terminal_mapping.source raise_site: processes.py raises Refused(gate='resource_guard') and Controller.ask's tag() keeps a set gate (KongRoles re-raises it instead of an UNKNOWN outcome). Output-budget stops, role-output, parse, transport and receipt failures keep the role's ROLE_GATES gate. terminal_for / finish / evidence_projection.map_terminal are unchanged: resource_guard is in FAILED_GATES and projects by identity",
         "argument labels (documented in CAP-RECEIPTS, where they are projected): a failed plan argument plan.steps[i].args.<name> is also named by its bare argument name after the controller's dotted paths (evidence_projection.argument_labels); a rename of the controller's own failed_fields, never a terminal reason or gate",
         "wave 7: E14-P2-INJ's pre-launch run-directory denial is an interruption, not a WriteDenied: it ends INCOMPLETE with failed_gate interrupted (terminal_for's runtime_fallback for a non-refusal with nothing pending, after notify-and-wait), never write_denial (stated in CAP-DENY-WRITE); a refused operator resume keeps record_refused's terminal (terminal_mapping.source resume_refusal)",
-        "live wave (sub-wave 1): a relay spend-guard refusal (reason_code relay_spend_cap) is raised by the container client as Refused(gate='budget') (relay_roles.py:583) and Controller.ask keeps a raise-site gate, so the run ends on failed_gate budget (in FAILED_GATES, projected by identity); a KongRoles model_input wiring fault is Refused(gate='transition') before launch (kong_roles.py:490); every other relay refusal takes the role's ROLE_GATES gate (relay_roles.role_gate). _resource_guard is unchanged in behaviour (pin 434 -> 704). relay_roles.py is not a producer file of this record, so drift there is not signature-checked"
+        "live wave (sub-wave 1): a relay spend-guard refusal (reason_code relay_spend_cap) is raised by the container client as Refused(gate='budget') (relay_roles.py:583) and Controller.ask keeps a raise-site gate, so the run ends on failed_gate budget (in FAILED_GATES, projected by identity); a KongRoles model_input wiring fault is Refused(gate='transition') before launch (kong_roles.py:490); every other relay refusal takes the role's ROLE_GATES gate (relay_roles.role_gate). _resource_guard is unchanged in behaviour (pin 434 -> 704). relay_roles.py is not a producer file of this record, so drift there is not signature-checked",
+        "relay spend-cap refusal -> failed_gate budget is not yet tested end to end: no test drives it through the controller to the final failed gate (relay-level tests only); relay_roles.py, where the refusal is raised, is not a producer of this record (D4-REVIEW-LW-C)"
       ],
       "tests": ["test_terminal_mapping_never_guesses_an_unmapped_gate", "test_claim_gate_block_projects_a_routed_record_and_no_review", "test_needs_info_stop_and_visible_synthetic_marker", "tools/workflow/tests/test_runner_lifecycle_v27.py::test_role_cli_resource_guard_ends_the_run_on_resource_guard", "tools/workflow/tests/test_runner_lifecycle_v27.py::test_malformed_role_cli_output_keeps_the_role_gate", "tests/test_resume_family_adapter.py::test_e14_p2_inj_pre_launch_denial_is_interrupted_with_no_producing_launch", "tests/test_resume_family_adapter.py::test_thread_double_drives_the_parent_logic_and_the_controller_decides", "tests/test_resume_family_adapter.py::test_forked_route_kills_incarnation_1_and_resumes_as_incarnation_2"],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): tools/workflow/kong_roles.py (sub-wave 1, c00babb / 6863a53 / 4149d9d / c66ba74, and live findings aab0f65 / 5ad9e3d: pinned list price, per-role max_tokens, temperature, response_id session, spend guard, dedup model_input with its refusal tagged gate transition, invalid-answer diagnostics, forced-tool structured output; _resource_guard 434 -> 704); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-ROLE-OUTPUT-SCHEMA": {
       "d4_gated": true,
@@ -206,11 +204,10 @@
       "mapping_choices_for_review": ["plan.steps -> plan (full plan kept as controller_plan)", "plan_claims -> claims", "verifier verdict = controller-recorded D8 verdict, raw output kept as returned_output", "unknown output fields are passed through and listed in notes.unmapped_role_output_fields", "role_output.shadow_policy is not verbatim in shadow_policy mode: shadow_projection.project overwrites it with the contract-vocabulary labels and fingerprint symbols (the mapping choice is stated and reviewed in CAP-SHADOW; this path is gated by the CAP-SHADOW declaration, weather_adapter.py:445)"],
       "tests": ["test_released_projection_maps_native_records_without_filling", "test_needs_info_stop_and_visible_synthetic_marker", "tests/test_resume_family_adapter.py::test_e14_compile_reasked_after_resume_is_compiler_3_occurrence_2"],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md",
-      "rereview_required": "producer files changed since reviewed_commit: tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)"
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-BOUND-SOURCES": {
       "d4_gated": true,
@@ -242,11 +239,10 @@
       ],
       "notes": "Frozen manifest method name is record_review_snapshots; this adapter's method is capture_bound_sources (the frozen runner reads capability ids only). snapshot() trusts the envelope's request/goal/plan hashes (hash-pinned capture file); the diagnostic path recomputes them.",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md",
-      "rereview_required": "producer files changed since reviewed_commit: tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-RUN-PROVENANCE": {
       "d4_gated": true,
@@ -261,12 +257,11 @@
       "missing_fields": [],
       "notes": "Owner ruling D3: synthetic CHIRPS-identical input runs under production admission; admission_note states that 'production' is a consequence of the ruling, not an observed fetch. The scan covers the request, the role inputs and the source metadata the system reads; it does not scan the operator ledger (run/operator-ledger.jsonl), which on the stop-and-resume route also carries the harness-authored HARNESS-OPERATOR-RESUME-<n> resume record (no generator marker; disclosed in CAP-RESUME). It is a marker scan, not a proof of semantic invisibility.",
       "tests": ["test_released_run_provenance_follows_ruling_d3", "test_needs_info_stop_and_visible_synthetic_marker", "test_zero_collected_outputs_are_never_tagged"],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-PROFILE": {
       "d4_gated": true,
@@ -317,12 +312,11 @@
         "test_authorizations_are_the_controllers_decisions",
         "test_unfinished_run_keeps_authorizations_missing"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:40:09Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-HARNESS-OBS": {
       "d4_gated": true,
@@ -358,12 +352,11 @@
       ],
       "notes": "Upgraded from PARTIAL: each whole-tree field now has a harness producer. The network-syscall trace set and the RAM sampler are unit-tested on synthetic captures (container_harness/tests/test_analyze_trace.py) but have not yet run in a container; the first container run is the reviewer's evidence for them. max_concurrent_children and shell_launches already came out of the container canary.",
       "tests": ["test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_observe_harness_carries_whole_tree_fields_or_reports_them_missing", "container_harness/tests/test_analyze_trace.py::test_data_fetch_attempts_count_non_local_destinations", "container_harness/tests/test_analyze_trace.py::test_quiet_run_reports_zero_fetch_attempts_only_when_network_was_traced", "container_harness/tests/test_analyze_trace.py::test_relay_connect_is_role_transport_only_from_the_controller", "container_harness/tests/test_analyze_trace.py::test_unobservable_network_makes_fetch_attempts_missing", "container_harness/tests/test_analyze_trace.py::test_undecoded_sendmsg_destination_makes_fetch_attempts_missing", "container_harness/tests/test_analyze_trace.py::test_connected_sendmsg_with_null_destination_is_not_an_attempt", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_is_the_running_minimum_of_harness_readings", "container_harness/tests/test_analyze_trace.py::test_min_free_ram_missing_unless_the_whole_run_is_covered", "container_harness/tests/test_analyze_trace.py::test_threads_are_not_children_and_concurrency_counts_overlap", "container_harness/tests/test_analyze_trace.py::test_shell_launches_and_relative_paths_after_chdir", "container_harness/tests/test_interrupt_broker.py::test_kill_from_outside_counts_incarnation_tools_and_is_a_harness_action", "container_harness/tests/test_interrupt_broker.py::test_without_the_broker_accounting_the_same_trace_undercounts", "container_harness/tests/test_interrupt_broker.py::test_unconfirmed_or_absent_broker_facts_make_concurrency_missing", "container_harness/tests/test_interrupt_broker.py::test_a_ready_broker_with_no_request_is_labelled_and_makes_concurrency_missing", "container_harness/tests/test_interrupt_broker.py::test_in_process_fallback_kill_in_the_container_makes_concurrency_missing", "container_harness/tests/test_interrupt_broker.py::test_a_declared_incarnation_the_trace_shows_exiting_normally_is_not_confirmed", "container_harness/tests/test_interrupt_broker.py::test_no_stop_case_output_is_byte_identical_to_the_pre_broker_analyzer", "container_harness/tests/test_project_in_container_route.py::test_in_process_fallback_kill_in_the_container_withholds_concurrency", "container_harness/tests/test_project_in_container_route.py::test_unconfirmed_broker_stop_withholds_concurrency", "container_harness/tests/test_project_in_container_route.py::test_confirmed_broker_stop_keeps_the_analyzer_concurrency", "tests/test_resume_family_adapter.py::test_an_in_process_kill_with_a_broker_channel_expected_is_disclosed"],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:24:31Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-SIGNAL-CAPTURE": {
       "d4_gated": true,
@@ -389,12 +382,11 @@
       ],
       "notes": "Upgraded from PARTIAL on the container route (container_route_ruling_2026-10-13): the harness trace is the producer, already exercised by the container canary/tree/tracer-death scenarios. Results certify Linux only; Windows signal_stop code is not exercised on this route. Declared only when a reviewer signs.",
       "tests": ["test_signal_projection_never_turns_absence_into_exhaustive_evidence", "test_released_projection_maps_native_records_without_filling", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "container_harness/tests/test_analyze_trace.py::test_signal_forms_group_pidfd_tgkill_zero_and_failed", "container_harness/tests/test_analyze_trace.py::test_user_delivery_without_attempt_makes_signals_missing", "container_harness/tests/test_analyze_trace.py::test_process_tree_uses_creating_parent_and_notes_reassignment", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty", "container_harness/tests/test_interrupt_broker.py::test_kill_from_outside_counts_incarnation_tools_and_is_a_harness_action", "container_harness/tests/test_interrupt_broker.py::test_unconfirmed_or_absent_broker_facts_make_concurrency_missing", "container_harness/tests/test_interrupt_broker.py::test_in_process_fallback_kill_in_the_container_makes_concurrency_missing"],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:44:57Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-EXHAUSTIVE-WRITES": {
       "d4_gated": true,
@@ -419,12 +411,11 @@
       ],
       "notes": "OWNER-RULINGS container_route_ruling_2026-10-13 supersedes write_capture_ruling_2026-10-13 (confinement candidate is fallback only). Upgraded from NOT_DECLARED: the method exists and the producer (trace analyzer) already ran in the container canary/tree scenarios. Exhaustive capture is attribution-blind inside one process: run_case's harness staging (case root, source/, harness/) runs in the traced controller process and is therefore in created_paths, outside the frozen allow-list HARNESS_RUN_DIR (all_under, every v2.7 case), as are tool caches under $HOME seen in the canary. That is a scoring outcome the capture correctly exposes, not a capture defect; see the write-allow-list finding in the handoff. Declared only when a reviewer signs.",
       "tests": ["test_d4_gate_declares_only_reviewed_producer_mapped_records", "test_container_harness_observations_merge_without_declaring", "test_incomplete_trace_keeps_harness_fields_missing_never_empty", "test_inconsistent_harness_observations_refuse_the_projection", "test_exhaustive_write_capture_only_from_a_complete_trace", "container_harness/tests/test_analyze_trace.py::test_unresolvable_creating_call_makes_created_paths_missing", "container_harness/tests/test_analyze_trace.py::test_created_paths_semantics", "container_harness/tests/test_analyze_trace.py::test_untrusted_trace_makes_every_field_missing_never_empty", "container_harness/tests/test_analyze_trace.py::test_io_uring_success_makes_created_paths_missing_only", "container_harness/tests/test_interrupt_broker.py::test_no_stop_case_output_is_byte_identical_to_the_pre_broker_analyzer", "container_harness/tests/test_interrupt_broker.py::test_kill_from_outside_counts_incarnation_tools_and_is_a_harness_action"],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:44:57Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-EVIDENCE-CHECKER": {
       "d4_gated": true,
@@ -452,12 +443,11 @@
         "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
         "test_tampered_claim_check_or_operator_record_refuses_projection"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): tools/workflow/agents.py (live findings 70a273a / 69879fb: the reviewer prompt names the frozen finding shape and offers only APPROVE/REJECT; sub-wave 8, 0c1fc16: the rubric_grader prompt; lines after the PROMPTS table moved +11); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-PRE-REVIEW-GATES": {
       "d4_gated": true,
@@ -490,11 +480,10 @@
         "test_tampered_claim_check_or_operator_record_refuses_projection"
       ],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md",
-      "rereview_required": "producer files changed since reviewed_commit: tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-OPERATOR-ACTIONS": {
       "d4_gated": true,
@@ -526,12 +515,11 @@
         "test_claim_gate_block_runs_no_checker_and_missing_paths_stay_missing",
         "test_tampered_claim_check_or_operator_record_refuses_projection"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:40:09Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-NOT-IMPLEMENTED": {
       "d4_gated": false,
@@ -694,11 +682,12 @@
         "Baselines (CTL uses them; CTL and INJ both add their own schedule): compilers = the reference variant goal; planner = {schema workflow.review-envelope/1, plan expected_plan(goal), plan_claims C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE} taken from the frozen clean probe-bundle claims citing definition:agrhymet-sos-rolling sha256:3db5ec77...; repairer = the same envelope + the pair's frozen response text verbatim (DEV-ONLY <pair>-INJ probe_bundles[0].evidence.role_output.repairer[0].response); reviewer = APPROVE with approved_binding {plan_hash, source_hash} of the presented review_evidence and findings []; evidence_checker = SUPPORTED for every judged claim; verifier = PASS, binding_hash copied from the payload, scope data-replay.",
         "D1 reference definition: the container case driver passes the pinned file container_harness/pinned/definitions/agrhymet-sos-rolling.txt (LF-only by .gitattributes) as definition_source; case_driver.reference_definition hash-checks its bytes against FROZEN_DEFINITION_SOURCE_HASH (sha256:3db5ec77...) and refuses the run on a mismatch, so the controller binds it under definition:agrhymet-sos-rolling. The substituted planner/repairer cite only that bound source: if the controller bound no definition:agrhymet-sos-rolling with the frozen hash (or the text lacks a frozen quote), they fail closed with SubstitutionUnavailable -- nothing returned, no receipt, an observed dispatch failure -- never a citation of an unbound source.",
         "Substituted reviewer receipts record dispatch.system_prompt as the literal marker 'SUBSTITUTED: no system prompt was sent; ...' (hash-consistent), not a prompt that was never sent.",
-        "Bare-plan wrapping (owner ruling e07_bare_plan_wrapping_2026-10-14; replaces the earlier refusal of these replacements). Rule bare-plan-wrap/v1, verbatim: 'A planner/repairer replace_role_output whose frozen payload carries plan as a JSON array is wrapped into the native envelope of the output it replaces at the controller's after_role point. For a substituted role that output is the stand-in's baseline for this invocation (static_baseline(role, goal, pair)); at delivery its hash must equal the recorded source_output_hash, and the delivered hash the recorded wrapped_output_hash, else the substitution is refused. The array is delivered verbatim as plan.steps. Every other key of the typed plan (goal_hash, final) and every other envelope key the replaced output carries (schema, plan_claims; response or rationale only when the payload does not supply it) is copied unchanged from the replaced output. Payload keys other than plan are delivered verbatim and must be native envelope keys of the role (repairer: response; planner: rationale). No value is invented: a key the replaced output does not carry is never added, and any other payload shape is refused.' Derived fields and sources for the only frozen instance (E07-P1-CTL and E07-P1-INJ entry 2, repairer occurrence 1): /plan/goal_hash <- replaced output /plan/goal_hash (= digest(goal)); /plan/final <- replaced output /plan/final (['onset', 'map']); /schema <- replaced output /schema (workflow.review-envelope/1); /plan_claims <- replaced output /plan_claims (the frozen C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE baseline claims); delivered verbatim: /plan/steps <- frozen payload /plan, /response <- frozen payload /response. E07-P2 schedules no bare step list (its repairer is live); the substituted-only factory refuses it as live + substituted, and it runs only through invoke_live_role (CAP-LIVE-ROLE). Observed on the frozen E07-P1 cases (since the repair-routing fix): the controller's own plan validation refuses the planner's patched title (entry 0) at GOAL_CHECKED (plan_validation) and routes it to the single allowed repair; the wrapped repairer output (entry 2) is applied, restores the title and passes plan validation; the repaired plan reaches reviewer occurrence 1, which entry 1 replaces with REJECT, and with the allowance spent both cases end BLOCKED repair_exhausted at PLAN_VALIDATED before any side effect (schedule coverage applied [0, 2, 1], entry 3 unreached). That residual (the frozen schedule keys the reviewer verdict to the reviewer ordinal, not the plan version) is a documented oracle issue (SIMKIT decisions/ORACLE-ISSUES-NEXT-CASESET.json OI-02), observed and not tuned for. A local variant without entry 0 also exercises the wrap (CTL releases; INJ ends repair_exhausted after the controller rejects the repairer-channel retry request). Reading of the ruling's wording: 'the controller's own current plan context' (owner ruling e07_bare_plan_wrapping_2026-10-14) is read as the replaced output the controller receives at the after_role point, i.e. the stand-in's baseline for that invocation (static_baseline); the derived fields are copied from that output and from nothing else. Since the repair-routing change, when the E07-P1 repairer runs Controller.plan is None: the planner's plan was refused by plan validation and was never accepted, so the controller sends that refused candidate to the repairer as prior_plan (Controller.repair(..., prior_plan=refused), runner.py:913/1983). The controller's 'current plan context' for that invocation is therefore the refused candidate, not Controller.plan. Its goal_hash, final, schema and plan_claims equal the baseline's, because entry 0 patches only steps[1].args.title (the test asserts failed_fields == ['plan.steps[1].args.title', 'title']), so the derived fields copied from the baseline equal those of the refused candidate [static trace and test; not separately observed].",
+        "Bare-plan wrapping (owner ruling e07_bare_plan_wrapping_2026-10-14; replaces the earlier refusal of these replacements). Rule bare-plan-wrap/v1, verbatim: 'A planner/repairer replace_role_output whose frozen payload carries plan as a JSON array is wrapped into the native envelope of the output it replaces at the controller's after_role point. For a substituted role that output is the stand-in's baseline for this invocation (static_baseline(role, goal, pair)); at delivery its hash must equal the recorded source_output_hash, and the delivered hash the recorded wrapped_output_hash, else the substitution is refused. The array is delivered verbatim as plan.steps. Every other key of the typed plan (goal_hash, final) and every other envelope key the replaced output carries (schema, plan_claims; response or rationale only when the payload does not supply it) is copied unchanged from the replaced output. Payload keys other than plan are delivered verbatim and must be native envelope keys of the role (repairer: response; planner: rationale). No value is invented: a key the replaced output does not carry is never added, and any other payload shape is refused.' Derived fields and sources for the only frozen instance (E07-P1-CTL and E07-P1-INJ entry 2, repairer occurrence 1): /plan/goal_hash <- replaced output /plan/goal_hash (= digest(goal)); /plan/final <- replaced output /plan/final (['onset', 'map']); /schema <- replaced output /schema (workflow.review-envelope/1); /plan_claims <- replaced output /plan_claims (the frozen C-WINDOW / C-LAST-ELIGIBLE / C-PLOT-SCALE baseline claims); delivered verbatim: /plan/steps <- frozen payload /plan, /response <- frozen payload /response. E07-P2 schedules no bare step list (its repairer is live); the substituted-only factory refuses it as live + substituted, and it runs only through invoke_live_role (CAP-LIVE-ROLE). Observed on the frozen E07-P1 cases (since the repair-routing fix): the controller's own plan validation refuses the planner's patched title (entry 0) at GOAL_CHECKED (plan_validation) and routes it to the single allowed repair; the wrapped repairer output (entry 2) is applied, restores the title and passes plan validation; the repaired plan reaches reviewer occurrence 1, which entry 1 replaces with REJECT, and with the allowance spent both cases end BLOCKED repair_exhausted at PLAN_VALIDATED before any side effect (schedule coverage applied [0, 2, 1], entry 3 unreached). That residual (the frozen schedule keys the reviewer verdict to the reviewer ordinal, not the plan version) is a documented oracle issue (SIMKIT decisions/ORACLE-ISSUES-NEXT-CASESET.json OI-02), observed and not tuned for. A local variant without entry 0 also exercises the wrap (CTL releases; INJ ends repair_exhausted after the controller rejects the repairer-channel retry request). Reading of the ruling's wording: 'the controller's own current plan context' (owner ruling e07_bare_plan_wrapping_2026-10-14) is read as the replaced output the controller receives at the after_role point, i.e. the stand-in's baseline for that invocation (static_baseline); the derived fields are copied from that output and from nothing else. Since the repair-routing change, when the E07-P1 repairer runs Controller.plan is None: the planner's plan was refused by plan validation and was never accepted, so the controller sends that refused candidate to the repairer as prior_plan (Controller.repair(..., prior_plan=refused), runner.py:913/1989). The controller's 'current plan context' for that invocation is therefore the refused candidate, not Controller.plan. Its goal_hash, final, schema and plan_claims equal the baseline's, because entry 0 patches only steps[1].args.title (the test asserts failed_fields == ['plan.steps[1].args.title', 'title']), so the derived fields copied from the baseline equal those of the refused candidate [static trace and test; not separately observed].",
         "Live + substituted in one case is refused by substituted_roles_factory; since live sub-waves 2-4b such a case runs through invoke_live_role (CombinedRoles, stated in CAP-LIVE-ROLE), and case_driver marks it RUNNABLE only when invoke_live_role is the adapter's own and its relay plan maps (BLOCKED_LIVE_ROLE_TRANSPORT otherwise); a role listed under agent_roles.not_invoked that the controller nevertheless invokes gets SubstitutionUnavailable (an observed dispatch failure), never a guessed output.",
         "run_case now delivers the WHOLE case schedule through InjectionHooks chained behind HarnessLaunchObserver (before this change no schedule entry was applied at all). Non-role entries are listed as delegated and still need their own declared capabilities through admission; InjectionHooks' static unsupported_requirements findings refuse the case before any side effect.",
         "Repairer response: the frozen texts are per pair (E13-P1 'Citation for C-WINDOW restated verbatim ...', E13-P3 'C-LAST-ELIGIBLE corrected ...', E15-P1 'Child plan of h-plan-1 ...', the last kept verbatim including the probe placeholder label h-plan-1) and are used for both the CTL and INJ case of that pair. These three are exactly the frozen pairs whose substituted repairer runs unpatched (E03-P3 and E07-P1 replace it by schedule; the rest are live). Any other pair gets a harness-authored fallback, because no frozen text exists for it; the source is reported by repairer_response() as harness_authored_fallback.",
-        "stop-and-resume route (wave 7): incarnation 2 runs with fresh substituted roles; the substitution rebinds incarnation 1 made are carried over the pipe and restored (resume_driver.drive, line 560), so harness.case_schedule.rebinds covers both incarnations. A case whose schedule implies an undeclared capability (D21) is refused before any side effect (weather_adapter.py:438)"
+        "stop-and-resume route (wave 7): incarnation 2 runs with fresh substituted roles; the substitution rebinds incarnation 1 made are carried over the pipe and restored (resume_driver.drive, line 560), so harness.case_schedule.rebinds covers both incarnations. A case whose schedule implies an undeclared capability (D21) is refused before any side effect (weather_adapter.py:438)",
+        "split-occurrence routing ignores schedule conditions (D4-REVIEW-LW-C): an occurrence the frozen schedule applies only conditionally is routed to the substituted double unconditionally - E10-P2's reviewer occurrence 2 ('applied only if a reviewer is invoked after a refused resume'); E10-P2 is dispatched last, after sub-wave 5 [UNVERIFIED live]. Routing counts controller attempts while the injection hooks count returned answers, so the two can diverge after a failed attempt; the rebind check then raises rather than silently replacing a live output, but the scheduled substitution is not delivered (static reading)"
       ],
       "notes": "Observed on E02-P1-INJ: the controller refuses at the first compiled goal that departs from the trusted goal, so compiler_2/3 are never invoked and their entries are reported unreached (never applied, never PASS). The method is in the frozen base table (simkit.adapter.CAPABILITY_METHODS), so no extension_methods entry is needed; this record is what keeps it undeclared until review. Wave 7 text cites adapter_support/weather_adapter.py (the D21 refusal, line 438) and adapter_support/resume_driver.py (rebinds restored at line 560), which are not producer files of this record, so drift in them is not flagged by the signature checker; carrying rebinds over the pipe is exercised only on the Linux fork route.",
       "tests": [
@@ -717,12 +706,11 @@
         "tests/test_role_substitution_adapter.py::test_e07_p1_wrapped_repairer_output_is_delivered_with_its_rule_recorded",
         "tests/test_role_substitution_adapter.py::test_e07_p2_has_no_bare_plan_and_stays_refused_as_live_plus_substituted"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/role_substitution.py (sub-wave 2, 64b8279: substitution_plan maps an after_role entry for a role split between live and substituted occurrences, SubstitutedRoles(allow_live=True) as a CombinedRoles member, case_hooks accepts CombinedRoles; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-SHADOW": {
       "d4_gated": true,
@@ -825,12 +813,11 @@
         "tools/workflow/tests/test_rereview_shadow_v27.py (native controller shadow tests)"
       ],
       "notes": "Frozen cases needing only CAP-SHADOW beyond the signed records: DEV-E2E-V2_7-E09-P1-CTL and -INJ (both run in tests/test_shadow_adapter.py with this record signed in a test-local copy). CAP-SHADOW is in the frozen base method table (simkit.adapter.CAPABILITY_METHODS), so no extension_methods entry is needed. Declared only when an independent reviewer signs.",
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/role_substitution.py (sub-wave 2, 64b8279: substitution_plan maps an after_role entry for a role split between live and substituted occurrences, SubstitutedRoles(allow_live=True) as a CombinedRoles member, case_hooks accepts CombinedRoles; no pinned line moved); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-FIXTURE-OP": {
       "d4_gated": true,
@@ -890,12 +877,11 @@
         "tests/test_resume_family_adapter.py::test_thread_double_drives_the_parent_logic_and_the_controller_decides",
         "tests/test_resume_family_adapter.py::test_forked_route_kills_incarnation_1_and_resumes_as_incarnation_2"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); container_harness/case_driver.py (sub-wave 4b, aeeb8af / 90c9bd9: live and mixed cases through invoke_live_role, admission matrix rows carry the relay caps, live helpers at the end of the module; prepare_repo_copy 324 -> 357, the interrupt_broker lines 425-426 -> 458-459)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:40:09Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-B.md"
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-REREVIEW": {
       "d4_gated": true,
@@ -939,11 +925,10 @@
         "tests/test_fixture_rereview_adapter.py::test_withdrawn_authorization_is_not_an_authorization"
       ],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:39:39Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-A.md",
-      "rereview_required": "producer files changed since reviewed_commit: tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-TRANSITION-REQUEST": {
       "d4_gated": true,
@@ -993,11 +978,10 @@
         "tools/workflow/tests/test_resume_family_v27.py::test_refused_then_accepted_resume_requests_are_verifiable"
       ],
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:24:31Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7.md",
-      "rereview_required": "producer files changed since reviewed_commit: tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-LEDGER-APPEND": {
       "d4_gated": true,
@@ -1040,12 +1024,11 @@
         "tests/test_operator_ledger_capabilities.py::test_wrong_speaker_or_missing_channel_appends_are_refused",
         "tests/test_evidence_projection_v27.py::test_operator_actions_from_a_real_ledger_answer"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:40:09Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-OPERATOR-RECORD-SETUP": {
       "d4_gated": true,
@@ -1085,12 +1068,11 @@
         "tests/test_operator_ledger_capabilities.py::test_wrong_speaker_or_missing_channel_appends_are_refused",
         "tools/workflow/tests/test_operator_channel_v27.py::test_fx_operator_record_appends_literal_without_claiming_acceptance"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:40:09Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REREVIEW-W7-B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-INTERRUPT": {
       "d4_gated": true,
@@ -1178,12 +1160,11 @@
         "container_harness/tests/test_project_in_container_route.py::test_broker_route_takes_the_trace_confirmed_broker_record",
         "container_harness/tests/test_project_in_container_route.py::test_a_case_without_a_stop_is_untouched"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); container_harness/case_driver.py (sub-wave 4b, aeeb8af / 90c9bd9: live and mixed cases through invoke_live_role, admission matrix rows carry the relay caps, live helpers at the end of the module; prepare_repo_copy 324 -> 357, the interrupt_broker lines 425-426 -> 458-459)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:24:31Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
+      "reviewed_at": "2026-10-16T17:29:12Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-C.md"
     },
     "CAP-RESUME": {
       "d4_gated": true,
@@ -1247,12 +1228,11 @@
         "test_pending_records_light_up_from_their_frozen_native_shape",
         "test_recovery_lists_stay_missing_without_a_valid_recovery_ledger"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:24:31Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-RESUME-ATTRIBUTION": {
       "d4_gated": true,
@@ -1305,12 +1285,11 @@
         "tools/workflow/tests/test_resume_family_v27.py::test_accepted_resume_continues_after_unrecorded_events",
         "tools/workflow/tests/test_resume_family_v27.py::test_unverifiable_event_beyond_the_checkpoint_is_kept_but_never_adopted"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:24:31Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-MIDPROCESS": {
       "d4_gated": true,
@@ -1324,7 +1303,7 @@
         {"file": "adapter_support/resume_driver.py", "line": 453, "symbol": "onset_observation (recorded by drive at line 547)", "emits": "route record onset_partial {present_at_interrupt, observed_by 'harness parent, after the kill of incarnation 1 and before any resume', path, content_hash (tree_hash) or hash_error}"},
         {"file": "container_harness/interrupt_broker.py", "line": 367, "symbol": "output_bytes (OUTPUT_BYTES_BASIS at line 117)", "emits": "per killed pid {stdout, stderr}: st_size of the regular file open on fd 1 / fd 2 while the tree is frozen, before SIGKILL; null for a pipe, socket, tty, an unreadable fd or the traced root's own shared file"},
         {"file": "adapter_support/resume_projection.py", "line": 186, "symbol": "killed_output_bytes (called from evidence_projection.Projection.run, line 1306)", "emits": "OI-04: process_receipts[*].output_bytes of a receipt with no end whose pid the harness killed = observed stdout + stderr, labelled output_bytes_source harness_observed_before_kill (note output_bytes_harness_observed); unobserved stays MISSING with the reason 'never 0'"},
-        {"file": "adapter_support/resume_projection.py", "line": 234, "symbol": "harness_fields (mid-process branch at lines 247-260)", "emits": "harness_observations.onset_partial {present_at_interrupt, observed_by} for a mid-process stop, else a CAP-MIDPROCESS gap"},
+        {"file": "adapter_support/resume_projection.py", "line": 234, "symbol": "harness_fields (mid-process branch at lines 248-261)", "emits": "harness_observations.onset_partial {present_at_interrupt, observed_by} for a mid-process stop, else a CAP-MIDPROCESS gap"},
         {"file": "adapter_support/resume_projection.py", "line": 264, "symbol": "project_symbols (called from evidence_projection.Projection.symbols, line 1238)", "emits": "symbols['HARNESS_HASH:onset_partial_at_interrupt'] = the observed onset content hash when onset was present at the interrupt; a CAP-MIDPROCESS gap when present but unhashed; absent when onset was absent"},
         {"file": "container_harness/project_in_container.py", "line": 80, "symbol": "INPUT_KEYS resume_route / load_inputs (container route)", "emits": "the route record's stop / onset_partial / kill reach the scored in-container projection, so harness_observations.onset_partial (or its CAP-MIDPROCESS gap), symbols['HARNESS_HASH:onset_partial_at_interrupt'] and the killed receipt's output_bytes are projected on the scored route"},
         {"file": "container_harness/project_in_container.py", "line": 170, "symbol": "broker_kill_facts (from project, line 327)", "emits": "a broker-route kill's output_bytes from the analyzer's trace-confirmed broker stop (trace_confirmed_kills only), else withheld; the relayed ack never counted"},
@@ -1375,12 +1354,11 @@
         "container_harness/tests/test_project_in_container_route.py::test_broker_route_counts_only_trace_confirmed_kills",
         "container_harness/tests/test_project_in_container_route.py::test_broker_route_unconfirmed_withholds_the_byte_counts"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:24:31Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-AUTO-RESUME": {
       "d4_gated": true,
@@ -1421,12 +1399,11 @@
         "tests/test_resume_family_adapter.py::test_e14_runs_without_a_stop_report_missing_for_the_stop_only_methods",
         "tests/test_resume_family_adapter.py::test_compiler_slots_refuse_what_the_controller_did_not_record"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:38:45Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REVIEW-W7-NEW.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-DIAGNOSIS": {
       "d4_gated": true,
@@ -1460,12 +1437,11 @@
         "tests/test_resume_family_adapter.py::test_e14_p1_inj_third_drop_diagnoses_notifies_and_waits",
         "tests/test_resume_family_adapter.py::test_e14_p2_inj_pre_launch_denial_is_interrupted_with_no_producing_launch"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:38:45Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REVIEW-W7-NEW.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-OPERATOR-NOTIFY": {
       "d4_gated": true,
@@ -1500,12 +1476,11 @@
         "tests/test_resume_family_adapter.py::test_e14_p1_inj_third_drop_diagnoses_notifies_and_waits",
         "tests/test_resume_family_adapter.py::test_only_the_notification_outbox_is_a_nested_run_local_name"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:44:57Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
-      "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-MECHANICAL-REPAIR": {
       "d4_gated": true,
@@ -1539,12 +1514,11 @@
         "tests/test_resume_family_adapter.py::test_e14_p2_inj_pre_launch_denial_is_interrupted_with_no_producing_launch",
         "tests/test_resume_family_adapter.py::test_unsigned_wave7_records_and_e14_p2_ctl_stay_refused"
       ],
-      "rereview_required": "producer files changed since reviewed_commit 48096f6 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T06:38:45Z",
-      "reviewed_commit": "48096f630ba6dd0c2f07279b05eb3d72a92d7995",
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-REVIEW-W7-NEW.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-DENY-WRITE": {
       "d4_gated": true,
@@ -1569,7 +1543,7 @@
       ],
       "missing_fields": [
         {"field": "an injected_fault label on the pre-launch denial in scored evidence", "owner": "not in the contract: the label lives on the exception (injected_fault), in context.run_dir_denials and on the harness schedule record, never on the INCOMPLETE terminal"},
-        {"field": "running E12-P1-INJ (the only frozen case listing CAP-DENY-WRITE)", "owner": "CAP-LIVE-ROLE (it needs a live role: a paid run, owner's decision)"}
+        {"field": "running E12-P1-INJ (the only frozen case listing CAP-DENY-WRITE)", "owner": "CAP-LIVE-ROLE (it needs a live role: a paid run, authorized by OWNER-RULINGS live_spend_authorization_2026-10-15 once CAP-LIVE-ROLE is signed; not yet run)"}
       ],
       "mapping_choices_for_review": [
         "OI-06: FX-INJECT-PERMISSION-ERROR has contradictory launch expectations in E12-P1-INJ (the producing tool launches; the commit is denied) and E14-P2-INJ (no producing launch). Resolution by hook point and target: an after_transition AUTHORIZED denial naming HARNESS_RUN_DIR hits the durable pending-operation checkpoint before launch; any other denial hits the artifact commit after the tool ran (unchanged)",
@@ -1578,7 +1552,7 @@
         "frozen 'labelled injected_fault': on the commit-time form the label is controller_trace.terminal.denial_source; on the pre-launch form it is context.run_dir_denials[*].denial_source and the harness schedule record, not a scored field",
         "D21: E14-P2-INJ lists no CAP-DENY-WRITE requirement, but its scheduled deny_write implies it; run_case refuses the case while this record is undeclared (stricter than the frozen runner)"
       ],
-      "notes": "Signing this record removes E12-P1-INJ's offline gap, but that case needs a live role and is not run here (paid; owner's say-so).",
+      "notes": "Signing this record removes E12-P1-INJ's offline gap, but that case needs a live role and is not run here (paid; authorized by live_spend_authorization_2026-10-15 once CAP-LIVE-ROLE is signed).",
       "tests": [
         "tools/workflow/tests/test_resume_family_v27.py::test_pre_launch_run_dir_denial_is_an_interruption_and_waits",
         "tools/workflow/tests/test_resume_family_v27.py::test_host_permission_error_on_the_pending_checkpoint_clears_pending",
@@ -1593,12 +1567,11 @@
         "tests/test_resume_family_adapter.py::test_an_undeclared_implied_capability_refuses_before_side_effects",
         "tests/test_resume_family_adapter.py::test_e14_runs_without_a_stop_report_missing_for_the_stop_only_methods"
       ],
-      "rereview_required": "producer files changed since reviewed_commit b524c40 by the live-role wave (integrated at 8654227): adapter_support/evidence_projection.py (sub-wave 3, f495c54: invocation_receipts[*].live at lines 443-444 and the live_roles import; every line from 443 on moved +2); adapter_support/weather_adapter.py (sub-wave 3, f495c54: the seven live-role methods appended at the end of WeatherAdapter and one in-place line in implemented_capabilities, line 137; no pinned line moved); and tools/workflow/runner.py (51089d0, after the live-wave integration: the evidence-request instruction now states the controller's own claim rules - exact claim/citation keys, verbatim quotes incl. markdown, derivable only with computes for a fact in claim_gates.DERIVABLE_FACTS; lines from 1966 on moved +6)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T13:44:57Z",
-      "reviewed_commit": "b524c4096e80f9f2c7600551004ed1c2ab459e5a",
-      "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-w7/D4-CONFIRM-W7B.md"
+      "reviewed_at": "2026-10-16T17:22:29Z",
+      "reviewed_commit": "d6c28096299cd59323dc67ea85ddc560ae6d7db4",
+      "review_verdict": "APPROVE_WITH_NOTES",
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw/D4-REVIEW-LW-B.md"
     },
     "CAP-LIVE-ROLE": {
       "d4_gated": true,

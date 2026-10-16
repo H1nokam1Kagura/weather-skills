@@ -367,10 +367,8 @@ def e14(lab, frozen):  # noqa: F811
 def test_resigned_producers_keep_24_admitted_and_the_signed_records_add_the_seven(frozen):  # noqa: F811
     cases = list(frozen.values())
     assert len(cases) == 66
-    # The committed file: the live-role wave flagged 24 signed records rereview_required
-    # (sub-wave 6), so it admits exactly SIGNED_ADMITTED (none); the test-local re-signed copy
-    # (every flag cleared, every wave-7 record signed since the D4 w7 reviews) admits
-    # RESIGNED_ADMITTED (31).
+    # The committed file: every record the live-role wave flagged is re-signed (D4-REVIEW-LW-B /
+    # -C), so it admits SIGNED_ADMITTED (31), the same as the test-local re-signed copy.
     assert {PREFIX + c for c in admitted(WeatherAdapter(), cases)} == SIGNED_ADMITTED
     committed = WeatherAdapter(producers=resigned())
     assert set(WAVE7) <= committed.implemented_capabilities()
