@@ -536,6 +536,12 @@ jobs:
           python -I container_harness/relay_usage.py caps --out "$RUNNER_TEMP/relay-caps.json" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/relay-caps.json"
 
+      - name: Runner Kong client (pinned SDK; live-role case; no network beyond PyPI, no secret)
+        # The relay's --client runner refuses to start without the pinned SDK (run 38951255405:
+        # "needs anthropic==1.13.0, found None"); the smoke jobs install the same file.
+        if: matrix.role_mode == 'live'
+        run: python -m pip install --quiet -r relay/runner_kit/requirements.txt
+
       - name: Start host relay (live-role case; the only step that sees the Kong key)
         if: matrix.role_mode == 'live'
         env:
