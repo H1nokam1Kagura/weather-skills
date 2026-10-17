@@ -46,7 +46,7 @@ Controls:
   The relay stops itself only when EXHAUSTED (after writing the refusal) or after
   ``--run-seconds``;
 - no retries: one relay request is at most one KongRoles call, and the worker runs with
-  ``KONG_SDK_MAX_RETRIES=0`` and ``KONG_TIMEOUT_SECONDS=200`` (below the 240 s call timeout);
+  ``KONG_SDK_MAX_RETRIES=0`` and ``KONG_TIMEOUT_SECONDS=170`` (below the client's 180 s and the 240 s call timeout);
 - append-only JSONL audit log with redacted metadata only (status, via, request id, model,
   usage, sent settings, hashes, sizes, spend totals, fault labels). Never the payload, the answer text, the
   run token or any key.
@@ -873,10 +873,12 @@ def build_roles(args, kit_root=None, kit_python=None):
         role_max_tokens=args.role_max_tokens,
         session_source="response_id",  # the provider's id, observed after the call
         data_policy_ack=True,
-        # No retries, overriding any .env value; and a 200 s SDK timeout (the kit default of 60 s
-        # cut off planner answers near 4k tokens at ~55-69 tok/s; 8192 tokens fit at 41 tok/s).
-        # It stays below the per-call process timeout (--call-seconds, default 240).
-        worker_env={"KONG_SDK_MAX_RETRIES": "0", "KONG_TIMEOUT_SECONDS": "200"},
+        # No retries, overriding any .env value; and a 170 s SDK timeout (the kit default of 60 s
+        # cut off planner answers near 4k tokens at ~55-69 tok/s; 8192 tokens fit down to ~48
+        # tok/s). It ends before the controller's relay client gives up (RelayRoles timeout 180 s),
+        # so a slow answer is a recorded worker timeout, never paid here and UNKNOWN there; and
+        # it stays below the per-call process timeout (--call-seconds, default 240).
+        worker_env={"KONG_SDK_MAX_RETRIES": "0", "KONG_TIMEOUT_SECONDS": "170"},
         **({"kit_root": kit_root, "kit_python": kit_python} if kit_root else {}),
     )
 
