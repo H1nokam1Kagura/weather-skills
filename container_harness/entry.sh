@@ -65,6 +65,10 @@ AS_RUNNER="setpriv --reuid=1000 --regid=1000 --init-groups"
 export HOME=/home/runner
 # The controller copy is read-only and byte-compiled at build; never try to write bytecode.
 export PYTHONDONTWRITEBYTECODE=1
+# >>> decoy-harness (B3a): FX-DECOY-SPAWN only; decoy_harness.py documents the process model
+DECOY=0
+DECOY_ENV=""
+# <<< decoy-harness
 
 # 2. untraced staging, as uid 1000
 case "$MODE" in
@@ -87,10 +91,73 @@ case "$MODE" in
       status abort staging_failed
       exit 4
     fi
+    # >>> decoy-harness (B3a)
+    # FX-DECOY-SPAWN (E12-P2 only). Untraced and before the baseline: the decoy runs the frozen
+    # literal argv as uid 1000 in its own session (D7), a child of this shell; a root strace -p
+    # records every signal it receives. Its pid reaches only the untraced prepare (DECOY_ENV).
+    # Every other case: the need check writes nothing and nothing below runs.
+    DECOY_NEEDS_OUT="$(cd /opt/ctl && $AS_RUNNER python -m container_harness.decoy_harness needs "$CASE_ID" 2>&1)"
+    DECOY_NEED=$?
+    if [ "$DECOY_NEED" != 1 ]; then
+      printf '%s\n' "$DECOY_NEEDS_OUT" > "$OUT/decoy_needs.stdout"
+      if [ "$DECOY_NEED" = 0 ]; then status decoy_needed 1; else status decoy_needed error; fi
+    fi
+    if [ "$DECOY_NEED" = 0 ]; then
+      DECOY_ARGV="$(cd /opt/ctl && $AS_RUNNER python -m container_harness.decoy_harness spec "$CASE_ID" \
+        2> "$OUT/decoy_spec.stderr")"
+      DECOY_SPEC_RC=$?
+      if [ "$DECOY_SPEC_RC" != 0 ] || [ -z "$DECOY_ARGV" ]; then
+        status decoy_spawn "failed:spec_exit_$DECOY_SPEC_RC"
+      else
+        # The subshell is not a process-group leader (no job control), so setsid(1) calls
+        # setsid() in place and execs: $! is the decoy's own pid.
+        (
+          set --
+          while IFS= read -r a; do set -- "$@" "$a"; done <<DECOY_ARGV_EOF
+$DECOY_ARGV
+DECOY_ARGV_EOF
+          cd /
+          exec $AS_RUNNER setsid "$@"
+        ) < /dev/null > "$OUT/decoy.stdout" 2>&1 &
+        DPID=$!
+        i=0
+        while [ $i -lt 200 ]; do
+          [ "$(tr '\0' '\n' < /proc/$DPID/cmdline 2>/dev/null)" = "$DECOY_ARGV" ] && break
+          sleep 0.05; i=$((i+1))
+        done
+        DPGID="$(cut -d' ' -f5 /proc/$DPID/stat 2>/dev/null)"
+        DSID="$(cut -d' ' -f6 /proc/$DPID/stat 2>/dev/null)"
+        if [ $i -ge 200 ] || [ "$DPGID" != "$DPID" ] || [ "$DSID" != "$DPID" ]; then
+          status decoy_spawn "failed:not_the_literal_argv_in_its_own_session"
+          kill -KILL "$DPID" 2>/dev/null
+          wait "$DPID" 2>/dev/null
+        else
+          status decoy_spawn ok
+          status decoy_pid "$DPID"
+          status decoy_pgid "$DPGID"
+          status decoy_sid "$DSID"
+          status decoy_uid "$(grep -E '^Uid:' /proc/$DPID/status | tr -s ' \t' ' ' | cut -d' ' -f2)"
+          strace -p "$DPID" -e trace=none -e signal=all --timestamps=unix,ns -o "$OUT/decoy.trace" \
+            < /dev/null > /dev/null 2> "$OUT/decoy_tracer.stderr" &
+          DTPID=$!
+          status decoy_tracer_pid "$DTPID"
+          status decoy_tracer_pgid "$(cut -d' ' -f5 /proc/$DTPID/stat 2>/dev/null)"
+          i=0
+          while [ $i -lt 200 ]; do
+            [ "$(grep -E '^TracerPid:' /proc/$DPID/status 2>/dev/null | tr -s ' \t' ' ' | cut -d' ' -f2)" = "$DTPID" ] && break
+            sleep 0.05; i=$((i+1))
+          done
+          if [ $i -lt 200 ]; then status decoy_tracer_attached 1; else status decoy_tracer_attached 0; fi
+          DECOY=1
+          DECOY_ENV="env SIMKIT_DECOY_PID=$DPID"
+        fi
+      fi
+    fi
+    # <<< decoy-harness
     # The case root (source/, harness/manifest.json, empty run/) is staged here, untraced and
     # before the baseline, so the traced run creates nothing outside /work/case/run
     # (frozen v2.7: created_paths all_under HARNESS_RUN_DIR).
-    if ! (cd /opt/ctl && $AS_RUNNER python -m container_harness.case_driver prepare "$CASE_ID" /work \
+    if ! (cd /opt/ctl && $DECOY_ENV $AS_RUNNER python -m container_harness.case_driver prepare "$CASE_ID" /work \
           > "$OUT/prepare.stdout" 2> "$OUT/prepare.stderr"); then
       status abort prepare_failed
       exit 4
@@ -217,6 +284,37 @@ else
   status untraced_exit "$RC"
 fi
 status run_end "$(date +%s.%N)"
+# >>> decoy-harness (B3a)
+# After run_end: the alive check (a dead child stays a zombie until reaped here, so the state
+# letter, not kill -0, decides), the tracer check (alive AND still the decoy's tracer), then
+# detach the tracer (SIGINT: strace detaches and exits) and only then kill the decoy, so the
+# harness's own kill is never in the decoy's signal record.
+if [ "$DECOY" = 1 ]; then
+  DSTATE="$(cut -d' ' -f3 /proc/$DPID/stat 2>/dev/null)"
+  status decoy_state_after_run "${DSTATE:-gone}"
+  if [ -n "$DSTATE" ] && [ "$DSTATE" != Z ] && [ "$DSTATE" != X ]; then
+    status decoy_alive_after_run 1
+  else
+    status decoy_alive_after_run 0
+  fi
+  DTSTATE="$(cut -d' ' -f3 /proc/$DTPID/stat 2>/dev/null)"
+  DTRACER="$(grep -E '^TracerPid:' /proc/$DPID/status 2>/dev/null | tr -s ' \t' ' ' | cut -d' ' -f2)"
+  if [ -n "$DTSTATE" ] && [ "$DTSTATE" != Z ] && [ "$DTRACER" = "$DTPID" ]; then
+    status decoy_tracer_alive_at_run_end 1
+  else
+    status decoy_tracer_alive_at_run_end 0
+  fi
+  kill -INT "$DTPID" 2>/dev/null
+  (sleep 10; kill -KILL "$DTPID" 2>/dev/null) &
+  DTWPID=$!
+  wait "$DTPID"
+  status decoy_tracer_exit "$?"
+  kill "$DTWPID" 2>/dev/null
+  kill -KILL "$DPID" 2>/dev/null
+  wait "$DPID"
+  status decoy_kill_exit "$?"
+fi
+# <<< decoy-harness
 kill -TERM "$RPID" 2>/dev/null
 wait "$RPID"
 status ram_sampler_exit "$?"
