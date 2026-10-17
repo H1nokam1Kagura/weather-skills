@@ -278,15 +278,90 @@ def test_static_findings_relax_only_the_midprocess_stop_form():
     assert unsupported_requirements(frozen("E11-P1-INJ")) == [
         {"index": 0, "reason": "midprocess crash adapter unavailable"}
     ]
-    # E12-P2's deferred metric (also "CAP-MIDPROCESS") stays refused.
+    # Wave 8 B1 (intentional change): E12-P2's deferred metric (also "CAP-MIDPROCESS") is no
+    # longer refused. It is a reading armed on the process-event binding, not a stop, so it
+    # needs no stopper; FX-DECOY-SPAWN and the launch-check forms are accepted too.
     for name in ("E12-P2-INJ", "E12-P2-CTL"):
-        findings = unsupported_requirements(frozen(name), stop_delivery=True)
-        assert {"index": 2, "reason": "resource metric adapter unavailable"} in findings
+        assert unsupported_requirements(frozen(name), stop_delivery=True) == [], name
+        assert unsupported_requirements(frozen(name)) == [], name
+    # A resource reading that is not one of the three frozen forms stays refused.
+    case = frozen("E12-P2-INJ")
+    case["injection_schedule"][2]["payload"]["timing"] = "deferred"
+    findings = unsupported_requirements(case, stop_delivery=True)
+    assert findings == [{"index": 2, "reason": "resource metric adapter unavailable"}]
     # A before_tool stop that is not the frozen mid-process text stays refused.
     case = frozen("E11-P1-INJ")
     case["injection_schedule"][0]["payload"]["when"] = "immediately"
     findings = unsupported_requirements(case, stop_delivery=True)
     assert findings[0]["reason"] == "midprocess crash adapter unavailable"
+
+
+# ------------------------------------------------- (3b) A3: budget override after a stop
+
+
+def stop_e11_p2(monkeypatch, name="E11-P2-INJ"):
+    """E11-P2 stopped at ONSET_CHECKED: the meter entry (0) is a stub, the stop (1) fires,
+    the resume request (2) is deferred to the parent."""
+    monkeypatch.setattr(
+        write_boundary, "meter_reading", lambda c, m, v: {"metric": m, "value": v, "index": 0}
+    )
+    stopper, packets = recording_stopper()
+    h = InjectionHooks(frozen(name), symbols=SYMBOLS, stopper=stopper)
+    with pytest.raises(Killed):
+        h("after_transition", {"state": "ONSET_CHECKED"}, SimpleNamespace(pending=None, context={}))
+    (packet,) = packets
+    assert [(d["index"], d["operation"]) for d in packet["deferred"]] == [(2, "request_transition")]
+    return packet
+
+
+def test_budget_override_rides_an_operator_resume_only_after_a_stop(monkeypatch):
+    packet = stop_e11_p2(monkeypatch)
+    parent = InjectionHooks(frozen("E11-P2-INJ"), symbols=SYMBOLS)
+    parent.import_state(packet["state"])
+    (record,) = parent.apply_deferred(SimpleNamespace(paths={}))
+    assert record["status"] == "APPLIED" and record["deferred_after_stop"] == 1
+    frozen_override = frozen("E11-P2-INJ")["injection_schedule"][2]["payload"]["budget_override"]
+    assert record["resume_override"] == frozen_override
+    assert parent.resume_requested
+    # The CTL pair carries no override: its record has none.
+    packet = stop_e11_p2(monkeypatch, "E11-P2-CTL")
+    ctl = InjectionHooks(frozen("E11-P2-CTL"), symbols=SYMBOLS)
+    ctl.import_state(packet["state"])
+    (record,) = ctl.apply_deferred(SimpleNamespace(paths={}))
+    assert "resume_override" not in record and ctl.resume_requested
+
+
+def test_budget_override_static_finding_needs_stop_delivery():
+    assert unsupported_requirements(frozen("E11-P2-INJ"), stop_delivery=True) == []
+    assert unsupported_requirements(frozen("E11-P2-INJ")) == [
+        {"index": 2, "reason": "budget-override request channel unavailable"}
+    ]
+    # A role-channel or non-operator request carrying an override stays refused either way.
+    for change in ({"requested_by_role_channel": "planner"}, {"requested_by": "planner"}):
+        case = frozen("E11-P2-INJ")
+        case["injection_schedule"][2]["payload"].update(change)
+        assert unsupported_requirements(case, stop_delivery=True) == [
+            {"index": 2, "reason": "budget-override request channel unavailable"}
+        ], change
+
+
+def test_budget_override_without_a_stop_is_still_refused(monkeypatch):
+    monkeypatch.setattr(
+        write_boundary, "meter_reading", lambda c, m, v: {"metric": m, "value": v, "index": 0}
+    )
+    h = InjectionHooks(frozen("E11-P2-INJ"), symbols=SYMBOLS)  # no stopper: nothing deferred
+    with pytest.raises(UnsupportedInjection, match="budget-override"):
+        h("after_transition", {"state": "ONSET_CHECKED"}, SimpleNamespace(pending=None, context={}))
+    assert h.records[2]["status"] == "UNSUPPORTED" and "resume_override" not in h.records[2]
+    assert not h.resume_requested
+    # Even deferred after a stop, a role-channel request with an override is refused.
+    payload = copy.deepcopy(frozen("E11-P2-INJ")["injection_schedule"][2]["payload"])
+    payload["requested_by_role_channel"] = "planner"
+    record = {"index": 2, "deferred_after_stop": 1}
+    fresh = InjectionHooks(frozen("E11-P2-INJ"), symbols=SYMBOLS)
+    with pytest.raises(UnsupportedInjection, match="budget-override"):
+        fresh._apply("request_transition", payload, "after_transition", {}, None, record)
+    assert "resume_override" not in record and not fresh.resume_requested
 
 
 # ----------------------------------------------------------------- (4) export / import
