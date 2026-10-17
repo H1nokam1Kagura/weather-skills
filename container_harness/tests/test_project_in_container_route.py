@@ -377,3 +377,38 @@ def test_a_case_without_a_stop_is_untouched(tmp_path, monkeypatch):
         "missing": [],
         "notes": [],
     }
+
+
+def test_a_none_route_record_is_dropped_and_concurrency_is_kept(tmp_path, monkeypatch):
+    """WAVE8 A1: the notify route (adapter_support/operator_notify_route.py, E14-P3) runs one
+    controller process and writes ``resume_route: None``. That None is dropped on load, so it is
+    never read as a stop case's route record: no kill facts (NO_KILL_RECORD would withhold the
+    analyzer's concurrency count) and max_concurrent_children stays as observed."""
+    seen = {}
+
+    def project_run(run_dir, harness):
+        seen.update(harness)
+        analyzed = json.loads(Path(harness["observations_path"]).read_text(encoding="utf-8"))
+        observed = dict(analyzed["harness_observations"])
+        return {"evidence": {"harness_observations": observed}, "missing": [], "notes": []}
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    inputs = tmp_path / "inputs.json"
+    record = {"schema": pic.INPUTS_SCHEMA, "case_id": "E14", "run_dir": str(run_dir)}
+    record[pic.ROUTE_KEY] = None  # what run_case writes on the notify route
+    inputs.write_text(json.dumps(record), encoding="utf-8")
+    obs = tmp_path / "evidence.json"
+    obs.write_text(json.dumps({"harness_observations": {"max_concurrent_children": 1}}), "utf-8")
+    monkeypatch.setattr(evidence_projection, "project_run", project_run)
+    out = tmp_path / "projection.json"
+    assert pic.main(["p", str(run_dir), str(obs), str(out), "--inputs", str(inputs)]) == 0
+    record = json.loads(out.read_text(encoding="utf-8"))
+    assert record["status"] == "OK", record.get("traceback")
+    assert pic.ROUTE_KEY not in seen and "kill_facts" not in record
+    projection = record["projection"]
+    assert projection["evidence"]["harness_observations"]["max_concurrent_children"] == 1
+    assert pic.CONCURRENCY_FIELD not in gaps(projection)
+    # Kept, the None would have been read as a route without a kill: concurrency withheld.
+    _, facts = pic.broker_kill_facts(None, {})
+    assert facts["status"] == "NO_KILL_RECORD"
