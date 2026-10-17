@@ -182,7 +182,7 @@ per-call cost, so every dollar figure here is an estimate.
 | Calls that may reach the gateway | `--max-requests` | `RELAY_MAX_REQUESTS` | 24 |
 | Observed + worst-case-charged tokens | `--max-total-tokens` | `RELAY_MAX_TOTAL_TOKENS` | 1,000,000 |
 | USD, list-price estimate | `--budget` | `RELAY_BUDGET` | 5 |
-| Per-call output ceiling | `--max-tokens` / `--role-max-tokens ROLE=N` | `RELAY_MAX_TOKENS` / `RELAY_ROLE_MAX_TOKENS` | 2048; planner and repairer 4096 |
+| Per-call output ceiling | `--max-tokens` / `--role-max-tokens ROLE=N` | `RELAY_MAX_TOKENS` / `RELAY_ROLE_MAX_TOKENS` | 2048; planner and repairer 8192 |
 | Temperature | `--temperature` (`none` omits it) | | 0 |
 
 The host reads the same env names as argument defaults; flags win.

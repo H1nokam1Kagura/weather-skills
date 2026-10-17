@@ -99,8 +99,8 @@ EOF
     #   RELAY_MAX_REQUESTS      calls that may reach the gateway               (default 24)
     #   RELAY_MAX_TOTAL_TOKENS  observed + worst-case-charged tokens           (default 1000000)
     #   RELAY_BUDGET            USD, Anthropic list-price estimate             (default 5)
-    #   RELAY_MAX_TOKENS        per-call max_tokens; planner/repairer get 4096 unless
-    #                           RELAY_ROLE_MAX_TOKENS overrides ("planner=4096 repairer=4096")
+    #   RELAY_MAX_TOKENS        per-call max_tokens; planner/repairer get 8192 unless
+    #                           RELAY_ROLE_MAX_TOKENS overrides ("planner=8192 repairer=8192")
     role_tokens=()
     for item in ${RELAY_ROLE_MAX_TOKENS:-}; do role_tokens+=(--role-max-tokens "$item"); done
     nohup python -B "$REPO/relay/kong_relay_host.py" --client runner --ack-not-sensitive \
