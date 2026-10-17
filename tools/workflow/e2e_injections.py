@@ -758,7 +758,9 @@ class InjectionHooks:
             form = resource_reading_form(payload)
             if form is not None:
                 if point != "before_tool":
-                    raise UnsupportedInjection("a free_ram_gib reading is armed only at before_tool")
+                    raise UnsupportedInjection(
+                        "free_ram_gib readings are armed only at before_tool"
+                    )
                 if form == "deferred":
                     return self._arm_deferred_reading(payload, event, controller, record)
                 return self._inject_resource_reading(payload, form, event, controller, record)
