@@ -47,7 +47,7 @@ from test_live_roles_adapter import (
 
 from adapter_support import live_roles
 from adapter_support import role_substitution as rs
-from adapter_support.weather_adapter import AdapterRefusal, WeatherAdapter
+from adapter_support.weather_adapter import METRIC_SCOPE, AdapterRefusal, WeatherAdapter
 from container_harness import case_driver as cd
 from container_harness import relay_usage
 from tools.workflow import e2e_injections, relay_roles
@@ -564,7 +564,7 @@ def test_patch_role_input_refuses_what_cannot_reach_a_live_role(frozen):  # noqa
 def test_budget_meter_readings_reach_the_controller_and_the_live_meter(local_runs):
     r = local_runs["metric"]
     report = r.adapter.inject_metric(r.case, run_dir=r.run, schedule=r.schedule)
-    assert report["scope"] == "budget meters only"
+    assert report["scope"] == METRIC_SCOPE
     (entry,) = report["entries"]
     assert entry["readings"] == {
         "consumed_model_usd": 1.0,
@@ -586,9 +586,14 @@ def test_budget_meter_readings_reach_the_controller_and_the_live_meter(local_run
 
 def test_inject_metric_refuses_resource_readings_and_reports_missing(frozen, driven):  # noqa: F811
     adapter = WeatherAdapter()
-    for short in ("E12-P2-INJ", "E12-P2-CTL"):  # free_ram_gib: no controller meter
-        with pytest.raises(AdapterRefusal, match="budget meters only"):
-            adapter.inject_metric(frozen[PREFIX + short])
+    # Wave 8 B2: the three frozen free_ram_gib forms (E12-P2) are planned; any other resource
+    # reading is still refused (tests/test_decoy_resource_adapter.py covers the forms).
+    for short in ("E12-P2-INJ", "E12-P2-CTL"):
+        ram = copy.deepcopy(frozen[PREFIX + short])
+        assert all(e["half"] == "resource" for e in adapter.inject_metric(ram)["entries"])
+        ram["injection_schedule"][1]["payload"]["timing"] = "immediate"
+        with pytest.raises(AdapterRefusal, match="neither"):
+            adapter.inject_metric(ram)
     plan = adapter.inject_metric(frozen[PREFIX + "E11-P2-INJ"])
     assert [e["index"] for e in plan["entries"]] == [0]
     timed = copy.deepcopy(frozen[PREFIX + "E11-P2-INJ"])
@@ -726,7 +731,7 @@ def test_notification_hook_refuses_a_closed_boundary_or_another_dispatcher(froze
     plan = rs.substitution_plan(e14)
     roles = SimpleNamespace(double=None)
     case_hooks = rs.CaseScheduleHooks(plan, roles, None)  # the hooks run_case builds
-    with pytest.raises(AdapterRefusal, match="live sub-wave 5"):
+    with pytest.raises(AdapterRefusal, match="notify route"):
         adapter.dispatch_after_operator_notification(case_hooks)
     flat = notify_case()
     for entry in flat["injection_schedule"]:

@@ -442,17 +442,32 @@ class WeatherAdapter(Adapter):
             "max_repairs": self.configure_repair(case),
         }
 
-    def prepare_before_run_fixture(self, case, prepared, profile_document, repo):
+    def prepare_before_run_fixture(
+        self, case, prepared, profile_document, repo, decoy_pid=None, read_process=None
+    ):
         """CAP-FIXTURE-OP fixture preparation (container case mode: ``case_driver prepare``,
         untraced, before the trace baseline): the case's before_run fixture operations on the
         disposable source copy of a prepare_fixture record, applied before the run starts
         (fixture_rereview_projection.prestage_before_run). -> the record run_case adopts
         (prepared["before_run_fixture"]), or None when the case schedules none or run_case
-        would refuse the case (nothing applied; run_case refuses it with the same reason)."""
+        would refuse the case (nothing applied; run_case refuses it with the same reason).
+
+        CAP-DECOY (wave 8): a case scheduling FX-DECOY-SPAWN has its delivery recorded here
+        too, from the decoy the entry script spawned before this step (``decoy_pid``, default
+        the SIMKIT_DECOY_PID that entry.sh passes to this untraced step only): the record is
+        written into ``prepared["before_run_decoy"]`` (spawn_decoy documents the route)."""
+        import os
+
         try:
             plans = self.plan_case(case, {"profile_document": profile_document, "repo": repo})
+            decoy = self.spawn_decoy(plans["scheduled"])
         except AdapterRefusal:
             return None
+        if decoy["entries"]:
+            pid = os.environ.get(DECOY_PID_ENV) if decoy_pid is None else str(decoy_pid)
+            native = plans["schedule"]["native_case"]
+            spawner = adopt_harness_decoy(pid, read_process)
+            prepared["before_run_decoy"] = prestage_decoy(native, decoy, prepared, spawner)
         return fixture_ops.prestage_before_run(
             plans["fixture"], plans["schedule"]["native_case"], prepared
         )
@@ -475,6 +490,8 @@ class WeatherAdapter(Adapter):
           and the in-process projection report leave as one record on the channel
           (persist_projection_inputs) instead of harness/*.json. Frozen v2.7 confines
           filesystem_snapshot.created_paths to HARNESS_RUN_DIR (all_under, every case).
+        * decoy_spawner (in-process route only): the harness's own FX-DECOY-SPAWN spawner;
+          pre-staged case mode adopts prepared_fixture["before_run_decoy"] (spawn_decoy).
 
         Without either (in-process route) everything is staged and written as before.
         """
@@ -482,6 +499,7 @@ class WeatherAdapter(Adapter):
         variant, shadow_plan, scheduled = plans["variant"], plans["shadow"], plans["scheduled"]
         fixture_plan, schedule_plan = plans["fixture"], plans["schedule"]
         max_repairs = plans["max_repairs"]
+        decoy = self._decoy_route(scheduled, profile)  # CAP-DECOY: refused here, no effect yet
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
         channel = profile.get("projection_inputs_channel")
         if profile.get("prepared_fixture") is not None:
@@ -531,8 +549,12 @@ class WeatherAdapter(Adapter):
             chained=shadow_projection.chain(schedule_hooks, shadow_driver)
         )
         if schedule_hooks is not None:
-            if before_run is not None:  # applied in fixture preparation: adopted, never re-applied
-                schedule_hooks.injection.adopt_before_run(before_run["delivery"])
+            adopted = self._before_run_state(before_run, decoy, prepared)
+            if adopted is not None:  # applied in fixture preparation: adopted, never re-applied
+                schedule_hooks.injection.adopt_before_run(adopted)
+            # CAP-DECOY: the in-process harness spawner; pre-staged, none (never in the run).
+            spawner = profile["decoy_spawner"] if decoy and not decoy["prestaged"] else None
+            schedule_hooks.injection.decoy_spawner = spawner
             schedule_hooks.prepare(seeded["request"], prepared["source"])
         build = functools.partial(
             Controller,
@@ -591,6 +613,11 @@ class WeatherAdapter(Adapter):
         }
         if expected_after is not None:
             harness_inputs["source_expected_after"] = expected_after
+        if schedule_hooks is not None and deferred_ram_scheduled(scheduled):
+            # CAP-METRIC (D5): the deferred readings actually delivered in-run, with offsets.
+            harness_inputs["injected_ram_readings"] = injected_ram_readings(
+                schedule_hooks.injection.records
+            )
         if resumed is not None:
             harness_inputs["resume_route"] = resumed.record  # resume_projection reads it
         fixture_record = None
@@ -1426,22 +1453,36 @@ class WeatherAdapter(Adapter):
         return plan
 
     def inject_metric(self, case, run_dir=None, schedule=None):
-        """CAP-METRIC, budget meters only. Frozen ADAPTER-REQUIREMENTS: "Inject resource/budget
-        readings into the controller's monitor."
+        """CAP-METRIC. Frozen ADAPTER-REQUIREMENTS: "Inject resource/budget readings into the
+        controller's monitor." Two halves, both delivered by the case schedule's InjectionHooks:
 
-        Implemented for the BUDGET half only: readings of the controller's own budget meters
-        (write_boundary.METERED: consumed_model_usd, elapsed_seconds, repair_attempts_used),
-        delivered immediately by the case schedule's InjectionHooks to
-        write_boundary.meter_reading, which applies each as a monotone floor and records it
-        durably in context["budget_readings"]. With live roles consumed_model_usd lands on the
-        live member's meter (CombinedRoles.spent). Resource readings (memory, CPU, ...) have no
-        controller meter to receive them: such an entry is refused, never approximated (E12-P2,
-        with its deferred mid-process form, stays out of reach).
+        * Budget: readings of the controller's own budget meters (write_boundary.METERED:
+          consumed_model_usd, elapsed_seconds, repair_attempts_used), immediate, delivered to
+          write_boundary.meter_reading, which applies each as a monotone floor and records it
+          durably in context["budget_readings"]. With live roles consumed_model_usd lands on the
+          live member's meter (CombinedRoles.spent).
+        * Resource (wave 8, E12-P2): exactly the three frozen free_ram_gib forms
+          (e2e_injections.resource_reading_form), at before_tool. They reach the controller's
+          own monitor, the process manager's memory reader (processes.Processes._read_memory):
+          ``launch_check`` is a one-shot reader read by that tool's launch check;
+          ``launch_check_every_later`` is the same at the selected occurrence only (D6, OI-12:
+          the selector governs); ``deferred`` is installed on the tool's own process_launch
+          once the durable process-NNN.start.json is confirmed (D7) and returns the value once,
+          2 s after that receipt's started_monotonic_ns, to the in-run RAM sampler (CAP-MIDPROCESS;
+          UNDELIVERED if the tool exits first). The injection flag stays in the delivery records,
+          never in what the controller reads.
+
+        Any other reading (another metric or timing, ``also`` beside a RAM reading, a RAM reading
+        at another hook) is refused, never approximated.
 
         Without ``run_dir``: the plan of every inject_metric entry, or AdapterRefusal. With
-        ``run_dir``: the controller's budget_readings (MISSING when it recorded none), each
-        marked with the schedule entry that delivered it when ``schedule`` (run_case's
-        case_schedule report) is supplied."""
+        ``run_dir``: for budget entries (or a plan with no resource entry) the controller's
+        budget_readings (MISSING when it recorded none), each marked with the schedule entry that
+        delivered it when ``schedule`` (run_case's case_schedule report) is supplied; for
+        resource entries ``resource_readings`` (each entry's delivery record and, for a launch
+        check, the controller's launch_check event of the selected occurrence) and
+        ``injected_ram_readings`` (the deferred readings actually DELIVERED, with offsets: the
+        harness input of the same name, run_case)."""
         from tools.workflow import e2e_injections, write_boundary
 
         entries = []
@@ -1449,25 +1490,34 @@ class WeatherAdapter(Adapter):
             if not isinstance(spec, dict) or spec.get("operation") != "inject_metric":
                 continue
             payload = spec.get("payload")
-            if not e2e_injections.metered(payload):
+            entry = {
+                "index": index,
+                "hook": spec.get("hook"),
+                "selector": copy.deepcopy(spec.get("selector")),
+            }
+            form = e2e_injections.resource_reading_form(payload)
+            if e2e_injections.metered(payload):
+                readings = {payload["metric"]: payload.get("value"), **payload.get("also", {})}
+                entries.append({**entry, "half": "budget", "readings": readings})
+            elif form is not None and spec.get("hook") == "before_tool":
+                entries.append({**entry, **resource_plan_entry(payload, form)})
+            else:
                 raise AdapterRefusal(
-                    f"schedule entry {index}: CAP-METRIC is implemented for the controller's "
-                    f"budget meters only {list(write_boundary.METERED)}, immediate timing; "
-                    "this reading has no controller meter (resource readings are not delivered)"
+                    f"schedule entry {index}: CAP-METRIC delivers the controller's budget meters "
+                    f"{list(write_boundary.METERED)} (immediate) and the three frozen "
+                    f"{e2e_injections.RAM_METRIC} forms at before_tool "
+                    f"{sorted(e2e_injections.RESOURCE_READING_FORMS.values())}; this reading is "
+                    "neither and is not delivered"
                 )
-            readings = {payload["metric"]: payload.get("value"), **payload.get("also", {})}
-            entries.append(
-                {
-                    "index": index,
-                    "hook": spec.get("hook"),
-                    "selector": copy.deepcopy(spec.get("selector")),
-                    "readings": readings,
-                }
-            )
-        plan = {"capability": "CAP-METRIC", "scope": "budget meters only", "entries": entries}
+        plan = {"capability": "CAP-METRIC", "scope": METRIC_SCOPE, "entries": entries}
         if run_dir is None:
             return plan
         native = evidence_projection.NativeRun(run_dir)
+        resource = [e for e in entries if e["half"] == "resource"]
+        if resource:
+            self._resource_report(plan, resource, native, schedule)
+        if resource and all(e["half"] == "resource" for e in entries):
+            return plan
         readings = native.context.get("budget_readings")
         if not isinstance(readings, list):
             plan["status"] = "MISSING"
@@ -1672,9 +1722,12 @@ class WeatherAdapter(Adapter):
         Refused (AdapterRefusal), never reported as delivered: hooks other than the
         InjectionHooks path; a schedule without ids/requires (the non-dependent dispatcher does
         not check recorded/emitted); and hooks built without the notification boundary.
-        run_case's case schedule (role_substitution.CaseScheduleHooks) does not open that
-        boundary yet (e2e_injections NOTIFICATION_HOOK is opt-in), so until live sub-wave 5
-        wires it no run_case run can deliver this hook, and this method says so."""
+        The boundary is opt-in (e2e_injections NOTIFICATION_HOOK): role_substitution's
+        CaseScheduleHooks builds its InjectionHooks without it, and run_case opens it through
+        the notify route (wave 8 A1: resume_driver.arm hands a case that schedules an
+        after_operator_notification entry to operator_notify_route.arm, which swaps in
+        InjectionHooks(notification_boundary=True) before any boundary is dispatched). Hooks
+        that did not take that route cannot deliver this hook, and this method says so."""
         from tools.workflow.e2e_injections import NOTIFICATION_HOOK
 
         if isinstance(hooks, role_substitution.CaseScheduleHooks):
@@ -1696,8 +1749,8 @@ class WeatherAdapter(Adapter):
         if closed:
             raise AdapterRefusal(
                 f"schedule entries {closed}: the notification boundary was not opened for these "
-                "hooks (InjectionHooks(notification_boundary=True)); run_case does not open it "
-                "yet (live sub-wave 5)"
+                "hooks (InjectionHooks(notification_boundary=True)); run_case opens it only "
+                "on the notify route (operator_notify_route.arm)"
             )
         report = hooks.dependency_report() if hooks.dependent else {"entries": []}
         return {
@@ -1705,3 +1758,373 @@ class WeatherAdapter(Adapter):
             "notifications_seen": hooks.notifications,
             "entries": [e for e in report["entries"] if e["hook"] == NOTIFICATION_HOOK],
         }
+
+    # ---- Wave 8 B2 (WAVE8-BRIEF.md Build B): CAP-DECOY and the CAP-METRIC resource report.
+    # Appended at the end of the class, as the live-role wave was.
+
+    def spawn_decoy(self, case, run_dir=None, harness=None):
+        """CAP-DECOY. Frozen ADAPTER-REQUIREMENTS: "Spawn a harmless harness-owned decoy process
+        outside the controller tree and observe its signals."
+
+        Delivery is the case schedule's FX-DECOY-SPAWN (e2e_injections._decoy_spawn): the
+        harness's own spawner, never the controller, and never inside the traced run.
+
+        * Container case mode (D7): entry.sh spawns the frozen literal argv as uid 1000 in its
+          own session, before the trace baseline, attaches a root strace to it, and passes its
+          pid as SIMKIT_DECOY_PID on the untraced ``case_driver prepare`` command line only.
+          prepare_before_run_fixture adopts that process (it spawns nothing: it checks that the
+          pid runs the literal argv, leads its own session and runs as the prepare uid) and
+          records the delivery as prepared["before_run_decoy"]; run_case re-verifies the record
+          and installs it (InjectionHooks.adopt_before_run), with no spawner on the run's hooks.
+        * In-process route: the harness's own spawner, profile["decoy_spawner"]
+          (``decoy_spawner(argv=, label=, lifetime_seconds=) -> {pid, pgid}``). No default host
+          spawner is provided: it could not run the decoy as uid 1000 (D7) and nothing would
+          trace its signals. Without one run_case refuses the case before any side effect.
+
+        Without ``run_dir``: the plan of the single FX-DECOY-SPAWN entry (empty when none is
+        scheduled), or AdapterRefusal (another hook, selector or argv than the frozen literal
+        one, or more than one entry). With ``run_dir`` (and ``harness``, run_case's projection
+        inputs): per entry the fixture-operation delivery record, and the projected
+        ``harness_observations.decoy`` ({pid, alive_after_run, signals_received} from the
+        container's decoy tracer), or status MISSING with the reason (the in-process route has
+        no decoy tracer, so there it is always MISSING)."""
+        from tools.workflow import e2e_injections
+
+        entries = []
+        for index, spec in decoy_schedule_entries(case):
+            selector = spec.get("selector") if isinstance(spec.get("selector"), dict) else {}
+            args = spec["payload"].get("args")
+            if (
+                spec.get("hook") != "before_run"
+                or selector.get("role_or_tool_or_stage") != "harness"
+                or selector.get("occurrence", 1) != 1
+                or args != e2e_injections.DECOY_ARGS
+            ):
+                raise AdapterRefusal(
+                    f"schedule entry {index}: FX-DECOY-SPAWN is delivered only as the frozen "
+                    "before_run harness operation with the literal argv"
+                )
+            entries.append(
+                {
+                    "index": index,
+                    "label": args["label"],
+                    "argv": list(args["argv"]),
+                    "parent": args["parent"],
+                    "lifetime_seconds": args["lifetime_seconds"],
+                    "spawned_by": "harness",
+                    "routes": copy.deepcopy(DECOY_ROUTES),
+                }
+            )
+        if len(entries) > 1:
+            raise AdapterRefusal("one FX-DECOY-SPAWN entry per case (one harness decoy)")
+        plan = {"capability": "CAP-DECOY", "entries": entries}
+        if run_dir is None:
+            return plan
+        report = ((harness or {}).get("fixture_operations") or {}).get("entries") or []
+        delivered = {e.get("index"): e for e in report if isinstance(e, dict)}
+        for entry in entries:
+            record = delivered.get(entry["index"])
+            entry["delivery"] = None
+            if record is not None:
+                keys = ("status", "effect", "delivered_target", "prestaged", "error", "reason")
+                entry["delivery"] = {k: record[k] for k in keys if k in record}
+        projection = self.capture_evidence(run_dir, harness)
+        observations = projection["evidence"]["harness_observations"]
+        if isinstance(observations, dict) and isinstance(observations.get("decoy"), dict):
+            plan["decoy"] = copy.deepcopy(observations["decoy"])
+            return plan
+        reasons = [
+            m["reason"]
+            for m in projection["missing"]
+            if str(m.get("path", "")).startswith("harness_observations.decoy")
+        ]
+        plan["status"] = "MISSING"
+        plan["reason"] = "; ".join(reasons) or (
+            "no harness_observations.decoy: only the container's decoy tracer observes the "
+            "decoy's signals (the in-process route has none)"
+        )
+        return plan
+
+    def _decoy_route(self, case, profile):
+        """run_case's CAP-DECOY route, decided before any side effect: None (no decoy
+        scheduled), or {plan, prestaged}. Pre-staged case mode needs the record fixture
+        preparation wrote from SIMKIT_DECOY_PID; the in-process route needs the harness's own
+        spawner. Neither is ever simulated."""
+        plan = self.spawn_decoy(case)
+        if not plan["entries"]:
+            return None
+        if profile.get("prepared_fixture") is not None:
+            if (profile["prepared_fixture"] or {}).get("before_run_decoy") is None:
+                raise AdapterRefusal(
+                    "pre-staged case mode: FX-DECOY-SPAWN must be delivered in fixture "
+                    "preparation from the entry script's decoy (SIMKIT_DECOY_PID on the untraced "
+                    "prepare); the traced run never spawns it"
+                )
+            return {"plan": plan, "prestaged": True}
+        if not callable(profile.get("decoy_spawner")):
+            raise AdapterRefusal(
+                "in-process route: FX-DECOY-SPAWN needs the harness's own spawner "
+                "(profile['decoy_spawner']); no decoy is simulated or spawned by default"
+            )
+        return {"plan": plan, "prestaged": False}
+
+    def _before_run_state(self, before_run, decoy, prepared):
+        """The before_run delivery state run_case adopts: the verified source record's
+        delivery, the verified decoy record (pre-staged case mode), both merged, or None."""
+        states = []
+        if before_run is not None:
+            states.append(before_run["delivery"])
+        if decoy is not None and decoy["prestaged"]:
+            states.append(verify_decoy_prestage(prepared.get("before_run_decoy"), decoy["plan"]))
+        return merge_prestage_states(states)
+
+    def _resource_report(self, plan, resource, native, schedule):
+        """inject_metric's resource half with ``run_dir``: the delivery record per entry (plus
+        the controller's launch_check event for a launch-check form), and the delivered
+        deferred readings (injected_ram_readings)."""
+        checks = native.kinds("launch_check")
+        records, out = [], []
+        for entry in resource:
+            mine = self._schedule_records(schedule, entry["index"])
+            records.extend(mine)
+            row = {"index": entry["index"], "reading_form": entry["reading_form"]}
+            if not mine:
+                row.update(delivery=None, reason="no delivery record for this entry")
+                out.append(row)
+                continue
+            record = mine[-1]
+            row.update({k: copy.deepcopy(record[k]) for k in RESOURCE_RECORD_KEYS if k in record})
+            if entry["reading_form"] != "deferred":
+                selector = entry.get("selector") or {}
+                own = [e for e in checks if e.get("tool") == selector.get("role_or_tool_or_stage")]
+                occurrence = selector.get("occurrence", 1)
+                event = own[occurrence - 1] if 0 < occurrence <= len(own) else None
+                row["controller_launch_check"] = (
+                    None
+                    if event is None
+                    else {k: event.get(k) for k in LAUNCH_CHECK_KEYS if k in event}
+                )
+            out.append(row)
+        plan["resource_readings"] = out
+        if schedule is None:
+            plan["injected_ram_readings"] = None
+            plan["injected_ram_readings_reason"] = "no case_schedule report supplied"
+        else:
+            plan["injected_ram_readings"] = injected_ram_readings(records)
+
+
+# ---- Wave 8 B2 module helpers (CAP-METRIC resource half, CAP-DECOY)
+
+METRIC_SCOPE = "budget meters and the three frozen free_ram_gib forms"
+# What a resource reading's delivery record carries into inject_metric's report
+# (e2e_injections _inject_resource_reading / _arm_deferred_reading).
+RESOURCE_RECORD_KEYS = (
+    "status",
+    "delivery",
+    "reason",
+    "error",
+    "reading_form",
+    "metric",
+    "value",
+    "tool",
+    "reading_source",
+    "adapter_mapping",
+    "anchor",
+    "offset_seconds",
+    "start_receipt",
+    "delivered_value",
+    "delivered_offset_seconds",
+)
+LAUNCH_CHECK_KEYS = ("sequence", "tool", "free_ram_gib", "reading_source", "launched")
+# entry.sh passes the harness-spawned decoy's pid ONLY on the untraced ``case_driver prepare``
+# command line (container_harness/decoy_harness.py ENV_VAR; the traced run never carries it).
+DECOY_PID_ENV = "SIMKIT_DECOY_PID"
+DECOY_ROUTES = {
+    "container": "entry.sh spawns the literal argv as uid 1000 in its own session before the "
+    "trace baseline (D7); the untraced prepare adopts it from SIMKIT_DECOY_PID",
+    "in_process": "the harness's own profile['decoy_spawner']; refused without one",
+}
+
+
+def resource_plan_entry(payload, form):
+    """The plan fields of one frozen free_ram_gib reading (form: resource_reading_form)."""
+    from tools.workflow import e2e_injections
+
+    entry = {
+        "half": "resource",
+        "metric": payload["metric"],
+        "value": payload["value"],
+        "reading_form": form,
+        "monitor": "processes.Processes memory reader",
+    }
+    if form == "deferred":
+        entry.update(
+            delivery_point="the in-run RAM sampler of the tool's own process",
+            anchor="process-NNN.start.json started_monotonic_ns (D7)",
+            offset_seconds=e2e_injections.DEFERRED_OFFSET_NS / 1e9,
+        )
+    else:
+        entry["delivery_point"] = "the launch check of the selected tool occurrence"
+    if form == "launch_check_every_later":
+        entry["adapter_mapping"] = (
+            "launch check before every later launch -> the selected launch only (D6, OI-12)"
+        )
+    return entry
+
+
+def deferred_ram_scheduled(case):
+    """The case schedules a deferred free_ram_gib reading (the in-run form)."""
+    from tools.workflow import e2e_injections
+
+    return any(
+        isinstance(spec, dict)
+        and spec.get("operation") == "inject_metric"
+        and e2e_injections.resource_reading_form(spec.get("payload")) == "deferred"
+        for spec in (case or {}).get("injection_schedule") or []
+    )
+
+
+def injected_ram_readings(records):
+    """The deferred free_ram_gib readings actually DELIVERED to the in-run sampler, from the
+    case schedule's delivery records: {schedule_index, metric, value, offset_seconds,
+    delivered_monotonic_ns, tool, start_receipt}. Launch-check readings are excluded (D5: the
+    RAM-while-running overlay takes min(sampler, these))."""
+    out = []
+    for record in records or []:
+        if not isinstance(record, dict) or record.get("reading_form") != "deferred":
+            continue
+        if record.get("delivery") != "DELIVERED":
+            continue
+        out.append(
+            {
+                "schedule_index": record.get("index"),
+                "metric": record.get("metric"),
+                "value": record.get("delivered_value"),
+                "offset_seconds": record.get("delivered_offset_seconds"),
+                "delivered_monotonic_ns": record.get("delivered_monotonic_ns"),
+                "tool": record.get("tool"),
+                "start_receipt": copy.deepcopy(record.get("start_receipt")),
+            }
+        )
+    return out
+
+
+def decoy_schedule_entries(case):
+    """(index, spec) of every FX-DECOY-SPAWN schedule entry."""
+    return [
+        (index, spec)
+        for index, spec in enumerate((case or {}).get("injection_schedule") or [])
+        if isinstance(spec, dict)
+        and spec.get("operation") == "mutate_fixture"
+        and isinstance(spec.get("payload"), dict)
+        and spec["payload"].get("fixture_operation") == "FX-DECOY-SPAWN"
+    ]
+
+
+def read_decoy_process(pid):
+    """{argv, pgid, sid, uid} of a live process from the Linux process table, or None."""
+    import os
+
+    root = Path("/proc") / str(pid)
+    try:
+        argv = root.joinpath("cmdline").read_bytes().decode("utf-8").split("\0")
+        status = root.joinpath("status").read_text(encoding="utf-8")
+        uid = next(line for line in status.splitlines() if line.startswith("Uid:")).split()[1]
+        return {
+            "argv": argv[:-1] if argv and argv[-1] == "" else argv,
+            "pgid": os.getpgid(pid),
+            "sid": os.getsid(pid),
+            "uid": int(uid),
+        }
+    except (OSError, ValueError, StopIteration, AttributeError, IndexError):
+        return None
+
+
+def adopt_harness_decoy(pid_text, read_process=None):
+    """The prepare step's decoy_spawner (container case mode). It spawns NOTHING: it adopts
+    the process entry.sh spawned (SIMKIT_DECOY_PID) after checking that it runs exactly the
+    requested argv, leads its own session (D7) and runs as this (uid 1000) prepare process.
+    Any failure raises UnsupportedInjection, which the prestage carries to run_case."""
+    import os
+
+    from tools.workflow.e2e_injections import UnsupportedInjection
+
+    def spawner(argv, label, lifetime_seconds):
+        text = (pid_text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            raise UnsupportedInjection(
+                f"FX-DECOY-SPAWN: no harness-spawned decoy ({DECOY_PID_ENV} absent or not a "
+                "pid; see the entry script's decoy_spawn status)"
+            )
+        pid = int(text)
+        seen = (read_process or read_decoy_process)(pid)
+        if seen is None:
+            raise UnsupportedInjection(f"FX-DECOY-SPAWN: decoy pid {pid} is not a live process")
+        if seen["argv"] != list(argv):
+            raise UnsupportedInjection(f"FX-DECOY-SPAWN: pid {pid} does not run the literal argv")
+        if not (seen["pgid"] == seen["sid"] == pid):
+            raise UnsupportedInjection(f"FX-DECOY-SPAWN: pid {pid} does not lead its own session")
+        getuid = getattr(os, "getuid", None)
+        if getuid is not None and seen["uid"] != getuid():
+            raise UnsupportedInjection(f"FX-DECOY-SPAWN: pid {pid} runs as another uid")
+        return {"pid": pid, "pgid": seen["pgid"]}
+
+    return spawner
+
+
+def prestage_decoy(native_case, decoy_plan, prepared, spawner):
+    """Fixture preparation of the FX-DECOY-SPAWN entry (container case mode, untraced): its
+    delivery through InjectionHooks.prestage_before_run on fresh hooks carrying ``spawner``
+    (adopt_harness_decoy). -> the prestage state (a delivery that raised is carried in it)."""
+    hooks = InjectionHooks(native_case, disposable_root=prepared["case_root"])
+    hooks.decoy_spawner = spawner
+    return hooks.prestage_before_run(
+        [e["index"] for e in decoy_plan["entries"]], Path(prepared["source"])
+    )
+
+
+def verify_decoy_prestage(state, decoy_plan):
+    """run_case: the prepare step's FX-DECOY-SPAWN state re-verified, or AdapterRefusal. A
+    carried exception is left for adopt_before_run to raise where prepare would have."""
+    from tools.workflow import e2e_injections
+
+    indices = [e["index"] for e in decoy_plan["entries"]]
+    if not isinstance(state, dict) or state.get("schema") != e2e_injections.PRESTAGE_SCHEMA:
+        raise AdapterRefusal("before_run decoy record has an unknown schema")
+    if state.get("indices") != indices:
+        raise AdapterRefusal("before_run decoy record delivers other entries than the case")
+    if state.get("raised") is not None:
+        return copy.deepcopy(state)
+    records = [r for r in state.get("records") or [] if r.get("index") in indices]
+    decoy = records[0].get("decoy") if len(records) == 1 else None
+    if (
+        not isinstance(decoy, dict)
+        or records[0].get("status") != "APPLIED"
+        or {k: decoy.get(k) for k in e2e_injections.DECOY_ARGS} != e2e_injections.DECOY_ARGS
+        or decoy.get("spawned_by") != "harness"
+        or not all(type(decoy.get(k)) is int and decoy[k] > 0 for k in ("pid", "pgid"))
+    ):
+        raise AdapterRefusal("before_run decoy record is not one applied harness decoy")
+    return copy.deepcopy(state)
+
+
+def merge_prestage_states(states):
+    """One adopt_before_run state from the prestage states of one schedule (or None)."""
+    states = [s for s in states if s is not None]
+    if len(states) <= 1:
+        return states[0] if states else None
+    if len({s["schedule_digest"] for s in states}) != 1:
+        raise AdapterRefusal("before_run records belong to different schedules")
+    indices = [i for s in states for i in s["indices"]]
+    if len(indices) != len(set(indices)):
+        raise AdapterRefusal("before_run records deliver the same entry twice")
+    return {
+        "schema": states[0]["schema"],
+        "schedule_digest": states[0]["schedule_digest"],
+        "indices": sorted(indices),
+        "records": sorted((r for s in states for r in s["records"]), key=lambda r: r["index"]),
+        "dispositions": sorted(d for s in states for d in s["dispositions"]),
+        "stopped": any(s["stopped"] for s in states),
+        "harness_error": next((s["harness_error"] for s in states if s["harness_error"]), None),
+        "raised": next((s["raised"] for s in states if s["raised"] is not None), None),
+    }
