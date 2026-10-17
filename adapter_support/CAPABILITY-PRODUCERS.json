@@ -843,7 +843,7 @@
         "tests/test_shadow_adapter.py::test_tampered_shadow_records_refuse_the_projection",
         "tools/workflow/tests/test_rereview_shadow_v27.py (native controller shadow tests)"
       ],
-      "notes": "Frozen cases needing only CAP-SHADOW beyond the signed records: DEV-E2E-V2_7-E09-P1-CTL and -INJ (both run in tests/test_shadow_adapter.py with this record signed in a test-local copy). CAP-SHADOW is in the frozen base method table (simkit.adapter.CAPABILITY_METHODS), so no extension_methods entry is needed. Declared only when an independent reviewer signs.",
+      "notes": "Frozen cases needing only CAP-SHADOW beyond the signed records: DEV-E2E-V2_7-E09-P1-CTL and -INJ (both run in tests/test_shadow_adapter.py with this record signed in a test-local copy). CAP-SHADOW is in the frozen base method table (simkit.adapter.CAPABILITY_METHODS), so no extension_methods entry is needed. Declared only when an independent reviewer signs. Wave 8 (A1, after this record's reviewed_commit): the operator-notification route refuses a shadow-configured case as well (operator_notify_route.shadow_configured / refuse_unsupported_route, reached from resume_driver.refuse_unsupported_route in plan_case before any side effect, and again in operator_notify_route.arm). No frozen case schedules both a shadow policy and after_operator_notification, so no admitted case changes; operator_notify_route.py is not a producer of this record.",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
       "reviewed_at": "2026-10-16T23:00:08Z",
       "reviewed_commit": "55b13054d34cff1b53daa65204bf098f54a26c61",
