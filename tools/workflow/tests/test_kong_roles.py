@@ -420,10 +420,10 @@ def test_role_max_tokens_and_temperature_reach_request_and_receipt(tmp_path):
     )
     agent.ask("planner", {})
     agent.ask("verifier", {})
-    assert [c["stdin"]["max_tokens"] for c in process.calls] == [4096, 2048]
+    assert [c["stdin"]["max_tokens"] for c in process.calls] == [8192, 2048]
     assert [c["stdin"]["temperature"] for c in process.calls] == [0, 0]
-    assert [r["settings"]["max_tokens"] for r in agent.receipts] == [4096, 2048]
-    assert agent.provenance()["role_max_tokens"] == {"planner": 4096, "repairer": 4096}
+    assert [r["settings"]["max_tokens"] for r in agent.receipts] == [8192, 2048]
+    assert agent.provenance()["role_max_tokens"] == {"planner": 8192, "repairer": 8192}
     for bad in ({"nope": 10}, {"planner": 0}, {"planner": 64001}, {"planner": 1.5}):
         with pytest.raises(ValueError):
             roles(tmp_path, Process(), role_max_tokens=bad)

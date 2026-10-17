@@ -445,7 +445,7 @@ def test_report_passes_on_recorded_evidence(recorded):
         assert s["answer_tool_hash_match"] is True and s["temperature_sent"] == 0
         assert s["model_observed"] == "claude-sonnet-4-6" and s["estimated_usd"] > 0
     # planner and repairer get their larger live output ceiling
-    assert by_call["planner"]["max_tokens"] == by_call["repairer"]["max_tokens"] == 4096
+    assert by_call["planner"]["max_tokens"] == by_call["repairer"]["max_tokens"] == 8192
     assert by_call["reviewer"]["max_tokens"] == 2048
     assert result["estimated_usd_total"] == pytest.approx(
         sum(s["estimated_usd"] for s in by_call.values())
