@@ -480,13 +480,46 @@ def harness_resume_record(index, run_id):
     }
 
 
+def split_roles(case):
+    """Native roles the case lists both live and substituted (E10-P2: the reviewer)."""
+    from adapter_support import role_substitution as rs
+
+    roles = (case or {}).get("agent_roles") or {}
+
+    def native(names):
+        return {rs.NATIVE_ROLE.get(n, n) for n in names or [] if isinstance(n, str)}
+
+    return native(roles.get("live")) & native(roles.get("substituted"))
+
+
+def split_receipts_after_accept(case, receipts):
+    """Tripwire (WAVE8 D3): substituted receipts of a split role in incarnation 2 after an
+    ACCEPTED resume. On this route a split role's substituted occurrence is frozen as "applied
+    only if a reviewer is invoked AFTER the controller refused a resume" (E10-P2), and a
+    refused resume runs nothing, so any such receipt is a routing the frozen text forbids.
+    -> [{role, invocation_id}] (empty when none)."""
+    from adapter_support import role_substitution as rs
+
+    split = split_roles(case)
+    return [
+        {"role": r.get("role"), "invocation_id": r.get("invocation_id")}
+        for r in receipts
+        if isinstance(r, dict) and r.get("role") in split and r.get("mode") == rs.MODE
+    ]
+
+
 def drive(channel, build, *, case, schedule_plan, prepared, profile, run_dir, operator_run_id):
     """Run incarnation 1 to its stop, kill it, resume as incarnation 2.
 
     ``build(hooks=...)`` constructs incarnation 1's Controller (run_case's arguments). Returns
     SimpleNamespace(controller, observer, schedule_hooks, processes, roles, record), where
     ``controller`` is incarnation 2 (or, when no resume was accepted, a stand-in carrying the
-    controller's own artifact paths) and ``record`` the harness resume-route record."""
+    controller's own artifact paths) and ``record`` the harness resume-route record.
+    A NotifyChannel (no stop) is driven by operator_notify_route.drive: no fork, record None."""
+    if isinstance(channel, operator_notify_route.NotifyChannel):
+        return operator_notify_route.drive(
+            channel, build, run_dir=run_dir, operator_run_id=operator_run_id
+        )
     from adapter_support import evidence_projection, role_substitution
     from adapter_support import operator_ledger_projection as olp
     from tools.workflow.runner import Controller
@@ -574,11 +607,12 @@ def drive(channel, build, *, case, schedule_plan, prepared, profile, run_dir, op
     if kind == "stop":
         record["deferred_applied"] = hooks.injection.apply_deferred(stand_in)
     if kind == "stop" and hooks.injection.resume_requested:
-        index = next(
-            r["index"]
+        deferred_request = next(
+            r
             for r in hooks.injection.records
             if r["operation"] == "request_transition" and r.get("deferred_after_stop") is not None
         )
+        index = deferred_request["index"]
         ledger = (checkpoint["context"].get("operator_channel") or {}).get("ledger_path")
         if not ledger:
             raise IncarnationError("the controller opened no operator ledger for this run")
@@ -595,6 +629,10 @@ def drive(channel, build, *, case, schedule_plan, prepared, profile, run_dir, op
             "requested_by": "operator",
             "run_id": operator_run_id,
         }
+        if "resume_override" in deferred_request:
+            # E11-P2-INJ (A3): the frozen entry's budget_override, carried by the deferred
+            # record, reaches the controller verbatim; the controller alone refuses it (UC-15).
+            request["budget_override"] = copy.deepcopy(deferred_request["resume_override"])
         record["resume_request"] = request
         record["incarnations"].append(
             {"incarnation": 2, "pid": os.getpid(), "parent_pid": os.getppid()}
@@ -607,10 +645,18 @@ def drive(channel, build, *, case, schedule_plan, prepared, profile, run_dir, op
             record["resume_result"] = {"result": "REFUSED", "gate": exc.gate}
         else:
             record["resume_result"] = {"result": "ACCEPTED"}
+            before = len(roles.receipts)
             try:
                 controller.run()
             except Exception:  # noqa: BLE001 - the controller recorded its own terminal
                 pass
+            tripped = split_receipts_after_accept(case, roles.receipts[before:])
+            if tripped:
+                raise IncarnationError(
+                    "a split role was routed to its substituted double after an ACCEPTED "
+                    f"resume ({tripped}); the frozen entry applies only after a REFUSED resume "
+                    "(WAVE8 D3)"
+                )
     return SimpleNamespace(
         controller=controller,
         observer=observer,

@@ -330,6 +330,8 @@ def project(run_dir, observations, inputs, record):
     from adapter_support.evidence_projection import project_run
 
     harness, record["inputs_status"] = load_inputs(inputs, run_dir)
+    if ROUTE_KEY in harness and harness[ROUTE_KEY] is None:  # notify route: no route record
+        del harness[ROUTE_KEY]
     harness["observations_path"] = observations
     analyzed = _read_observations(observations)
     kill_facts = None
