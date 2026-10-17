@@ -64,6 +64,9 @@ FIXTURE_TARGETS = {
     "FX-SRC-META-ATTR": "source",
     "FX-SRC-CELL-INCREMENT": "source",
     "FX-ONSET-CELL-SHIFT": "run_artifact",
+    # Wave 8 B1 (CAP-DECOY): no file; the harness spawns the literal sleeper through the hooks'
+    # decoy_spawner (e2e_injections._decoy_spawn), refused when none is configured.
+    "FX-DECOY-SPAWN": "harness_process",
 }
 # Operations whose delivery creates new entries outside HARNESS_RUN_DIR (frozen U12/all_under) in
 # the traced controller process, unless delivered at before_run (prestage_before_run, untraced).
@@ -94,6 +97,7 @@ REQUIRED_ARGS = {
     "FX-SRC-META-ATTR": {"attribute", "value"},
     "FX-SRC-CELL-INCREMENT": {"variable", "amount_mm"},
     "FX-ONSET-CELL-SHIFT": {"artifact", "days"},
+    "FX-DECOY-SPAWN": {"label", "argv", "parent", "lifetime_seconds"},
 }
 # What the controller's repository copy must hold for the copy to be the binding's twin: the
 # files catalog.build_manifest hashes, plus the whole skills tree (scripts the controller runs).
