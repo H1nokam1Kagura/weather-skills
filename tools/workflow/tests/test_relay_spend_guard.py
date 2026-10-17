@@ -660,13 +660,14 @@ def test_relay_stop_audit_fields_are_in_the_snapshot(tmp_path):
 def test_relay_worker_sdk_timeout_outlasts_a_long_planner_answer():
     """The kit's default 60 s SDK timeout ended planner answers near 4k tokens (~55-69 tok/s
     in the live audit logs: truncations at 59.4/59.8 s, APITimeoutError at 61/62 s). The relay
-    sets 150 s, still below the 180 s call timeout relay_ci.sh passes as --call-seconds."""
+    sets 200 s (8192 tokens at 41 tok/s), below the 240 s per-call timeout that relay_ci.sh
+    passes as --call-seconds and that is also the relay CLI's default."""
     from types import SimpleNamespace
 
     from tools.workflow.kong_roles import LIVE_ROLE_MAX_TOKENS
 
     args = SimpleNamespace(
-        call_seconds=180,
+        call_seconds=240,
         run_seconds=1500,
         budget=1.0,
         model="claude-sonnet-4-6",
@@ -677,6 +678,8 @@ def test_relay_worker_sdk_timeout_outlasts_a_long_planner_answer():
     roles = host.build_roles(args)
     assert roles.worker_env["KONG_SDK_MAX_RETRIES"] == "0"
     timeout = float(roles.worker_env["KONG_TIMEOUT_SECONDS"])
-    assert timeout == 150 and timeout < args.call_seconds
+    assert timeout == 200 and timeout < args.call_seconds
     ci = (ROOT / "container_harness" / "relay_ci.sh").read_text(encoding="utf-8")
-    assert "--call-seconds 180" in ci
+    assert "--call-seconds 240" in ci
+    parser_default = host.main.__code__.co_consts  # the CLI default is a literal in main
+    assert 240 in parser_default

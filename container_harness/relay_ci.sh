@@ -108,7 +108,7 @@ EOF
       --max-requests "${RELAY_MAX_REQUESTS:-24}" \
       --max-total-tokens "${RELAY_MAX_TOTAL_TOKENS:-1000000}" \
       --budget "${RELAY_BUDGET:-5}" \
-      --run-seconds "${RELAY_RUN_SECONDS:-1500}" --call-seconds 180 \
+      --run-seconds "${RELAY_RUN_SECONDS:-1500}" --call-seconds 240 \
       --max-tokens "${RELAY_MAX_TOKENS:-256}" ${role_tokens[@]+"${role_tokens[@]}"} \
       --model claude-sonnet-4-6 \
       --audit-log "$DIR/relay-audit.jsonl" --token-file "$DIR/secret/relay.token" \

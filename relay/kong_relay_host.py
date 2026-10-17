@@ -46,7 +46,7 @@ Controls:
   The relay stops itself only when EXHAUSTED (after writing the refusal) or after
   ``--run-seconds``;
 - no retries: one relay request is at most one KongRoles call, and the worker runs with
-  ``KONG_SDK_MAX_RETRIES=0`` and ``KONG_TIMEOUT_SECONDS=150`` (below the 180 s call timeout);
+  ``KONG_SDK_MAX_RETRIES=0`` and ``KONG_TIMEOUT_SECONDS=200`` (below the 240 s call timeout);
 - append-only JSONL audit log with redacted metadata only (status, via, request id, model,
   usage, sent settings, hashes, sizes, spend totals, fault labels). Never the payload, the answer text, the
   run token or any key.
@@ -873,9 +873,10 @@ def build_roles(args, kit_root=None, kit_python=None):
         role_max_tokens=args.role_max_tokens,
         session_source="response_id",  # the provider's id, observed after the call
         data_policy_ack=True,
-        # No retries, overriding any .env value; and a 150 s SDK timeout (the kit default of 60 s
-        # cut off planner answers near 4k tokens at ~55-69 tok/s; it stays below --call-seconds 180).
-        worker_env={"KONG_SDK_MAX_RETRIES": "0", "KONG_TIMEOUT_SECONDS": "150"},
+        # No retries, overriding any .env value; and a 200 s SDK timeout (the kit default of 60 s
+        # cut off planner answers near 4k tokens at ~55-69 tok/s; 8192 tokens fit at 41 tok/s).
+        # It stays below the per-call process timeout (--call-seconds, default 240).
+        worker_env={"KONG_SDK_MAX_RETRIES": "0", "KONG_TIMEOUT_SECONDS": "200"},
         **({"kit_root": kit_root, "kit_python": kit_python} if kit_root else {}),
     )
 
@@ -941,7 +942,7 @@ def main(argv=None):
     parser.add_argument("--max-total-tokens", type=int, default=caps["max_total_tokens"])
     parser.add_argument("--budget", type=float, default=caps["budget"])
     parser.add_argument("--run-seconds", type=int, default=1800)
-    parser.add_argument("--call-seconds", type=int, default=120)
+    parser.add_argument("--call-seconds", type=int, default=240)
     parser.add_argument("--model", default="claude-sonnet-4-6")
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument("--role-max-tokens", action="append", type=_role_tokens, default=None)
