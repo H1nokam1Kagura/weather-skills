@@ -47,6 +47,15 @@ analyzer saw the broker engaged): nothing is filled. harness_observations.contro
 and harness_observations.onset_partial are listed MISSING with the reason, and an analyzer
 HARNESS_CONTROLLER_PID that the incarnation check could not test is withheld (MISSING).
 
+Decoy and injected RAM readings (Wave 8 B3b, after project_run, so evidence_projection.py and
+its reviewed records are unchanged): ``harness_observations.decoy`` is copied from the analyzer
+(``{pid, alive_after_run, signals_received}``) or listed MISSING (CAP-DECOY) with the analyzer's
+reason; a case scheduling FX-DECOY-SPAWN whose analyzer carried no decoy section is MISSING too.
+OI-11 / D5: when run_case delivered deferred free_ram_gib readings (``injected_ram_readings``),
+``min_free_ram_while_running_gib`` becomes min(sampler minimum, those in-run readings), with the
+basis note ``RAM_BASIS``; launch-check readings are excluded, and without a sampler minimum the
+field stays MISSING. With no readings carried, the projection is untouched.
+
 Missing stays missing: an absent, unreadable or foreign inputs file is recorded
 (``inputs_status``) and the projection runs from the observations alone, so those fields come
 out MISSING exactly as they would without the file. An inputs file for another run directory
@@ -56,6 +65,7 @@ projection, the output says UNAVAILABLE and nothing is substituted.
 
 import copy
 import json
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -77,6 +87,23 @@ ROUTE_ABSENT_REASON = (
     "the harness resume-route record (run_case resume_route) was not carried into the "
     "in-container projection"
 )
+# Wave 8 B3b (CAP-DECOY, OI-11 / D5).
+RAM_READINGS_KEY = "injected_ram_readings"
+RAM_FIELD = "harness_observations.min_free_ram_while_running_gib"  # analyze_trace.RAM_FIELD
+RAM_KEY = "min_free_ram_while_running_gib"
+RAM_BASIS = (
+    "OI-11 / D5: min(harness RAM sampler minimum, injected in-run readings). The injected "
+    "readings come from the frozen injection schedule (deferred free_ram_gib readings the harness "
+    "delivered to the controller while a tool ran), not from the host counter: the readings here "
+    "are injected, so the oracle tests the stop rule, not the host counter. Launch-check readings "
+    "are excluded."
+)
+DECOY_KEY = "decoy"  # harness_observations.decoy (analyze_trace.decoy_observation)
+DECOY_FIELD = "harness_observations.decoy"
+DECOY_FIXTURE_OPERATION = "FX-DECOY-SPAWN"  # decoy_harness.FIXTURE_OPERATION
+DECOY_ABSENT_REASON = (
+    "the case schedules FX-DECOY-SPAWN but the analyzer carried no harness_observations.decoy"
+)
 INPUT_KEYS = (
     "launch_observations",
     "processes_root",
@@ -92,12 +119,17 @@ INPUT_KEYS = (
     # CAP-INTERRUPT / CAP-MIDPROCESS: the harness stop-and-resume route record
     # (resume_projection.route): controller incarnations, kill, stop, onset_partial.
     ROUTE_KEY,
+    # Wave 8 B3b, OI-11 / D5 (CAP-METRIC resource half): the deferred free_ram_gib readings the
+    # harness actually delivered, each with its value and offset seconds. Consumed HERE by the
+    # min_free_ram overlay after project_run, never handed to project_run.
+    RAM_READINGS_KEY,
 )
 # Always written by run_case, except: source_expected_after only when it is known (a case with
 # an unapplied source operation leaves it to CAP-FIXTURE-OP), fixture_operations only when the
-# case schedules a fixture operation and resume_route only for a harness_stop_controller case;
-# none is then "not carried".
-OPTIONAL_INPUT_KEYS = ("source_expected_after", "fixture_operations", ROUTE_KEY)
+# case schedules a fixture operation, resume_route only for a harness_stop_controller case and
+# injected_ram_readings only for a case with injected free_ram_gib readings; none is then "not
+# carried".
+OPTIONAL_INPUT_KEYS = ("source_expected_after", "fixture_operations", ROUTE_KEY, RAM_READINGS_KEY)
 
 
 class ForeignInputs(ValueError):
@@ -324,6 +356,117 @@ def apply_route_disclosures(projection, harness, observations, kill_facts):
         )
 
 
+def _number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
+def _first(entry, *keys):
+    for key in keys:
+        if key in entry:
+            return entry[key]
+    return None
+
+
+def classify_ram_readings(readings):
+    """-> (in-run readings [{value, offset_seconds}], excluded [{index, why}], malformed reason).
+
+    An entry is a delivered deferred reading (value and offset seconds; the e2e_injections
+    record's delivered_value / delivered_offset_seconds are accepted as those). A launch-check
+    reading (reading_form other than "deferred") and an undelivered one (delivery other than
+    DELIVERED) are excluded, never used. Any unreadable entry makes the whole list malformed."""
+    if not isinstance(readings, list):
+        return [], [], f"{RAM_READINGS_KEY} is not a list ({type(readings).__name__})"
+    in_run, excluded = [], []
+    for index, entry in enumerate(readings):
+        if not isinstance(entry, dict):
+            return [], [], f"{RAM_READINGS_KEY}[{index}] is not an object"
+        form = entry.get("reading_form")
+        if form is not None and form != "deferred":
+            excluded.append({"index": index, "why": f"launch-check reading (reading_form {form})"})
+            continue
+        delivery = entry.get("delivery")
+        if delivery is not None and delivery != "DELIVERED":
+            excluded.append({"index": index, "why": f"not delivered (delivery {delivery})"})
+            continue
+        value = _first(entry, "delivered_value", "value")
+        offset = _first(entry, "delivered_offset_seconds", "offset_seconds")
+        if not _number(value) or not _number(offset):
+            return [], [], (
+                f"{RAM_READINGS_KEY}[{index}] has no finite non-negative value and offset seconds "
+                f"(value {value!r}, offset {offset!r})"
+            )
+        in_run.append({"value": value, "offset_seconds": offset})
+    return in_run, excluded, None
+
+
+def overlay_min_free_ram(projection, readings):
+    """OI-11 / D5, after project_run: min_free_ram_while_running_gib = min(the analyzer's sampler
+    minimum, the injected in-run readings). No readings carried (or an empty list): untouched.
+    No sampler minimum: the field stays MISSING with its own reason (an injected reading is a
+    bound on the minimum, never the minimum itself). Returns the disclosure, or None."""
+    if not readings:
+        return None
+    observed = projection["evidence"].setdefault("harness_observations", {})
+    in_run, excluded, malformed = classify_ram_readings(readings)
+    note = {"basis": RAM_BASIS, "injected_in_run": in_run, "excluded": excluded}
+    sampler = observed.get(RAM_KEY)
+    note["sampler_gib"] = sampler
+    if malformed:
+        observed.pop(RAM_KEY, None)
+        note.update(status="WITHHELD", reason=malformed)
+        _gap(projection, RAM_FIELD, "CAP-HARNESS-OBS", f"withheld: {malformed}")
+    elif not in_run:
+        note.update(status="SAMPLER_ONLY", reason="no injected in-run reading was delivered")
+    elif sampler is None:
+        note.update(
+            status="SAMPLER_MISSING",
+            reason="injected in-run readings were delivered but the harness RAM sampler gave no "
+            "running minimum, so the field stays MISSING",
+        )
+    else:
+        value = min([sampler] + [r["value"] for r in in_run])
+        observed[RAM_KEY] = value
+        note.update(status="OVERLAID", value=value)
+    projection["notes"].append({"min_free_ram_overlay": note})
+    return note
+
+
+def _decoy_scheduled(harness):
+    report = harness.get("fixture_operations")
+    entries = report.get("entries") if isinstance(report, dict) else None
+    return any(
+        isinstance(e, dict) and e.get("fixture_operation") == DECOY_FIXTURE_OPERATION
+        for e in entries or []
+    )
+
+
+def overlay_decoy(projection, analyzed, harness):
+    """CAP-DECOY: copy the analyzer's harness_observations.decoy into the scored projection
+    ({pid, alive_after_run, signals_received}), or list it MISSING with the analyzer's reason. A
+    case that schedules no decoy and whose analyzer carried none is untouched. Returns the
+    disclosure, or None."""
+    section = ((analyzed or {}).get("harness_observations") or {}).get(DECOY_KEY)
+    if not isinstance(section, dict):
+        if not _decoy_scheduled(harness):
+            return None
+        _gap(projection, DECOY_FIELD, "CAP-DECOY", DECOY_ABSENT_REASON)
+        return {"status": "MISSING", "reason": DECOY_ABSENT_REASON}
+    fields = ("pid", "alive_after_run", "signals_received")
+    if section.get("status") == "OBSERVED" and all(k in section for k in fields):
+        observed = projection["evidence"].setdefault("harness_observations", {})
+        observed[DECOY_KEY] = {k: copy.deepcopy(section[k]) for k in fields}
+        projection["missing"] = [m for m in projection["missing"] if m.get("path") != DECOY_FIELD]
+        return {"status": "OBSERVED", "source": "analyzer harness_observations.decoy"}
+    reason = "container harness: " + str(section.get("reason") or "decoy not observed")
+    _gap(projection, DECOY_FIELD, "CAP-DECOY", reason)
+    return {"status": "MISSING", "reason": reason}
+
+
 def project(run_dir, observations, inputs, record):
     """Fill ``record`` with inputs_status, kill_facts (route record carried) and projection,
     each as soon as it is known (an error later keeps what was recorded)."""
@@ -332,6 +475,7 @@ def project(run_dir, observations, inputs, record):
     harness, record["inputs_status"] = load_inputs(inputs, run_dir)
     if ROUTE_KEY in harness and harness[ROUTE_KEY] is None:  # notify route: no route record
         del harness[ROUTE_KEY]
+    ram_readings = harness.pop(RAM_READINGS_KEY, None)  # the overlay's input, not project_run's
     harness["observations_path"] = observations
     analyzed = _read_observations(observations)
     kill_facts = None
@@ -340,6 +484,12 @@ def project(run_dir, observations, inputs, record):
         record["kill_facts"] = kill_facts
     projection = project_run(run_dir, harness)
     apply_route_disclosures(projection, harness, analyzed, kill_facts)
+    decoy = overlay_decoy(projection, analyzed, harness)
+    if decoy is not None:
+        record["decoy"] = decoy
+    ram = overlay_min_free_ram(projection, ram_readings)
+    if ram is not None:
+        record["ram_overlay"] = {k: ram[k] for k in ("status", "sampler_gib") if k in ram}
     record["projection"] = projection
     return record
 

@@ -43,6 +43,12 @@ Frozen v2.7 shapes produced (EVIDENCE_CONTRACT.json ``structures``):
     cleanly, no reading falls inside the run window, or the readings leave a gap longer than
     ``RAM_MAX_GAP_S`` (at either end or between readings): a sampled minimum is claimed only
     when the whole run is covered. A post-exit reading is never used.
+  * ``harness_observations.decoy`` (FX-DECOY-SPAWN cases only, i.e. when entry.sh wrote
+    ``decoy_needed``; Wave 8 B3b, CAP-DECOY): ``{status: OBSERVED, pid, alive_after_run,
+    signals_received}`` from ``decoy_harness.observe`` (the decoy's own root ``strace -p``), or
+    ``{status: MISSING, reason}``. Kept out of ``missing``: the decoy tracer is not the main trace.
+    The decoy and its tracer are harness processes (parent: the entry shell), and the decoy is
+    always in ``process_tree`` with that harness parent, signalled or not.
 
 Missing stays missing: if the tracer died, a trace file is truncated, the harness did not
 finish, or the trace is structurally inconsistent, every trace-derived field is ABSENT (listed
@@ -83,6 +89,11 @@ TRACE_FIELDS = (
 )
 RAM_FIELD = "harness_observations.min_free_ram_while_running_gib"
 RAM_MAX_GAP_S = 2.0
+# B3b (CAP-DECOY): decoy_harness.py, loaded by path (this script runs under ``python -I``, which
+# puts neither its own directory nor the package on sys.path).
+DECOY_HARNESS_FILE = "decoy_harness.py"
+DECOY_TRACER = "decoy-tracer"
+DECOY_FIELDS = ("pid", "alive_after_run", "signals_received")
 NETWORK_SYSCALLS = {"connect", "sendto", "sendmsg", "sendmmsg"}
 # Address families that never leave the container: not a data fetch.
 LOCAL_FAMILIES = {"AF_UNIX", "AF_LOCAL", "AF_NETLINK"}
@@ -629,6 +640,10 @@ def analyze(outdir, run_dir=None):
     add_harness(tracer_pid, entry_pid, parse_int(status.get("tracer_pgid")), "strace")
     decoy = parse_int(status.get("decoy_pid"))
     add_harness(decoy, entry_pid, parse_int(status.get("decoy_pgid")), "decoy")
+    # B3b (CAP-DECOY): the decoy's own root strace -p, a child of the entry shell outside the
+    # traced tree (decoy_harness.py process model). Absent for every non-decoy case.
+    decoy_tracer = parse_int(status.get("decoy_tracer_pid"))
+    add_harness(decoy_tracer, entry_pid, parse_int(status.get("decoy_tracer_pgid")), DECOY_TRACER)
     sampler = parse_int(status.get("ram_sampler_pid"))
     add_harness(sampler, entry_pid, parse_int(status.get("ram_sampler_pgid")), "ram-sampler")
     broker_pid = parse_int(status.get("interrupt_broker_pid"))  # absent unless a stop case
@@ -1210,10 +1225,13 @@ def analyze(outdir, run_dir=None):
                 while hp and str(hp) not in tree and hp in harness:
                     tree[str(hp)] = harness[hp].harness_parent
                     hp = harness[hp].harness_parent
+        decoy_gap = decoy_in_tree(tree, harness, decoy) if decoy is not None else None
         if ambiguous:
             missing["process_tree"] = (
                 f"pid reuse with different creating parents: {sorted(set(ambiguous))}"
             )
+        elif decoy_gap:
+            missing["process_tree"] = decoy_gap
         else:
             evidence["process_tree"] = tree
         evidence["harness_observations"]["max_concurrent_children"] = max_concurrent(
@@ -1243,6 +1261,11 @@ def analyze(outdir, run_dir=None):
         complete and not unresolved_targets
     )
     evidence["harness_observations"]["tracer_status"] = tracer
+    if "decoy_needed" in status:  # FX-DECOY-SPAWN cases only (entry.sh writes it for no other)
+        decoy_obs, notes["decoy_observation"] = decoy_observation(outdir, status)
+        # Never in ``missing``: the decoy has its own tracer, so its gap is no doubt on the main
+        # trace (evidence_projection.write_capture_status reads every non-RAM gap as one).
+        evidence["harness_observations"]["decoy"] = decoy_obs
     outside = []
     if run_dir and "created_paths" in evidence["filesystem_snapshot"]:
         rd = posixpath.normpath(run_dir)
@@ -1297,6 +1320,69 @@ def analyze(outdir, run_dir=None):
 
 def roots_has(roots, tid):
     return tid in roots
+
+
+def decoy_in_tree(tree, harness, decoy):
+    """FX-DECOY-SPAWN postcondition: the decoy is in ``process_tree`` with its HARNESS parent
+    (the entry shell), signalled or not, plus the harness chain above it (closure). -> None, or
+    the reason process_tree cannot be given (never a guessed parent)."""
+    parent = harness[decoy].harness_parent
+    if parent is None:
+        return f"decoy pid {decoy}: its harness parent is unknown (no entry_pid status line)"
+    prev = tree.get(str(decoy))
+    if prev is not None and prev != parent:
+        return (
+            f"decoy pid {decoy} is also a traced tree process (creating parent {prev}), not the "
+            f"harness decoy (parent {parent})"
+        )
+    tree[str(decoy)] = parent
+    hp = parent
+    while hp and str(hp) not in tree and hp in harness:
+        tree[str(hp)] = harness[hp].harness_parent
+        hp = harness[hp].harness_parent
+    return None
+
+
+_DECOY_HARNESS = []
+
+
+def load_decoy_harness():
+    """container_harness/decoy_harness.py from beside this file (stdlib only, like this one)."""
+    if not _DECOY_HARNESS:
+        import importlib.util
+
+        path = Path(__file__).resolve().with_name(DECOY_HARNESS_FILE)
+        spec = importlib.util.spec_from_file_location("simkit_decoy_harness", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _DECOY_HARNESS.append(module)
+    return _DECOY_HARNESS[0]
+
+
+def decoy_observation(outdir, status):
+    """-> (``harness_observations.decoy``, note). ``decoy_harness.observe`` reads the decoy's own
+    trace and the entry shell's decoy status lines. OBSERVED carries ``{status, pid,
+    alive_after_run, signals_received}``; anything else is ``{status: MISSING, reason}``, never
+    an empty signal list standing in for an unobserved window. The full observation is the note."""
+    try:
+        obs = load_decoy_harness().observe(outdir, status=status)
+    except Exception as exc:  # noqa: BLE001 - recorded as the MISSING reason, never papered over
+        reason = f"decoy observation failed: {type(exc).__name__}: {exc}"
+        obs = {"status": "MISSING", "reason": reason}
+    note = {
+        "source": "decoy_harness.observe: the decoy's own root strace -p ($OUT/decoy.trace) and "
+        "the entry shell's decoy_* status lines; signals delivered between run_start and run_end",
+        "observation": obs,
+    }
+    if not isinstance(obs, dict) or obs.get("status") != "OBSERVED":
+        reason = obs.get("reason") if isinstance(obs, dict) else None
+        return {"status": "MISSING", "reason": reason or "no decoy observation"}, note
+    missing_keys = [k for k in DECOY_FIELDS if k not in obs]
+    if missing_keys:
+        return {"status": "MISSING", "reason": f"decoy observation lacks {missing_keys}"}, note
+    out = {"status": "OBSERVED"}
+    out.update({k: obs[k] for k in DECOY_FIELDS})
+    return out, note
 
 
 def min_free_ram(outdir, status):
