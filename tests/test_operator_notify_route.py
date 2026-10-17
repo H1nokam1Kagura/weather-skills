@@ -153,8 +153,12 @@ def test_e14_p3_is_admitted_only_with_the_notify_hook_record_signed(frozen):  # 
         assert not resume_driver.implied_missing(case, signed.implemented_capabilities()), short
         missing = set(case["adapter_requirements"]) - unsigned.implemented_capabilities()
         assert missing == {"CAP-OPERATOR-NOTIFY-HOOK"}, short
-    committed = WeatherAdapter(producers=resigned()).implemented_capabilities()
-    assert "CAP-OPERATOR-NOTIFY-HOOK" not in committed
+    # The committed record is signed since wave 8 batch A (D4-REVIEW-LW6-BEH at fb9fa8a), so the
+    # committed file declares the hook and admits both E14-P3 cases.
+    committed = WeatherAdapter().implemented_capabilities()
+    assert "CAP-OPERATOR-NOTIFY-HOOK" in committed
+    for short in TARGETS:
+        assert not set(frozen[PREFIX + short]["adapter_requirements"]) - committed, short
 
 
 # ------------------------------------------------------------------- E14-P3 through run_case
