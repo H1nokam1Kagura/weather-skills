@@ -293,9 +293,9 @@ def test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed():
             assert cap not in WeatherAdapter.extension_methods
         else:
             assert WeatherAdapter.extension_methods[cap] == method
-    # Six live records are signed (D4-CONFIRM-LW-A); CAP-OPERATOR-NOTIFY-HOOK stays unsigned until
-    # sub-wave 5 opens the notification boundary in run_case.
-    held = {"CAP-OPERATOR-NOTIFY-HOOK"}
+    # All seven live records are signed: six at D4-CONFIRM-LW-A, CAP-OPERATOR-NOTIFY-HOOK at
+    # D4-REVIEW-LW6-BEH once wave 8 batch A opened the notification route.
+    held = set()
     committed = WeatherAdapter().implemented_capabilities()
     assert set(LIVE_WAVE) & committed == set(LIVE_WAVE) - held
     assert set(LIVE_WAVE) & WeatherAdapter(producers=resigned()).implemented_capabilities() == (
@@ -313,15 +313,17 @@ def test_admission_refuses_every_live_case_while_the_live_records_are_unsigned(f
     cases = list(frozen.values())
     live = {c["id"] for c in cases if "CAP-LIVE-ROLE" in c["adapter_requirements"]}
     assert len(live) == 34
-    # The committed file (six live records signed) admits exactly LIVE_SIGNED_ADMITTED; E14-P3
-    # needs the held CAP-OPERATOR-NOTIFY-HOOK and E12-P2 needs CAP-DECOY.
+    # The committed file (all live records signed) admits exactly LIVE_SIGNED_ADMITTED; only
+    # E12-P2 stays out, needing CAP-DECOY (build B, parked).
     records = simkit_run(cases, WeatherAdapter(enable_run_case=True), profile={})
     by_id = {r["case_id"]: r for r in records}
     assert {c for c in live if by_id[c]["status"] != "NOT_IMPLEMENTED"} == LIVE_SIGNED_ADMITTED
-    for short in ("E14-P3-CTL", "E14-P3-INJ"):
+    for short in ("E12-P2-CTL", "E12-P2-INJ"):
         missing = by_id[PREFIX + short]["missing_capabilities"]
         assert by_id[PREFIX + short]["status"] == "NOT_IMPLEMENTED"
-        assert "CAP-OPERATOR-NOTIFY-HOOK" in missing, short
+        assert "CAP-DECOY" in missing, short
+    for short in ("E14-P3-CTL", "E14-P3-INJ"):
+        assert by_id[PREFIX + short]["status"] != "NOT_IMPLEMENTED", short
     # Without the live signatures (stripped test-locally) every live case is refused.
     for producers in (
         signed_producers(unsigned=LIVE_WAVE),  # live records present, unsigned
@@ -363,16 +365,15 @@ def test_case_driver_admission_runs_mixed_cases_and_matrix_rows_carry_relay_caps
     assert live - runnable == {"E12-P2-CTL", "E12-P2-INJ"}
     # E12-P1-INJ needs only CAP-DENY-WRITE beyond the live records: legitimately runnable.
     assert rows["E12-P1-INJ"]["disposition"] == "RUNNABLE"
-    # CAP-OPERATOR-NOTIFY-HOOK is signed only after sub-wave 5 opens the notification boundary
-    # in run_case; until then E14-P3 stays refused.
+    # Without the CAP-OPERATOR-NOTIFY-HOOK signature (stripped test-locally) E14-P3 is refused:
+    # its admission rests on that record alone beyond the other live records.
     pre_sw5 = admission_with(monkeypatch, signed_producers(unsigned=["CAP-OPERATOR-NOTIFY-HOOK"]))
     pre = {r["case_id"][len(PREFIX) :]: r for r in pre_sw5["cases"]}
     for short in ("E14-P3-CTL", "E14-P3-INJ"):
         assert pre[short]["disposition"] == "NOT_IMPLEMENTED", short
-    # Admitted by requirements although their LIVE-WAVE-BRIEF sub-wave 5 mechanics (live roles
-    # across incarnations; the E11-P2-INJ override channel) are not built [UNVERIFIED whether
-    # they refuse at run time]: pinned here so any change is deliberate. They are dispatched
-    # only by explicit case list, last in the spend sequence, after sub-wave 5.
+    # Admitted by requirements: E10-P2's live roles across incarnations are built (wave 8 A1);
+    # E11-P2-INJ's override channel is not (build B, parked), so it is dispatched only by explicit
+    # case list. Pinned here so any change is deliberate.
     for short in ("E10-P2-CTL", "E10-P2-INJ", "E11-P2-INJ"):
         assert pre[short]["disposition"] == "RUNNABLE", short
     matrix = {m["case_id"][len(PREFIX) :]: m for m in signed["matrix"]}

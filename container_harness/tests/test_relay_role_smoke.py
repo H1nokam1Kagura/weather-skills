@@ -547,7 +547,7 @@ def test_role_job_relay_caps_are_the_smokes():
     assert set(env) == {*smoke.RELAY_CAPS, "KONG_ANTHROPIC_KEY", "RELAY_RUN_SECONDS"}
     assert env["RELAY_MAX_REQUESTS"] == str(len(smoke.CALLS))
     assert set(env["RELAY_ROLES"].split()) == set(smoke.ROLES)
-    # planner/repairer keep the live 4096 ceiling (no RELAY_ROLE_MAX_TOKENS override)
+    # planner/repairer keep the live 8192 ceiling (no RELAY_ROLE_MAX_TOKENS override)
     assert "RELAY_ROLE_MAX_TOKENS" not in env
     # the relay outlives the container (else it stops on run_seconds, not the cap), and the
     # job outlives both

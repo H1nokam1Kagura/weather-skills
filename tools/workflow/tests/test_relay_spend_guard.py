@@ -360,8 +360,8 @@ def test_a_twelve_call_run_passes_within_caps(tmp_path, served):
     assert spend["input_tokens"] == 12_000 and spend["output_tokens"] == 1_200
     assert spend["estimated_usd"] == pytest.approx(12 * CALL_USD)
     sent = {(c["max_tokens"], c["temperature"]) for c in process.calls}
-    assert [c["max_tokens"] for c in process.calls[:4]] == [2048, 4096, 2048, 4096]
-    assert sent == {(2048, 0), (4096, 0)}
+    assert [c["max_tokens"] for c in process.calls[:4]] == [2048, 8192, 2048, 8192]
+    assert sent == {(2048, 0), (8192, 0)}
     assert {r["cost_basis"] for r in agent.receipts} == {COST_BASIS}
 
 
@@ -655,3 +655,36 @@ def test_relay_stop_audit_fields_are_in_the_snapshot(tmp_path):
     assert spend["cost_basis"] == COST_BASIS
     forbidden = {"payload", "value", "text", "token", "answer", "key", "system", "user"}
     assert not forbidden & {k for line in audit_lines(tmp_path) for k in line}
+
+
+def test_relay_worker_sdk_timeout_outlasts_a_long_planner_answer():
+    """The kit's default 60 s SDK timeout ended planner answers near 4k tokens (~55-69 tok/s
+    in the live audit logs: truncations at 59.4/59.8 s, APITimeoutError at 61/62 s). The relay
+    sets 170 s (8192 tokens down to ~48 tok/s): below the controller's relay client timeout
+    (RelayRoles, 180 s; D4-REVIEW-LW6-BEH B-LW6-1 / F-LW6-1) and below the 240 s per-call
+    timeout that relay_ci.sh passes as --call-seconds and that is the relay CLI default."""
+    from types import SimpleNamespace
+
+    from tools.workflow.kong_roles import LIVE_ROLE_MAX_TOKENS
+
+    args = SimpleNamespace(
+        call_seconds=240,
+        run_seconds=1500,
+        budget=1.0,
+        model="claude-sonnet-4-6",
+        max_tokens=2048,
+        temperature=0.0,
+        role_max_tokens=dict(LIVE_ROLE_MAX_TOKENS),
+    )
+    roles = host.build_roles(args)
+    assert roles.worker_env["KONG_SDK_MAX_RETRIES"] == "0"
+    timeout = float(roles.worker_env["KONG_TIMEOUT_SECONDS"])
+    assert timeout == 170 and timeout < args.call_seconds
+    import inspect
+
+    client_timeout = inspect.signature(relay_roles.RelayRoles).parameters["timeout"].default
+    assert timeout < client_timeout < args.call_seconds
+    ci = (ROOT / "container_harness" / "relay_ci.sh").read_text(encoding="utf-8")
+    assert "--call-seconds 240" in ci
+    parser_default = host.main.__code__.co_consts  # the CLI default is a literal in main
+    assert 240 in parser_default

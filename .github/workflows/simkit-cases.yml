@@ -236,7 +236,7 @@ jobs:
     # ~USD 0.40 per dispatch (reviewer x2 ~0.07 each at ~21k input tokens, planner and repairer
     # ~0.08 each at ~18k in / ~1.5k out, evidence_checker ~0.06, compiler / verifier /
     # shadow_policy ~0.005 each); the relay's summed worst case (bytes as tokens, full output
-    # ceilings) is ~USD 1.35 and ~366k tokens, under the caps below.
+    # ceilings) is ~USD 1.47 and ~374k tokens (planner and repairer at 8192), under the caps below.
     # Relay caps: 8 requests, USD 2, then the cap probe makes the relay stop itself. Same
     # isolation, secret scoping, probes, key-absence scan and teardown as relay-smoke.
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.selector == 'relay-role-smoke'
