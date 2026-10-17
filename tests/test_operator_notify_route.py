@@ -18,7 +18,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from test_evidence_projection_v27 import resigned, score
+from test_evidence_projection_v27 import score
 from test_live_roles_adapter import (
     PREFIX,
     frozen,  # noqa: F401 - module fixture (hash-checked frozen cases)
