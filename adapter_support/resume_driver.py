@@ -44,7 +44,7 @@ import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
-from adapter_support import resume_projection
+from adapter_support import operator_notify_route, resume_projection
 from tools.workflow import operator_ledger
 from tools.workflow.catalog import tree_hash
 from tools.workflow.contracts import Refused
@@ -174,8 +174,10 @@ def refuse_unsupported_schedule(case, stop_delivery):
 
 
 def refuse_unsupported_route(case, shadow_configured):
-    """The forked route's own preconditions, checked before any side effect."""
+    """The forked route's own preconditions, checked before any side effect (and, for a case
+    with no stop, the notify route's: operator_notify_route.refuse_unsupported_route)."""
     if not stop_scheduled(case):
+        operator_notify_route.refuse_unsupported_route(case, shadow_configured)
         return
     if not fork_available():
         raise _refusal(
@@ -238,9 +240,10 @@ class StopChannel:
 
 def arm(schedule_hooks, case):
     """Replace the case hooks' InjectionHooks with a stop-delivery one, before any boundary
-    is dispatched. Returns the StopChannel, or None when the case schedules no stop."""
+    is dispatched. Returns the StopChannel; for a case with no stop, the notify route's
+    NotifyChannel (operator_notify_route.arm: E14-P3 only), else None."""
     if not stop_scheduled(case):
-        return None
+        return operator_notify_route.arm(schedule_hooks, case)
     old = getattr(schedule_hooks, "injection", None)
     if old is None or old.records or old.prepared or old.counts:
         raise _refusal("stop delivery must be armed on unused case schedule hooks")
