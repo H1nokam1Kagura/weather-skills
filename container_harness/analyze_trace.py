@@ -1255,7 +1255,19 @@ def analyze(outdir, run_dir=None):
     notes["created_then_deleted"] = sorted({r["path"] for r in created if r["deleted_later"]})
     if broker_engaged(outdir, status):  # harness_stop_controller cases only
         apply_interrupt_broker(
-            outdir, status, evidence, missing, notes, procs, root_key, kills, deliveries, complete
+            outdir,
+            status,
+            evidence,
+            missing,
+            notes,
+            procs,
+            root_key,
+            kills,
+            deliveries,
+            complete,
+            fetch_attempts=fetch_attempts,
+            relay_endpoint=relay_endpoint,
+            root_tid=root_tid,
         )
     evidence["missing"] = missing
     evidence["harness_notes"] = notes
@@ -1459,12 +1471,22 @@ def max_concurrent(procs, root_key):
 #     (interrupt_broker_deliveries, sigkill_deaths_by_interrupt_broker).
 #   * the broker's facts (output_bytes harness-observed via /proc before the kill, OI-04) go to
 #     evidence[BROKER_EVIDENCE_KEY], each stop with its trace confirmation.
+#   * relay attribution (Wave 8 A2, decision D4): incarnation 1 is a fork, so its role calls to
+#     the declared relay endpoint come from its own pid, not the traced root's, and the generic
+#     replay counts them as data fetches. A connect to the relay made by a broker-declared,
+#     trace-confirmed incarnation's OWN pid (inside that incarnation's lifetime) is role
+#     transport: it moves to role_transport_connects and data_fetch_attempts is recomputed. A
+#     relay connect by any other direct child of the traced root (its stop unconfirmed, as for
+#     concurrency above) makes data_fetch_attempts MISSING with the reason: never 0, never a
+#     fetch. Tools under an incarnation (grandchildren of the root) and every non-relay
+#     destination stay data fetches; the root's own relay connects are untouched.
 # A case with no stop scheduled has none of the status keys and no record: nothing here runs.
 BROKER = "interrupt-broker"
 BROKER_RECORD = "interrupt_broker.json"
 BROKER_SCHEMA = "simkit.interrupt-broker/1"
 BROKER_EVIDENCE_KEY = "harness_interrupt_broker"
 CONCURRENCY_FIELD = "harness_observations.max_concurrent_children"
+FETCH_FIELD = "harness_observations.data_fetch_attempts"
 NO_STOP_REASON = (
     "interrupt broker engaged but it received no stop request: the controller incarnation "
     "is unconfirmed (an in-process kill, or no stop delivered), so its children cannot be "
@@ -1522,6 +1544,82 @@ def _concurrency_missing(evidence, missing, reason):
     missing.setdefault(CONCURRENCY_FIELD, reason)
 
 
+def _attribute_incarnation_relay(
+    evidence,
+    missing,
+    notes,
+    procs,
+    root_key,
+    incarnation_keys,
+    fetch_attempts,
+    relay_endpoint,
+    root_tid,
+):
+    """D4: relay connects of a confirmed incarnation's own pid are role transport; a relay
+    connect by any other direct child of the traced root makes data_fetch_attempts MISSING.
+    The root's own relay connects were filed as role transport by record_network and never
+    reach fetch_attempts; any root entry found here is left exactly as it is."""
+    if fetch_attempts is None or not relay_endpoint:
+        return
+    confirmed = set(incarnation_keys)
+
+    def maker(entry):
+        """The traced process that made the call: same pid, alive at the call (None if not one)."""
+        ts = entry.get("ts_ns")
+        found = [
+            p
+            for p in procs.values()
+            if p.pid == entry.get("pid")
+            and p.start is not None
+            and ts is not None
+            and p.start <= ts
+            and (p.end is None or ts <= p.end)
+        ]
+        return found[0] if len(found) == 1 else None
+
+    moved, unconfirmed, kept = [], [], []
+    for entry in fetch_attempts:
+        if entry.get("destination") != relay_endpoint or entry.get("pid") == root_tid:
+            kept.append(entry)
+            continue
+        p = maker(entry)
+        if p is not None and p.key in confirmed:
+            moved.append(entry)
+        elif p is None or (p.creator == root_key and p.key != root_key):
+            unconfirmed.append(entry)  # an unconfirmed incarnation, or an unattributable call
+        else:
+            kept.append(entry)  # a tool under an incarnation (or deeper): still a fetch
+    if not moved and not unconfirmed:
+        return
+    fetch_attempts[:] = kept
+    notes["role_transport_connects"] = sorted(
+        notes["role_transport_connects"] + moved, key=lambda e: (e["ts_ns"], e["tid"])
+    )
+    notes["network_attempts"] = fetch_attempts[:50]
+    if moved:
+        notes["incarnation_role_transport_connects"] = len(moved)
+    obs = evidence["harness_observations"]
+    if unconfirmed:
+        notes["unconfirmed_incarnation_relay_connects"] = unconfirmed[:20]
+        pids = sorted({e["pid"] for e in unconfirmed})
+        obs.pop("data_fetch_attempts", None)
+        missing.setdefault(
+            FETCH_FIELD,
+            f"relay endpoint reached by direct child(ren) of the traced root {pids} whose stop "
+            "is not a broker-declared, trace-confirmed incarnation: role transport or data "
+            "fetch is undecidable",
+        )
+    elif "data_fetch_attempts" in obs:
+        obs["data_fetch_attempts"] = len(fetch_attempts)
+    notes["semantics"]["data_fetch_attempts"] = (
+        "connect() and destination-addressed send calls of any tree process to a non-local "
+        "address family, successful or not; connects to the declared relay endpoint by the "
+        "controller (the traced root) or by a broker-declared, trace-confirmed incarnation's own "
+        "pid are role transport (listed in role_transport_connects), not data fetches; a relay "
+        "connect by any other direct child of the root makes the field MISSING"
+    )
+
+
 def max_concurrent_over_incarnations(procs, root_key, incarnation_keys):
     """Most direct children of the traced root or of a confirmed incarnation alive at once; an
     incarnation is not itself a child (same tie rule as max_concurrent)."""
@@ -1541,7 +1639,19 @@ def max_concurrent_over_incarnations(procs, root_key, incarnation_keys):
 
 
 def apply_interrupt_broker(
-    outdir, status, evidence, missing, notes, procs, root_key, kills, deliveries, complete
+    outdir,
+    status,
+    evidence,
+    missing,
+    notes,
+    procs,
+    root_key,
+    kills,
+    deliveries,
+    complete,
+    fetch_attempts=None,
+    relay_endpoint=None,
+    root_tid=None,
 ):
     broker_pid = parse_int(status.get("interrupt_broker_pid"))
     section = {
@@ -1562,6 +1672,9 @@ def apply_interrupt_broker(
     if record is None:
         section.update(status="UNAVAILABLE", reason=reason)
         _concurrency_missing(evidence, missing, reason)
+        _attribute_incarnation_relay(
+            evidence, missing, notes, procs, root_key, [], fetch_attempts, relay_endpoint, root_tid
+        )
         evidence[BROKER_EVIDENCE_KEY] = section
         return
     section["output_bytes_basis"] = record.get("output_bytes_basis")
@@ -1609,6 +1722,17 @@ def apply_interrupt_broker(
             problems.append(f"stop {i} (pid {pid}) not confirmed by the trace")
     section["incarnation_pids"] = [procs[k].pid for k in incarnations]
     section["harness_killed_pids"] = sorted({p for p, _ in harness_kills})
+    _attribute_incarnation_relay(
+        evidence,
+        missing,
+        notes,
+        procs,
+        root_key,
+        incarnations,
+        fetch_attempts,
+        relay_endpoint,
+        root_tid,
+    )
 
     def by_broker(k):
         return any(k["pid"] == p and k["ts_ns"] >= req for p, req in harness_kills)
