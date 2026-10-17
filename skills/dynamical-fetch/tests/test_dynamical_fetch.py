@@ -205,7 +205,8 @@ def test_open_dataset_falls_back_to_staging(mod, monkeypatch):
             calls["cleared"] += 1
 
         @staticmethod
-        def open(dataset):
+        def open(dataset, *, chunks):
+            assert chunks is None
             return _imerg_like_analysis_ds()
 
     monkeypatch.setitem(__import__("sys").modules, "dynamical_catalog", _Catalog)

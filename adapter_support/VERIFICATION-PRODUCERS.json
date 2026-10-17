@@ -1,0 +1,36 @@
+{
+  "schema": "verification.producers/1",
+  "capabilities": {
+    "CAP-VERIFICATION-PROFILES-V1": {
+      "d4_gated": true,
+      "status": "PRODUCER_MAPPED",
+      "scope": "Synthetic cached verification profiles with substituted roles; no live role, remote acquisition, OS containment or frozen-onset scoring claim",
+      "reviewer": null,
+      "reviewed_at": null,
+      "reviewed_commit": null,
+      "rereview_required": "New profile adapter and case/evidence contract require independent producer review; prior onset signatures do not apply",
+      "producers": [
+        {"file":"adapter_support/verification_adapter.py"},
+        {"file":"tools/verification_profiles/__init__.py"},
+        {"file":"tools/verification_profiles/contracts.py"},
+        {"file":"tools/verification_profiles/controller.py"},
+        {"file":"tools/verification_profiles/science.py"},
+        {"file":"tools/verification_profiles/fixtures.py"},
+        {"file":"tools/verification_profiles/lifecycle.py"},
+        {"file":"tools/verification_profiles/evaluation.py"},
+        {"file":"tools/workflow/__main__.py"},
+        {"file":"tools/workflow/catalog.py"},
+        {"file":"tools/workflow/contracts.py"},
+        {"file":"tools/workflow/persistence.py"},
+        {"file":"tools/check_capability_signatures.py"},
+        {"file":"skills/aggregate-temporal/scripts/aggregate.py"},
+        {"file":"skills/convert-to-totals/scripts/convert_to_totals.py"},
+        {"file":"skills/verify/scripts/verify.py"},
+        {"file":"evals/controller/verification-v1/cases.json"},
+        {"file":"tests/frozen_v27.py"},
+        {"file":"tests/fixtures/frozen-v27.tar.xz"}
+      ],
+      "tests": ["tests/test_verification_profiles.py", "tests/test_verification_adapter.py"]
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "schema": "workflow.profile-proposal/1",
+  "status": "EXPERIMENTAL_SYNTHETIC_SUBSET_ONLY",
+  "implementation": "tools.workflow verification dispatches tools/verification_profiles and adapter_support/verification_adapter.py. Separate 19-case diagnostic SIMKIT caseset; normal admission withheld by unsigned VERIFICATION-PRODUCERS.json. See tools/verification-profiles.md for scope and limitations.",
+  "purpose": "Executable-controller extensions for short-window rainfall verification and historical GEFS verification",
+  "activation_gate": "Implement and review the contracts, controller transitions, evidence projection and new synthetic cases before registering either profile. This document grants no capability or live authority.",
+  "profiles": [
+    {
+      "id": "harvest-verification/v1",
+      "scientific_scope": "Forecast rainfall verification for explicitly requested fixed-duration windows; no inference of crop maturity or safe harvest conditions",
+      "required_request_fields": [
+        "models", "variables", "bbox", "start_date", "end_date", "window_days",
+        "metrics", "event_thresholds_and_comparators", "reference_identity",
+        "baseline_identity", "uncertainty", "output_products", "authorization"
+      ],
+      "bounded_scope": {
+        "window_days_supported_initially": [2, 5, 10],
+        "calendar_dekads": "unsupported; never silently substitute for fixed 10-day windows",
+        "crop_parameters": "Record absent crop/maturity parameters as missing. Rainfall verification may complete, but a harvest-readiness claim cannot.",
+        "unavailable_products": "Retain in the requested-product ledger with evidence and an explicit terminal status; never silently omit them"
+      },
+      "completion": "Every requested model, variable, window and output product has a verified artifact or an evidenced unavailable/blocked status. A 5-day product cannot discharge a requested 2-day product. Any unmet requested product prevents an unqualified COMPLETE verdict."
+    },
+    {
+      "id": "gefs-history/v1",
+      "scientific_scope": "Retrospective verification of forecasts issued at explicitly requested historical initializations",
+      "required_request_fields": [
+        "dataset_id", "initializations", "variables", "bbox", "lead_selection",
+        "member_selection", "window_days", "metrics", "reference_identity",
+        "baseline_identity", "acquisition_limits", "uncertainty", "authorization"
+      ],
+      "bounded_scope": {
+        "initial_probe": "One requested initialization, variable and bounded bbox/lead subset; record elapsed time, output bytes, coordinates, member count, finite count, backend and known cache state before scaling",
+        "missing_initialization": "Mark unavailable with source evidence; do not replace it with the latest forecast",
+        "acquisition_limits": "Require explicit maximum initialization count, spatial cells, selected members/leads, elapsed time and output bytes; refuse an unbounded expansion",
+        "comparison_claims": "A backend performance comparison requires identical selections, value/coordinate/missingness equality and timing metadata. Uncontrolled cache/network order prevents a general speedup claim."
+      },
+      "completion": "Every requested initialization and score is accounted for. Verification claims require scored artifacts plus coverage diagnostics. A successful download or interrupted run is not verification."
+    }
+  ],
+  "shared_controller_contract": {
+    "authority": "Operator-authored request ledger binds exact goals and actions. Reuse existing authorization only within its recorded scope. Model responses cannot add authority, paths or scientific choices.",
+    "input_support": [
+      "Validate every source identity and provenance before execution; synthetic fixtures require honest trusted harness registration, never production-fetch relabelling",
+      "Verify forecast issuance, lead and valid-time mapping; distinguish forecast verification from analysis-to-analysis agreement",
+      "Normalize compatible units with explicit provenance; require exact requested variables, matched grids and interval start/end bounds before scoring",
+      "Require complete fixed-duration windows; retain and report incomplete tails rather than scoring them as full windows",
+      "Use a common finite mask across the forecast, reference and baseline; ensemble scoring requires the declared member-coverage rule",
+      "Keep thresholds and comparator semantics explicit: current hits uses >= whereas Brier uses >; do not silently combine those event definitions"
+    ],
+    "plan": "Registered producing steps and literal parser-checked arguments, reviewed before execution. No arbitrary model-authored shell or dynamic extension of the allowlist.",
+    "requested_product_ledger": "Stable entries for each requested product, window and initialization, with pending/running/verified/unavailable/blocked/paused statuses and evidence paths",
+    "reuse": "Reuse a validated bounded source across requested windows. Reuse completed outputs only when source, request, build, arguments, provenance and output hashes still match.",
+    "failure": "Persist pending operation before launch. Stop dependents after failure. At most one evidenced retry of a failed operation into a new path; never treat partial output as a cache hit.",
+    "pause": "An explicit operator pause terminates owned active work, records pending/partial state and prevents automatic continuation. A later explicit resume verifies request, source, runtime, artifacts and remaining limits before reuse.",
+    "score_artifacts": [
+      "Forecast and baseline scores on identical support",
+      "Paired finite counts, selected and missing periods, members and lead groups",
+      "Declared uncertainty method, block length, seed and resample count; insufficient independent samples explicitly prevent an uncertainty claim",
+      "Provenance linking each score to exact inputs and transformations",
+      "Reproducible final artifact checks and independent verifier receipts; skipped, blocked and unverifiable gates remain explicit"
+    ],
+    "release": "Release only the products whose required gates passed. Report partial scope explicitly. Preserve role separation, bounded repair/spend/time counters and immutable resume limits."
+  },
+  "implementation_seams": [
+    {"area": "contracts and profiles", "work": "Add versioned request schemas and exact typed plans; retain cached-onset behavior and reject unsupported new scope"},
+    {"area": "catalog and source admission", "work": "Add actual-parser contracts for acquisition, alignment, aggregation, totals and verification; bind multiple input identities and truthful synthetic admission"},
+    {"area": "controller and recovery", "work": "Implement per-product/per-init transitions, pending-operation records, bounded retry, pause/resume and output-reuse checks; instructions alone do not satisfy this contract"},
+    {"area": "scientific evidence", "work": "Record matched-support checks, counts, baseline and uncertainty artifacts; validate replay and final verification without weakening existing gates"},
+    {"area": "SIMKIT", "work": "Create a separate synthetic caseset and reviewed adapter evidence contract. Do not modify the frozen cached-onset corpus, its oracles or ratification ledger."},
+    {"area": "capability records", "work": "Identify changed producer files and obtain the required independent review/signatures before declaring capabilities; never copy approvals from the onset profile"}
+  ],
+  "synthetic_case_plan": [
+    {"id": "WINDOW-ALL", "assertion": "Requested 2/5/10-day products all produce analytic expected totals and paired forecast/baseline scores"},
+    {"id": "WINDOW-PARTIAL", "assertion": "Incomplete trailing intervals are excluded and their dropped coverage is reported"},
+    {"id": "WINDOW-MISMATCH", "assertion": "Equal labels with unequal interval bounds or one-sided period metadata are refused before scoring"},
+    {"id": "SUPPORT-MISMATCH", "assertion": "Wrong grid, units, time support or member coverage cannot pass by inner joining or silent averaging"},
+    {"id": "BASELINE-MASK", "assertion": "Forecast, baseline and reference use identical paired samples, including missing members and observations"},
+    {"id": "THRESHOLD-BOUNDARY", "assertion": "Values exactly on the threshold follow the explicitly requested comparator"},
+    {"id": "UNCERTAINTY-SUPPORT", "assertion": "Uncertainty resampling preserves paired time blocks; insufficient samples yield an explicit unsupported result"},
+    {"id": "FOLLOW-THROUGH", "assertion": "Completing one window leaves other requested windows pending and execution continues under the original valid authorization"},
+    {"id": "PRODUCT-UNAVAILABLE", "assertion": "Unavailable requested inputs remain in the ledger; no all-products success is reported"},
+    {"id": "HISTORY-PROBE", "assertion": "Scaling cannot begin before a bounded probe passes and its timing/size/selection evidence exists"},
+    {"id": "HISTORY-GAP", "assertion": "An unavailable historical initialization is recorded without substituting a current run"},
+    {"id": "REUSE-EXACT", "assertion": "Resume preserves verified products and does not repeat successful source acquisition or score production"},
+    {"id": "REUSE-TAMPER", "assertion": "Changed request, input, build, provenance or artifact hashes prevent reuse"},
+    {"id": "WORKER-DEATH", "assertion": "A worker death blocks dependent work, preserves prior successes and permits only the bounded evidenced retry"},
+    {"id": "OPERATOR-PAUSE", "assertion": "Explicit pause stops owned work and remains paused through internal notifications until explicit valid resume"},
+    {"id": "FINAL-GATE", "assertion": "Absent, blocked or unverifiable score/replay/verifier evidence cannot produce a successful release"}
+  ],
+  "evaluation_boundary": "This is an acceptance proposal, not a scored caseset or an independent review. Cases and analytic oracles must be independently reviewed before claims of SIMKIT coverage.",
+  "data_boundary": "Synthetic fixtures and generic contracts only in Git. Real session exports, user datasets and credentials remain outside the repository.",
+  "deployment": "Identify installed-plugin and hosted-agent targets, verify the deployed revision, then run bounded integrated evaluation and request replay. A local passing suite is not deployment evidence."
+}

@@ -1,0 +1,26 @@
+{
+  "schema": "verification.cases/1",
+  "oracle_status": "PROPOSED_UNRATIFIED",
+  "frozen_onset_score_eligible": false,
+  "cases": [
+    {"id":"VP-HARVEST-WINDOWS","profile":"harvest-verification/v1","scenario":"all_windows","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-GEFS-WINDOWS","profile":"gefs-history/v1","scenario":"all_windows","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-BOUNDS","profile":"harvest-verification/v1","scenario":"bounds_mismatch","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-GRID","profile":"harvest-verification/v1","scenario":"grid_mismatch","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-MEMBER-MASK","profile":"harvest-verification/v1","scenario":"member_missing","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-THRESHOLD","profile":"harvest-verification/v1","scenario":"threshold","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-UNCERTAINTY","profile":"harvest-verification/v1","scenario":"insufficient","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-HISTORY-GAP","profile":"gefs-history/v1","scenario":"history_gap","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-HISTORY-MIXED","profile":"gefs-history/v1","scenario":"mixed_history","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-HISTORY-IDENTITY","profile":"gefs-history/v1","scenario":"wrong_initialization","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-PAUSE-RESUME","profile":"harvest-verification/v1","scenario":"pause_resume","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-PAUSE-BEFORE-REVIEW","profile":"harvest-verification/v1","scenario":"pause_before_review","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-FINAL-PAUSE","profile":"harvest-verification/v1","scenario":"final_pause","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-WORKER-RETRY","profile":"harvest-verification/v1","scenario":"worker_retry","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-WORKER-EXHAUSTED","profile":"harvest-verification/v1","scenario":"worker_exhausted","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-REVIEW-REJECT","profile":"harvest-verification/v1","scenario":"review_reject","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-VERIFIER-REJECT","profile":"harvest-verification/v1","scenario":"verifier_reject","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-REPLAY-MISMATCH","profile":"harvest-verification/v1","scenario":"replay_mismatch","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]},
+    {"id":"VP-ARTIFACT-TAMPER","profile":"harvest-verification/v1","scenario":"artifact_tamper","adapter_requirements":["CAP-VERIFICATION-PROFILES-V1"]}
+  ]
+}
