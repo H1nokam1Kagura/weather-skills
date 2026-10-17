@@ -360,8 +360,8 @@ def test_a_twelve_call_run_passes_within_caps(tmp_path, served):
     assert spend["input_tokens"] == 12_000 and spend["output_tokens"] == 1_200
     assert spend["estimated_usd"] == pytest.approx(12 * CALL_USD)
     sent = {(c["max_tokens"], c["temperature"]) for c in process.calls}
-    assert [c["max_tokens"] for c in process.calls[:4]] == [2048, 4096, 2048, 4096]
-    assert sent == {(2048, 0), (4096, 0)}
+    assert [c["max_tokens"] for c in process.calls[:4]] == [2048, 8192, 2048, 8192]
+    assert sent == {(2048, 0), (8192, 0)}
     assert {r["cost_basis"] for r in agent.receipts} == {COST_BASIS}
 
 

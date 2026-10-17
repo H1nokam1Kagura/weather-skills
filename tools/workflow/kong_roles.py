@@ -67,7 +67,7 @@ Budget (D16; spend is untracked by owner ruling):
 
 Settings the live relay sets (``relay/kong_relay_host.py``; the defaults here are unchanged):
 - ``role_max_tokens``: per-role output ceilings (``LIVE_ROLE_MAX_TOKENS``: planner and repairer
-  4096, every other role ``max_tokens``); the receipt's ``settings.max_tokens`` is the role's.
+  8192, every other role ``max_tokens``); the receipt's ``settings.max_tokens`` is the role's.
 - ``temperature``: sent when not null. The pinned SDK has no typed ``temperature`` argument,
   so the worker sends it through the SDK's ``extra_body`` and ``settings_sent`` echoes exactly
   that. Temperature 0 lowers variance; it does not make a model deterministic.
@@ -159,7 +159,7 @@ MIN_HEADROOM_USD = 0.05
 # Per-role output ceilings for live runs (LIVE-WAVE-BRIEF.md, sub-wave 1): the planner and the
 # repairer write whole plans; every other role answers a short verdict object.
 DEFAULT_MAX_TOKENS = 2048
-LIVE_ROLE_MAX_TOKENS = {"planner": 4096, "repairer": 4096}
+LIVE_ROLE_MAX_TOKENS = {"planner": 8192, "repairer": 8192}
 # Where the session id comes from. "uuid": minted here before the call (the historical
 # default, kept for the direct ``--roles kong`` path). "response_id": the provider's own
 # response id, OBSERVED after the call; a response without one is refused (live relay).

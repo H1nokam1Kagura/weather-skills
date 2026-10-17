@@ -161,7 +161,7 @@ CALLS = (
 ROLES = sorted({c["role"] for c in CALLS})
 # The relay caps the workflow job passes to relay_ci.sh relay-start (a test pins them): every
 # role above, one request per call (then the cap probe exhausts the relay), the live cases'
-# per-call output ceiling (planner/repairer keep LIVE_ROLE_MAX_TOKENS 4096), a token cap above
+# per-call output ceiling (planner/repairer keep LIVE_ROLE_MAX_TOKENS 8192), a token cap above
 # the summed worst case of every call and a USD 2 budget above the summed worst-case price.
 RELAY_CAPS = {
     "RELAY_ROLES": " ".join(ROLES),
