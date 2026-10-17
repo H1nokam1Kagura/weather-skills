@@ -1,0 +1,72 @@
+{
+ "schema": "simkit.scorer-diag-fixtures/1",
+ "source_root": "simkit/handoffs/completion-20261012 (evidence repo)",
+ "note": "projection.json and score.json are byte copies (gzip). runner_record.json is trimmed to case_id/status/controller_ran (the only fields case_driver.score reads); its evidence copy is dropped.",
+ "files": [
+  {
+   "path": "gh-live-3/run-38982518114/case-DEV-E2E-V2_7-E03-P2-CTL/DEV-E2E-V2_7-E03-P2-CTL/harness-out/projection.json.gz",
+   "source_sha256": "f6f0b087f31797ea41ccf24849169db990edeb01f06fcb08c8a79a65cf506003"
+  },
+  {
+   "path": "gh-live-3/run-38982518114/case-DEV-E2E-V2_7-E03-P2-CTL/DEV-E2E-V2_7-E03-P2-CTL/harness-out/score.json.gz",
+   "source_sha256": "2a8e777c93240daa440f01b9574df8abd98f451ceb9a987aaefcd2340f444741"
+  },
+  {
+   "path": "gh-live-3/run-38982518114/case-DEV-E2E-V2_7-E03-P2-CTL/DEV-E2E-V2_7-E03-P2-CTL/harness-out/runner_record.json",
+   "source_sha256": "7add9e02f647a1970d1d6ed2c86c3bb9457f98601ee5626fcd0a7e07dc4db563",
+   "trimmed": true
+  },
+  {
+   "path": "gh-live-3/run-38982518114/case-DEV-E2E-V2_7-E03-P2-INJ/DEV-E2E-V2_7-E03-P2-INJ/harness-out/projection.json.gz",
+   "source_sha256": "0238e8f1d362dfa6e5430291e4b30d9935920bf815c9c1ff3729f92973f97a73"
+  },
+  {
+   "path": "gh-live-3/run-38982518114/case-DEV-E2E-V2_7-E03-P2-INJ/DEV-E2E-V2_7-E03-P2-INJ/harness-out/score.json.gz",
+   "source_sha256": "c400568b379f7ef2c8cfe99bd9178d450085d4a69f4b5fa1e42c77969cc17844"
+  },
+  {
+   "path": "gh-live-3/run-38982518114/case-DEV-E2E-V2_7-E03-P2-INJ/DEV-E2E-V2_7-E03-P2-INJ/harness-out/runner_record.json",
+   "source_sha256": "35d59bd150c6d66fd128057b771bc98c91a07fd96a3abe57c74bcaef9c7417fa",
+   "trimmed": true
+  },
+  {
+   "path": "gh-live-3/run-38983733017/case-DEV-E2E-V2_7-E12-P1-CTL/DEV-E2E-V2_7-E12-P1-CTL/harness-out/projection.json.gz",
+   "source_sha256": "ca2573413e44d4820734a7e590cfec5717de3547c337fd4f9fdb90b61d9a38ca"
+  },
+  {
+   "path": "gh-live-3/run-38983733017/case-DEV-E2E-V2_7-E12-P1-CTL/DEV-E2E-V2_7-E12-P1-CTL/harness-out/score.json.gz",
+   "source_sha256": "c2436fdc65581e895109ceeb716e7ca5d7cc44919f19defc3764879283893522"
+  },
+  {
+   "path": "gh-live-3/run-38983733017/case-DEV-E2E-V2_7-E12-P1-CTL/DEV-E2E-V2_7-E12-P1-CTL/harness-out/runner_record.json",
+   "source_sha256": "bd8adde204e5c143883aec366f7080242c9deb3015a3036d246a4bae681b132c",
+   "trimmed": true
+  },
+  {
+   "path": "gh-live-3/run-38982993467/case-DEV-E2E-V2_7-E02-P2-INJ/DEV-E2E-V2_7-E02-P2-INJ/harness-out/projection.json.gz",
+   "source_sha256": "a94b0e98bf817dfb6efd2435cbed2977b1574d02d8ef4d825ce1f12035521964"
+  },
+  {
+   "path": "gh-live-3/run-38982993467/case-DEV-E2E-V2_7-E02-P2-INJ/DEV-E2E-V2_7-E02-P2-INJ/harness-out/score.json.gz",
+   "source_sha256": "90089ba1c42163282fa96d1627643f675dbf771ae5dbe8fb9c52a637453dd68c"
+  },
+  {
+   "path": "gh-live-3/run-38982993467/case-DEV-E2E-V2_7-E02-P2-INJ/DEV-E2E-V2_7-E02-P2-INJ/harness-out/runner_record.json",
+   "source_sha256": "606d3a5c8133c7e8eeb955794244ed7d74b9b07fecc7a9683909cba86ef99d02",
+   "trimmed": true
+  },
+  {
+   "path": "gh-live-4/run-38990098526/case-DEV-E2E-V2_7-E02-P2-CTL/DEV-E2E-V2_7-E02-P2-CTL/harness-out/projection.json.gz",
+   "source_sha256": "89d133003c3bf0463739bb2271ffbeb31b1e0c69880a37da6b02ed9660370340"
+  },
+  {
+   "path": "gh-live-4/run-38990098526/case-DEV-E2E-V2_7-E02-P2-CTL/DEV-E2E-V2_7-E02-P2-CTL/harness-out/score.json.gz",
+   "source_sha256": "8f22a6772f4f51d1967170155dd8ddb715c0c0f770f1d2577a54a7c060dfe5be"
+  },
+  {
+   "path": "gh-live-4/run-38990098526/case-DEV-E2E-V2_7-E02-P2-CTL/DEV-E2E-V2_7-E02-P2-CTL/harness-out/runner_record.json",
+   "source_sha256": "e293c243ec121e827ad714b37cb86ddd07e60a8e0e8d516b87b356cb295b404f",
+   "trimmed": true
+  }
+ ]
+}
