@@ -7,8 +7,10 @@ The caller owns oracle evaluation and live/fixture role selection.
 import copy
 import errno
 import json
+import math
 import os
 import re
+import time
 import tomllib
 from collections import Counter
 from pathlib import Path
@@ -99,6 +101,7 @@ FIXTURE_OPERATIONS = frozenset(
         "FX-LEDGER-APPEND",
         "FX-OPERATOR-RECORD",
         "FX-TRANSPORT-RETRY",
+        "FX-DECOY-SPAWN",
     }
 )
 DEFINITIONS_FILE = "skills/onset-date/references/onset_definitions.toml"
@@ -135,14 +138,24 @@ def unsupported_requirements(case, stop_delivery=False):
     """Static capability findings, not oracle judgments or execution results.
 
     stop_delivery=True: the caller runs the hooks with a stopper (real kill), so the frozen
-    CAP-MIDPROCESS stop form (E11-P1-INJ) is deliverable. Without one it stays refused."""
+    CAP-MIDPROCESS stop form (E11-P1-INJ) is deliverable, and so is an operator resume carrying
+    a budget_override (E11-P2-INJ: delivered after the stop, the controller refuses it). Without
+    one both stay refused. The three frozen free_ram_gib forms (E12-P2, resource_reading_form)
+    are accepted at before_tool; every other resource reading stays refused."""
     findings = []
     for i, spec in enumerate(case.get("injection_schedule", [])):
         op, payload, hook = spec["operation"], spec.get("payload", {}), spec["hook"]
         reason = None
-        if op == "inject_metric" and not metered(payload):
+        if op == "inject_metric" and not (
+            metered(payload) or (hook == "before_tool" and resource_reading_form(payload))
+        ):
             reason = "resource metric adapter unavailable"
-        elif op == "request_transition" and "budget_override" in payload:
+        elif (
+            op == "request_transition"
+            and "budget_override" in payload
+            and not (stop_delivery and operator_override_resume(payload))
+        ):
+            # A3: an override rides only an operator resume delivered after a harness stop.
             reason = "budget-override request channel unavailable"
         elif op == "replace_role_output" and hook == "after_transition":
             reason = "stage event is not a shadow-policy output channel"
@@ -237,9 +250,19 @@ def replace_in_place(target, value):
 
 class InjectionHooks:
     def __init__(
-        self, case, symbols=None, disposable_root=None, notification_boundary=False, stopper=None
+        self,
+        case,
+        symbols=None,
+        disposable_root=None,
+        notification_boundary=False,
+        stopper=None,
+        decoy_spawner=None,
     ):
         self._init_stop_delivery(stopper)
+        # CAP-DECOY: the harness's own spawner (FX-DECOY-SPAWN); see _decoy_spawn. A wrapper
+        # that builds these hooks itself may set the attribute before the run instead.
+        self.decoy_spawner = decoy_spawner
+        self.armed_readings = []  # armed free_ram_gib readings (closures, never exported)
         self.case = copy.deepcopy(case)
         self.schedule = self.case.get("injection_schedule", [])
         self.symbols = dict(symbols or {})
@@ -346,6 +369,7 @@ class InjectionHooks:
         return request
 
     def __call__(self, point, event, controller):
+        self._settle_readings()
         if point == "before_run" and self.prepared:
             return
         self._dispatch(point, event, controller)
@@ -705,9 +729,17 @@ class InjectionHooks:
             return self._interrupt(payload, point, event, controller, record)
         if operation == "request_transition":
             if "budget_override" in payload:
-                raise UnsupportedInjection(
-                    "resume budget-override request channel is not implemented"
-                )
+                # A3 (E11-P2-INJ): only an operator resume delivered after a harness stop
+                # carries the override through; the controller decides (and refuses) it.
+                if record.get("deferred_after_stop") is None or not operator_override_resume(
+                    payload
+                ):
+                    raise UnsupportedInjection(
+                        "resume budget-override request channel is not implemented"
+                    )
+                self.resume_requested = True
+                record["resume_override"] = copy.deepcopy(payload["budget_override"])
+                return False
             if payload.get("action") == "resume" and "requested_by_role_channel" not in payload:
                 self.resume_requested = True
                 return False
@@ -723,6 +755,15 @@ class InjectionHooks:
         if operation == "deny_write":
             return self._deny_write_routed(payload, point, event, controller, record)
         if operation == "inject_metric":
+            form = resource_reading_form(payload)
+            if form is not None:
+                if point != "before_tool":
+                    raise UnsupportedInjection(
+                        "free_ram_gib readings are armed only at before_tool"
+                    )
+                if form == "deferred":
+                    return self._arm_deferred_reading(payload, event, controller, record)
+                return self._inject_resource_reading(payload, form, event, controller, record)
             return self._inject_metric(payload, controller, record)
         if operation == "mutate_fixture":
             if isinstance(payload, dict) and payload.get("fixture_operation") == (
@@ -974,6 +1015,8 @@ class InjectionHooks:
             return
         if operation == "FX-STDERR-APPEND":
             return self._stderr_append(args, event, record)
+        if operation == "FX-DECOY-SPAWN":
+            return self._decoy_spawn(args, record)
         if operation in {"FX-DEF-PARAM-EDIT", "FX-DEF-TOUCH", "FX-RUNTIME-MANIFEST-BUMP"}:
             try:
                 return {
@@ -1297,6 +1340,8 @@ class InjectionHooks:
         Refused while a transient fault or trigger is armed: those are closures, not state."""
         if self.fault is not None or self.transport_fault is not None or self.midprocess:
             raise HarnessDispatchError("cannot export hook state while a fault is armed")
+        if self.armed_readings:
+            raise HarnessDispatchError("cannot export hook state while a resource reading is armed")
         state = {
             "schema": STATE_SCHEMA,
             "schedule_digest": digest(self.schedule),
@@ -1553,6 +1598,215 @@ class InjectionHooks:
                 raise kind[raised["type"]](raised["message"])
             raise HarnessDispatchError(f"{raised['type']}: {raised['message']}")
 
+    # ------------------------------------------------- wave 8 B1: resource readings, decoy
+    # CAP-METRIC resource half (E12-P2): the three frozen free_ram_gib forms only
+    # (resource_reading_form). The reading reaches the controller through the process
+    # manager's own memory_reader hook (processes.Processes._read_memory), so its launch_check
+    # event labels it reading_source "injected" by itself; processes.py is not edited. The
+    # injection flag stays in these records, never in what the system reads.
+    #
+    # Records exposed for the adapter (B2): a launch-check reading's record carries
+    # reading_form, metric, value, tool, injected_reading and delivery ARMED -> DELIVERED (the
+    # first memory read after the arming before_tool, i.e. that tool's launch check) or
+    # UNDELIVERED with a reason. A deferred reading's record carries reading_form "deferred",
+    # offset_seconds, start_receipt {path, serial, pid, tool, started_monotonic_ns} once the
+    # tool launched, and delivery ARMED -> DELIVERED (with delivered_value,
+    # delivered_monotonic_ns, delivered_offset_seconds measured from started_monotonic_ns) or
+    # UNDELIVERED with a reason. FX-DECOY-SPAWN's record carries decoy {label, argv, parent,
+    # lifetime_seconds, pid, pgid, spawned_by}.
+
+    def _inject_resource_reading(self, payload, form, event, controller, record):
+        """Launch-check form: a one-shot controller.processes.memory_reader. Its first call is
+        the launch check of the tool whose before_tool armed it (runner Controller.tool calls
+        processes.run right after that hook); it returns the injected value once. The next
+        read uninstalls it and returns the real reading; a later hook boundary settles it."""
+        value = payload["value"]
+        processes = getattr(controller, "processes", None)
+        if processes is None or not hasattr(processes, "memory_reader"):
+            raise UnsupportedInjection("a launch-check reading needs the controller's processes")
+        current = processes.memory_reader
+        if getattr(current, "harness_reading", None) is not None:
+            raise UnsupportedInjection("one harness free_ram_gib reading per launch")
+        state = {"kind": "launch_check", "processes": processes, "record": record}
+        state.update(previous=current, spent=False, wrapper=None, bound=None)
+
+        def reader():
+            if not state["spent"]:
+                state["spent"] = True
+                record.update(delivery="DELIVERED", reading_source="injected")
+                return value
+            self._uninstall_reading(state)
+            return _real_reading(state["previous"])
+
+        reader.harness_reading = state
+        state["reader"] = reader
+        processes.memory_reader = reader
+        self.armed_readings.append(state)
+        record.update(
+            effect="one-shot launch-check free_ram_gib reading armed",
+            reading_form=form,
+            metric=payload["metric"],
+            value=value,
+            tool=event.get("skill"),
+            injected_reading=True,
+            delivery="ARMED",
+        )
+        if form == "launch_check_every_later":
+            # D6 (OI-12): the selector governs; the launch check of the selected occurrence only.
+            record["adapter_mapping"] = "launch check before every later launch -> selected launch"
+        return False
+
+    def _arm_deferred_reading(self, payload, event, controller, record):
+        """Deferred form (CAP-MIDPROCESS): wraps the controller's process-event binding, as
+        _arm_midprocess_stop does. On the tool's own process_launch it confirms the durable
+        process-NNN.start.json (D7: the anchor is its started_monotonic_ns), then installs a
+        reader returning the real reading until DEFERRED_OFFSET_NS after that anchor, the
+        injected value once, and uninstalls. If the tool exits first: UNDELIVERED."""
+        value = payload["value"]
+        processes = getattr(controller, "processes", None)
+        bound = getattr(processes, "on_event", None)
+        if getattr(bound, "controller_owner", None) is not controller or not hasattr(
+            processes, "memory_reader"
+        ):
+            raise UnsupportedInjection(
+                "deferred reading needs the controller's durable process-event record"
+            )
+        if self.midprocess is not None or any(s["kind"] == "deferred" for s in self.armed_readings):
+            raise UnsupportedInjection("one process_launch trigger per controller incarnation")
+        skill = event.get("skill")
+        argv = [str(a) for a in event.get("argv", [])]
+        state = {"kind": "deferred", "processes": processes, "record": record, "bound": bound}
+        state.update(previous=None, reader=None, serial=None, delivered=False)
+
+        def undelivered(reason):
+            record.update(delivery="UNDELIVERED", reason=reason)
+            self._uninstall_reading(state)
+
+        def on_event(kind, details):
+            bound(kind, details)  # the controller's durable record (and its chain) first
+            if state not in self.armed_readings:
+                return
+            if kind == "process_exit" and state["serial"] is not None:
+                if details.get("serial") == state["serial"] and not state["delivered"]:
+                    undelivered("tool exited before the deferred reading was due")
+                return
+            if kind != "process_launch" or state["serial"] is not None:
+                return
+            launched = [str(a) for a in details.get("argv", [])]
+            if details.get("tool") != skill or (argv and launched[-len(argv) :] != argv):
+                return undelivered("first launch was another process")
+            receipt = Path(processes.root) / f"process-{int(details['serial']):03}.start.json"
+            try:
+                durable = json.loads(receipt.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return undelivered("start receipt is not durable")
+            started = durable.get("started_monotonic_ns") if isinstance(durable, dict) else None
+            if (
+                type(started) is not int
+                or started != details.get("started_monotonic_ns")
+                or durable.get("serial") != details["serial"]
+            ):
+                return undelivered("start receipt disagrees with the launch event")
+            previous = processes.memory_reader
+            displaced = getattr(previous, "harness_reading", None)
+            if displaced is not None:  # this tool's spent launch-check reading
+                self._uninstall_reading(displaced)
+                previous = processes.memory_reader
+            due = started + DEFERRED_OFFSET_NS
+
+            def reader():
+                now = time.monotonic_ns()
+                if now < due:
+                    return _real_reading(previous)
+                state["delivered"] = True
+                record.update(
+                    delivery="DELIVERED",
+                    delivered_value=value,
+                    delivered_monotonic_ns=now,
+                    delivered_offset_seconds=(now - started) / 1e9,
+                )
+                self._uninstall_reading(state)
+                return value
+
+            reader.harness_reading = state
+            state.update(serial=details["serial"], previous=previous, reader=reader)
+            processes.memory_reader = reader
+            record["start_receipt"] = {
+                "path": receipt.name,
+                "serial": details["serial"],
+                "pid": details.get("pid"),
+                "tool": skill,
+                "started_monotonic_ns": started,
+            }
+
+        state["wrapper"] = on_event
+        processes.on_event = on_event
+        self.armed_readings.append(state)
+        record.update(
+            effect="deferred free_ram_gib reading armed on the tool's own process_launch",
+            reading_form="deferred",
+            metric=payload["metric"],
+            value=value,
+            tool=skill,
+            anchor="process-NNN.start.json started_monotonic_ns",
+            offset_seconds=DEFERRED_OFFSET_NS / 1e9,
+            injected_reading=True,
+            delivery="ARMED",
+        )
+        return False
+
+    def _uninstall_reading(self, state):
+        """Restore exactly what this reading replaced; a later rebind on top is left alone."""
+        processes = state["processes"]
+        if state.get("reader") is not None and processes.memory_reader is state["reader"]:
+            processes.memory_reader = state["previous"]
+        if state.get("wrapper") is not None and processes.on_event is state["wrapper"]:
+            processes.on_event = state["bound"]
+        if state in self.armed_readings:
+            self.armed_readings.remove(state)
+
+    def _settle_readings(self):
+        """At the next hook boundary an armed reading is over: a spent launch check is
+        uninstalled; one never read, or a deferred reading never delivered, is UNDELIVERED."""
+        for state in list(self.armed_readings):
+            record = state["record"]
+            if state["kind"] == "launch_check" and not state["spent"]:
+                record.update(delivery="UNDELIVERED", reason="no launch check followed")
+            elif state["kind"] == "deferred" and not state["delivered"]:
+                reason = "tool never launched" if state["serial"] is None else "boundary passed"
+                record.update(delivery="UNDELIVERED", reason=reason)
+            self._uninstall_reading(state)
+
+    def _decoy_spawn(self, args, record):
+        """FX-DECOY-SPAWN (CAP-DECOY): the harness spawns the literal sleeper, never the
+        controller. ``decoy_spawner(argv=, label=, lifetime_seconds=) -> {"pid", "pgid"}`` is
+        the harness's own (container: the entry script's setsid child, D7); its pid and pgid
+        are recorded. Without a spawner the operation is refused, never simulated."""
+        if record.get("hook") != "before_run":
+            raise UnsupportedInjection("FX-DECOY-SPAWN is a before_run harness operation")
+        if args != DECOY_ARGS:
+            raise UnsupportedInjection("FX-DECOY-SPAWN accepts only the frozen literal argv")
+        if self.decoy_spawner is None:
+            raise UnsupportedInjection("FX-DECOY-SPAWN needs a harness spawner")
+        spawned = self.decoy_spawner(
+            argv=list(args["argv"]), label=args["label"], lifetime_seconds=args["lifetime_seconds"]
+        )
+        ids = [spawned.get(k) if isinstance(spawned, dict) else None for k in ("pid", "pgid")]
+        if not all(type(i) is int and i > 0 for i in ids) or ids[0] == os.getpid():
+            raise HarnessDispatchError("decoy spawner returned no harness-owned pid/pgid")
+        if hasattr(os, "getpgid") and ids[1] == os.getpgid(0):
+            raise HarnessDispatchError("decoy shares the harness process group")
+        record.update(
+            effect="harness-spawned decoy recorded",
+            target="harness process space",
+            decoy={
+                **copy.deepcopy(args),
+                "pid": ids[0],
+                "pgid": ids[1],
+                "spawned_by": "harness",
+            },
+        )
+
 
 STOP_MODE = "harness_stop_controller"
 STOP_SCHEMA = "e2e-injections.stop/1"
@@ -1578,6 +1832,60 @@ def midprocess_payload(payload):
         and "before any exit receipt" in when
         and "CAP-MIDPROCESS" in when
     )
+
+
+RAM_METRIC = "free_ram_gib"
+# The three frozen free_ram_gib timing texts (E12-P2-INJ/CTL), verbatim -> reading form.
+RESOURCE_READING_FORMS = {
+    "launch check": "launch_check",
+    "deferred: delivered while plot-onset is running, 2 seconds after its start receipt "
+    "(requires CAP-MIDPROCESS)": "deferred",
+    "launch check before every later launch": "launch_check_every_later",
+}
+DEFERRED_OFFSET_NS = 2_000_000_000  # "2 seconds after its start receipt"
+# FX-DECOY-SPAWN, the frozen E12-P2 arguments verbatim (literal argv, harmless sleeper).
+DECOY_ARGS = {
+    "label": "plot-onset-decoy",
+    "argv": ["python", "-c", "import time; time.sleep(1800)", "plot-onset-decoy"],
+    "parent": "harness",
+    "lifetime_seconds": 1800,
+}
+
+
+def resource_reading_form(payload):
+    """The frozen free_ram_gib form of an inject_metric payload, else None (refused).
+
+    Exactly {metric, value, timing}: metric free_ram_gib, timing one of the three frozen texts,
+    value a finite positive number. Anything else (no timing, "immediate", ``also`` readings,
+    another wording) is not one of these forms."""
+    if not isinstance(payload, dict) or set(payload) != {"metric", "value", "timing"}:
+        return None
+    value, timing = payload["value"], payload["timing"]
+    if payload["metric"] != RAM_METRIC or not isinstance(timing, str):
+        return None
+    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        return None
+    return RESOURCE_READING_FORMS.get(timing)
+
+
+def operator_override_resume(payload):
+    """A3: an operator resume (not a role-channel request) carrying a budget_override."""
+    return (
+        isinstance(payload, dict)
+        and payload.get("action") == "resume"
+        and payload.get("requested_by") == "operator"
+        and "requested_by_role_channel" not in payload
+        and isinstance(payload.get("budget_override"), dict)
+    )
+
+
+def _real_reading(previous):
+    """What the process manager would read without the harness reading."""
+    if previous is not None:
+        return previous()
+    from . import processes
+
+    return processes.free_gib()  # looked up at call time, as Processes does
 
 
 def midprocess_stop_form(spec):
