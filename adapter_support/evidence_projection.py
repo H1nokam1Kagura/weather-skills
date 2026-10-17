@@ -985,7 +985,7 @@ class Projection:
                 out[name] = {"present": False, "path": path}
                 continue
             out[name] = {"present": True, "content_hash": content, "path": path}
-        return out
+        return nan_mask.project(self, out)  # artifacts.onset.nan_mask_matches_source or a gap
 
     # ---- budget (EC:budget_ledger)
     def budget_ledger(self, receipts, launch_checks):
@@ -1680,6 +1680,7 @@ def run_provenance(run_dir, harness_dir, markers, tags=None):
 # Imported last: pre_review_projection imports EvidenceMappingError from this module.
 from adapter_support import fixture_rereview_projection as frx  # noqa: E402
 from adapter_support import live_roles as lvr  # noqa: E402
+from adapter_support import nan_mask  # noqa: E402
 from adapter_support import operator_ledger_projection as olp  # noqa: E402
 from adapter_support import pre_review_projection as prp  # noqa: E402
 from adapter_support import resume_projection as rsp  # noqa: E402
