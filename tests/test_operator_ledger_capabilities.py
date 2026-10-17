@@ -36,7 +36,7 @@ WAVE7_CASES = ("E10-P1-CTL", "E10-P1-INJ", "E11-P1-CTL", "E11-P1-INJ")
 # by them, not executed here (live cases run only through the relay, by explicit case list).
 LIVE_CASES = ("E10-P2-CTL", "E10-P2-INJ", "E11-P2-CTL", "E11-P2-INJ", "E15-P2-CTL")
 # Flagged rereview_required by the live-role wave (LIVE-WAVE-BRIEF sub-wave 6).
-LIVE_WAVE_FLAGGED = CAPS  # Producer changes in the pending claim-facts/setup-timing merge.
+LIVE_WAVE_FLAGGED = ()  # all three re-signed after the live-role wave (D4-REVIEW-LW-B / -C)
 
 
 UNSIGN = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}

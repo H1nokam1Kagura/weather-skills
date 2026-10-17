@@ -993,6 +993,120 @@ def test_plan_and_goal_restatements_pass_gate_one_without_a_checker_verdict(tmp_
     assert c.repairs_used == 0
 
 
+def all_derivable_planner(payload, n):
+    """Every claim derivable and MATCHing (the live 38925383658 repairer shape)."""
+    value = default_planner(payload, n)
+    value["claims"] = [c for c in value["claims"] if c["derivable"]] + restatement_claims(payload)
+    return value
+
+
+def test_all_derivable_claim_set_routes_to_repair_never_presented_without_a_checker(
+    tmp_path, monkeypatch
+):
+    """V24-PRE-REVIEW-GATES requires a checker occurrence and a SUPPORTED checker receipt for
+    every presented plan, so a claim set with no checker-judged claim is never presented, even
+    when every computed fact matches; the repaired version is checked, then presented."""
+    stub = Stub(planner=all_derivable_planner)
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    first, second = records(c)
+    assert first["citation_gate"] == "PASS"
+    assert all(x["verdict"] == "SUPPORTED" and x["derivable"] for x in first["claims"])
+    assert first["decision"] == "ROUTE_TO_REPAIR"
+    assert first["evidence_checker_occurrence"] is None and first["reviewer_occurrence"] is None
+    assert second["decision"] == "PRESENT_FOR_REVIEW" and second["evidence_checker_occurrence"] == 1
+    assert [call["role"] for call in stub.calls][3:] == [
+        "planner",
+        "repairer",
+        "evidence_checker",
+        "reviewer",
+    ]
+    (repaired,) = [call for call in stub.calls if call["role"] == "repairer"]
+    failure = json.loads(repaired["payload"]["failure"])
+    assert failure["checker_judged_claims"] == 0 and failure["failed_claims"] == []
+    assert "add at least one derivable false claim" in failure["instruction"]
+
+
+def test_all_derivable_claim_set_with_no_repair_budget_never_reaches_reviewer(
+    tmp_path, monkeypatch
+):
+    stub = Stub(planner=all_derivable_planner)
+    c = make_controller(tmp_path, monkeypatch, stub, max_repairs=0)
+    with pytest.raises(Refused, match="bounded plan repair exhausted"):
+        c._run()
+    assert stub.count("reviewer") == 0 and stub.count("evidence_checker") == 0
+    (record,) = saved_records(c)
+    assert record["decision"] == "ROUTE_TO_REPAIR" and record["evidence_checker_occurrence"] is None
+
+
+def test_checker_ruling_on_an_unsent_derivable_claim_blocks_presentation(tmp_path, monkeypatch):
+    """D4 LW3 N-PRG-6: the receipt is the worst of all rulings, so a non-SUPPORTED ruling on a
+    derivable claim the checker was not sent would present a plan with a failing receipt
+    (V24-PRE-REVIEW-GATES). It routes to repair; the claim's own verdict stays computed."""
+
+    def checker(payload, n):
+        value = default_checker(payload, n)
+        if n == 1:
+            value["verdicts"].append(
+                {"claim_id": "C-LAST-ELIGIBLE", "verdict": "INSUFFICIENT", "reasoning": "x"}
+            )
+        return value
+
+    stub = Stub(checker=checker)
+    c = make_controller(tmp_path, monkeypatch, stub)
+    with pytest.raises(ReviewReached):
+        c._run()
+    first, second = records(c)
+    by_id = {x["claim_id"]: x for x in first["claims"]}
+    assert by_id["C-LAST-ELIGIBLE"]["verdict"] == "SUPPORTED"
+    assert by_id["C-LAST-ELIGIBLE"]["checker_verdict"] == "INSUFFICIENT"
+    assert first["decision"] == "ROUTE_TO_REPAIR" and first["evidence_checker_occurrence"] == 1
+    receipts = [r for r in c.roles.receipts if r["role"] == "evidence_checker"]
+    assert [r["verdict"] for r in receipts] == ["INSUFFICIENT", "SUPPORTED"]
+    assert second["decision"] == "PRESENT_FOR_REVIEW" and second["evidence_checker_occurrence"] == 2
+    (repaired,) = [call for call in stub.calls if call["role"] == "repairer"]
+    failure = json.loads(repaired["payload"]["failure"])
+    assert failure["checker_ruled_derivable_claims"] == ["C-LAST-ELIGIBLE"]
+    assert failure["failed_claims"] == []
+
+
+def test_record_without_a_checker_occurrence_is_never_presented():
+    contract, goal, plan = controller_state()
+    claims = [c for c in reference_claims() if c["derivable"]]
+    sources = [
+        {"source_id": SOURCE_ID, "source_hash": FROZEN_SOURCE_HASH, "text": REFERENCE_DEFINITION}
+    ]
+    args = (0, "p" * 64, "m", "s", claims, sources, contract, goal, plan)
+    record = claim_gates.build_record(*args)
+    assert record["claims"][0]["verdict"] == "SUPPORTED"
+    assert record["decision"] == "ROUTE_TO_REPAIR"
+
+
+def test_repair_finding_keeps_its_bytes_when_a_claim_was_judged():
+    """The checker_judged_claims key appears only on the all-derivable route."""
+    record = {
+        "index": 0,
+        "citation_gate": "FAIL",
+        "claims": [
+            {
+                "claim_id": "C-WINDOW",
+                "derivable": False,
+                "citation_verdict": "FAIL",
+                "computed": None,
+                "verdict": "INSUFFICIENT",
+                "basis": "checker",
+            }
+        ],
+    }
+    finding = json.loads(claim_gates.repair_failure(record))
+    assert set(finding) == {"claim_check_index", "citation_gate", "failed_claims", "instruction"}
+    assert finding["instruction"] == (
+        "Correct the claims or citations; quotes must be verbatim from a "
+        "bound source and derivable facts must match the controller's computation."
+    )
+
+
 @pytest.mark.parametrize(
     "change, failing",
     [
@@ -1032,6 +1146,7 @@ def test_evidence_request_lists_the_registered_facts_and_no_values(tmp_path, mon
     assert ", ".join(names) in instruction
     assert "never against documentation" in instruction
     assert "exactly one fact" in instruction
+    assert "At least one claim is derivable false" in instruction
     # Generic: the controller's values are never handed to the planner in the instruction.
     for value in ("precip", "preserve_nan", "2025-12-02", "agrhymet-sos-rolling", GOAL["title"]):
         assert value not in instruction

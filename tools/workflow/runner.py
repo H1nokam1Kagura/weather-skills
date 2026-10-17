@@ -1997,6 +1997,9 @@ class Controller:
                 "value is exactly the value it states, with the same JSON type. Every other "
                 "claim is derivable false and is judged only on whether its own cited quotes "
                 "state its fact; such a claim never rests on the plan or the goal. "
+                "At least one claim is derivable false: a plan is presented for review only "
+                "after the evidence checker has judged its derivable false claims, so a plan "
+                "whose claims are all derivable is routed to repair. "
                 "Declarations and citations are not controller support verdicts. "
                 "For a repair also include response; retain all envelope fields.",
             }

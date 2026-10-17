@@ -344,7 +344,17 @@ def build_record(
         raise Refused(
             "no evidence checker may run after a citation gate failure", gate="claim_evidence"
         )
-    present = gate == "PASS" and all(c["verdict"] == "SUPPORTED" for c in per_claim)
+    # A plan is presented only after an evidence-checker pass (V24-PRE-REVIEW-GATES requires a
+    # checker occurrence and a SUPPORTED checker receipt for every presented plan): a claim set
+    # with no checker-judged claim routes to repair, however well its computed facts match. The
+    # receipt is the worst of ALL rulings, so a ruling on a derivable claim the checker was not
+    # sent also blocks presentation; it never makes that claim's own verdict.
+    present = (
+        gate == "PASS"
+        and checker_occurrence is not None
+        and all(v == "SUPPORTED" for v in checker_verdicts.values())
+        and all(c["verdict"] == "SUPPORTED" for c in per_claim)
+    )
     return {
         "index": index,
         "plan_hash": plan_hash,
@@ -366,20 +376,37 @@ def presentations(records, plan_hash):
 
 def repair_failure(record):
     """The bounded, factual finding handed to the repairer for a routed plan version."""
-    return json.dumps(
-        {
-            "claim_check_index": record["index"],
-            "citation_gate": record["citation_gate"],
-            "failed_claims": [
-                {k: c[k] for k in ("claim_id", "citation_verdict", "computed", "verdict", "basis")}
-                for c in record["claims"]
-                if c["verdict"] != "SUPPORTED" or c["citation_verdict"] != "PASS"
-            ],
-            "instruction": "Correct the claims or citations; quotes must be verbatim from a "
-            "bound source and derivable facts must match the controller's computation.",
-        },
-        sort_keys=True,
-    )
+    finding = {
+        "claim_check_index": record["index"],
+        "citation_gate": record["citation_gate"],
+        "failed_claims": [
+            {k: c[k] for k in ("claim_id", "citation_verdict", "computed", "verdict", "basis")}
+            for c in record["claims"]
+            if c["verdict"] != "SUPPORTED" or c["citation_verdict"] != "PASS"
+        ],
+        "instruction": "Correct the claims or citations; quotes must be verbatim from a "
+        "bound source and derivable facts must match the controller's computation.",
+    }
+    if not any(not c["derivable"] for c in record["claims"]):
+        # Only on this route, so every other finding keeps its exact bytes.
+        finding["checker_judged_claims"] = 0
+        finding["instruction"] += (
+            " Every claim is derivable, so no evidence checker ran and the plan cannot be "
+            "presented: add at least one derivable false claim whose cited quotes state its fact."
+        )
+    overruled = [
+        c["claim_id"]
+        for c in record["claims"]
+        if c["derivable"] and c["checker_verdict"] not in (None, "SUPPORTED")
+    ]
+    if overruled:
+        # Only on this route, likewise: the checker ruled a derivable claim it was not sent.
+        finding["checker_ruled_derivable_claims"] = overruled
+        finding["instruction"] += (
+            " The evidence checker ruled derivable claims it was not asked to judge, and its "
+            "receipt must be SUPPORTED before the plan is presented: restate or remove them."
+        )
+    return json.dumps(finding, sort_keys=True)
 
 
 def record_hash(record):

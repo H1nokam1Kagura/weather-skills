@@ -27,8 +27,6 @@ from test_evidence_projection_v27 import (
     GENERATOR,
     LIVE_SIGNED_ADMITTED,
     MAP_GOAL,
-    REREVIEW_REQUIRED,
-    SIGNED_ADMITTED,
     TEST_FREE_RAM_GIB,
     ledger,
     profile_document,
@@ -299,7 +297,7 @@ def test_live_wave_capabilities_are_methods_but_stay_undeclared_until_signed():
     # sub-wave 5 opens the notification boundary in run_case.
     held = {"CAP-OPERATOR-NOTIFY-HOOK"}
     committed = WeatherAdapter().implemented_capabilities()
-    assert set(LIVE_WAVE) & committed == set(LIVE_WAVE) - held - REREVIEW_REQUIRED
+    assert set(LIVE_WAVE) & committed == set(LIVE_WAVE) - held
     assert set(LIVE_WAVE) & WeatherAdapter(producers=resigned()).implemented_capabilities() == (
         set(LIVE_WAVE) - held
     )
@@ -319,7 +317,7 @@ def test_admission_refuses_every_live_case_while_the_live_records_are_unsigned(f
     # needs the held CAP-OPERATOR-NOTIFY-HOOK and E12-P2 needs CAP-DECOY.
     records = simkit_run(cases, WeatherAdapter(enable_run_case=True), profile={})
     by_id = {r["case_id"]: r for r in records}
-    assert {c for c in live if by_id[c]["status"] != "NOT_IMPLEMENTED"} == live & SIGNED_ADMITTED
+    assert {c for c in live if by_id[c]["status"] != "NOT_IMPLEMENTED"} == LIVE_SIGNED_ADMITTED
     for short in ("E14-P3-CTL", "E14-P3-INJ"):
         missing = by_id[PREFIX + short]["missing_capabilities"]
         assert by_id[PREFIX + short]["status"] == "NOT_IMPLEMENTED"
@@ -350,8 +348,8 @@ def test_case_driver_admission_runs_mixed_cases_and_matrix_rows_carry_relay_caps
     committed_live = {
         r["case_id"] for r in committed["cases"] if r["role_mode"] == "live" and r["admitted"]
     }
-    assert committed_live == LIVE_SIGNED_ADMITTED & SIGNED_ADMITTED
-    assert set(committed["selected"]) == LIVE_SIGNED_ADMITTED & SIGNED_ADMITTED
+    assert committed_live == LIVE_SIGNED_ADMITTED
+    assert set(committed["selected"]) == LIVE_SIGNED_ADMITTED
     signed = admission_with(monkeypatch, signed_producers())
     rows = {r["case_id"][len(PREFIX) :]: r for r in signed["cases"]}
     # Group A (all live) and group B/C (mixed, through the combining hook) are runnable.

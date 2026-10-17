@@ -1710,8 +1710,8 @@ LIVE_SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E15-P2-INJ",
 }
 # The frozen cases the committed producer file admits. A change to this set is a change to what
-# is runnable and must be made here deliberately. The pending fixes withhold all cases.
-SIGNED_ADMITTED = set()  # Pending re-review: every frozen case needs a withheld producer.
+# is runnable and must be made here deliberately: the 31 offline cases plus the 30 live ones.
+SIGNED_ADMITTED = set(RESIGNED_ADMITTED) | LIVE_SIGNED_ADMITTED
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
 # it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Six of the
@@ -1720,43 +1720,12 @@ SIGNED_ADMITTED = set()  # Pending re-review: every frozen case needs a withheld
 PENDING_D4_REVIEW = {"CAP-OPERATOR-NOTIFY-HOOK"}
 # Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
-# by tools/check_capability_signatures.py). These 33 records name producers changed by the
-# claim-facts/setup-timing integration at 2fb9dda. Removing a flag requires fresh review/signing.
-REREVIEW_REQUIRED = {
-    "CAP-AUTO-RESUME",
-    "CAP-BINDING-PASSTHROUGH",
-    "CAP-BOUND-SOURCES",
-    "CAP-DENY-WRITE",
-    "CAP-DIAGNOSIS",
-    "CAP-EVIDENCE-CHECKER",
-    "CAP-EXHAUSTIVE-WRITES",
-    "CAP-FIXTURE-OP",
-    "CAP-INTERRUPT",
-    "CAP-LEDGER-APPEND",
-    "CAP-LEDGER-SEED",
-    "CAP-LIVE-ROLE",
-    "CAP-MECHANICAL-REPAIR",
-    "CAP-METRIC",
-    "CAP-MIDPROCESS",
-    "CAP-OPERATOR-ACTIONS",
-    "CAP-OPERATOR-NOTIFY",
-    "CAP-OPERATOR-RECORD-SETUP",
-    "CAP-PRE-REVIEW-GATES",
-    "CAP-REASON-MAP",
-    "CAP-RECEIPTS",
-    "CAP-REREVIEW",
-    "CAP-RESUME",
-    "CAP-RESUME-ATTRIBUTION",
-    "CAP-ROLE-INPUT-PATCH",
-    "CAP-ROLE-OUTPUT-SCHEMA",
-    "CAP-ROLE-SUBSTITUTE",
-    "CAP-RUN-PROVENANCE",
-    "CAP-SHADOW",
-    "CAP-SYMBOLS",
-    "CAP-TRANSITION-REQUEST",
-    "CAP-TRANSPORT-RETRY",
-    "CAP-TRANSPORT-RETRY-SETUP",
-}
+# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty
+# since the 33 records flagged by the controller fixes after the first live frozen-case runs
+# (claim-gate 4790afe, setup-timing 8647ad5 / dbb1444 / f2af31a, N-PRG-1 55b1305, N-PRG-6
+# f50f9f4) were re-signed from D4-REVIEW-LW2-LS (91cd4b3), D4-REVIEW-LW3-SHIFT / -GATE
+# (55b1305) and D4-REVIEW-LW3B-CONFIRM (f50f9f4).
+REREVIEW_REQUIRED = set()
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
