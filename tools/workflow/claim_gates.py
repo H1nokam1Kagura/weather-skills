@@ -143,9 +143,14 @@ def _ws(text):
 
 
 def citation_verdict(claim, bound):
-    """PASS only when every citation names a bound source, its hash and a verbatim quote."""
+    """PASS only when every citation names a bound source, its hash and a verbatim quote.
+
+    A non-derivable claim needs at least one citation. A derivable claim may carry none: the
+    controller computes it from its own state, and the frozen contract requires a citation only
+    on non-derivable claims (any citation a derivable claim does carry must still resolve).
+    """
     if not claim["citations"]:
-        return "FAIL"
+        return "PASS" if claim["derivable"] else "FAIL"
     for citation in claim["citations"]:
         source = bound.get(citation["source_id"])
         quote = citation["quote"]

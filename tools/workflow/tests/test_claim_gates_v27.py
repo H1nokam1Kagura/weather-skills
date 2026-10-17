@@ -1071,6 +1071,43 @@ def test_checker_ruling_on_an_unsent_derivable_claim_blocks_presentation(tmp_pat
     assert failure["failed_claims"] == []
 
 
+def test_uncited_derivable_claims_pass_gate_one_and_the_plan_is_presented(tmp_path, monkeypatch):
+    """Frozen rule: only a non-derivable claim must carry a citation. Restatements with no
+    citation (the live shape of DIAGNOSIS-LIVE-2) pass gate 1 by computation; the judged
+    claims still go to the checker and the plan is presented."""
+
+    def planner(payload, n):
+        value = default_planner(payload, n)
+        extra = restatement_claims(payload)
+        for claim in extra:
+            claim["citations"] = []
+        value["claims"] += extra
+        return value
+
+    stub = Stub(planner=planner)
+    c = make_controller(tmp_path, monkeypatch, stub, max_repairs=0)
+    with pytest.raises(ReviewReached):
+        c._run()
+    (record,) = records(c)
+    assert record["citation_gate"] == "PASS" and record["decision"] == "PRESENT_FOR_REVIEW"
+    by_id = {x["claim_id"]: x for x in record["claims"]}
+    for claim_id in ("C-PLAN-VARIABLE", "C-GOAL-MISSING"):
+        assert by_id[claim_id]["citation_verdict"] == "PASS"
+        assert by_id[claim_id]["computed"] == "MATCH"
+
+
+def test_citation_gate_still_fails_an_uncited_judged_claim_or_a_bad_derivable_quote():
+    sources = [
+        {"source_id": SOURCE_ID, "source_hash": FROZEN_SOURCE_HASH, "text": REFERENCE_DEFINITION}
+    ]
+    bound = claim_gates.registry(sources)
+    judged = {**reference_claims()[0], "citations": []}
+    assert claim_gates.citation_verdict(judged, bound) == "FAIL"
+    derivable = {**reference_claims()[1], "citations": [citation(FROZEN_NON_VERBATIM_QUOTES[0])]}
+    assert claim_gates.citation_verdict(derivable, bound) == "FAIL"
+    assert claim_gates.citation_verdict({**derivable, "citations": []}, bound) == "PASS"
+
+
 def test_record_without_a_checker_occurrence_is_never_presented():
     contract, goal, plan = controller_state()
     claims = [c for c in reference_claims() if c["derivable"]]
