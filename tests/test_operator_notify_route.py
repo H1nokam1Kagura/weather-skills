@@ -153,10 +153,11 @@ def test_e14_p3_is_admitted_only_with_the_notify_hook_record_signed(frozen):  # 
         assert not resume_driver.implied_missing(case, signed.implemented_capabilities()), short
         missing = set(case["adapter_requirements"]) - unsigned.implemented_capabilities()
         assert missing == {"CAP-OPERATOR-NOTIFY-HOOK"}, short
-    assert "CAP-OPERATOR-NOTIFY-HOOK" not in WeatherAdapter(producers=resigned()).implemented_capabilities()
+    committed = WeatherAdapter(producers=resigned()).implemented_capabilities()
+    assert "CAP-OPERATOR-NOTIFY-HOOK" not in committed
 
 
-# --------------------------------------------------------------------------- E14-P3 through run_case
+# ------------------------------------------------------------------- E14-P3 through run_case
 
 
 def test_e14_p3_ctl_two_automatic_resumes_then_the_operator_ledger_resume_releases(notified):
