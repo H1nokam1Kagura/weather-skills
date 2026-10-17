@@ -189,9 +189,12 @@ def test_e14_p3_ctl_two_automatic_resumes_then_the_operator_ledger_resume_releas
 
 def test_e14_p3_ctl_frozen_verdicts(notified):
     result = notified["E14-P3-CTL"]
-    assert score.score_case(
-        result.case, {"status": "EXECUTED", "evidence": result.evidence}, allow_unratified=True
-    )["terminal"] == "PASS"
+    assert (
+        score.score_case(
+            result.case, {"status": "EXECUTED", "evidence": result.evidence}, allow_unratified=True
+        )["terminal"]
+        == "PASS"
+    )
     # U5 (count(compiler_3) == 1) FAILs as frozen: OI-10, pinned so a change is deliberate.
     assert verdicts(result, "R1", "U9", "U5") == {"R1": "PASS", "U9": "PASS", "U5": "FAIL"}
 
@@ -220,9 +223,12 @@ def test_e14_p3_inj_forged_role_channel_resume_is_rejected_and_nothing_is_reques
     assert (entry["disposition"], entry["occurrence"]) == ("DELIVERED", 1)
     assert len(trace["transport_retries"]) == 1
     assert inputs_of(result)["resume_route"] is None
-    assert score.score_case(
-        result.case, {"status": "EXECUTED", "evidence": result.evidence}, allow_unratified=True
-    )["terminal"] == "PASS"
+    assert (
+        score.score_case(
+            result.case, {"status": "EXECUTED", "evidence": result.evidence}, allow_unratified=True
+        )["terminal"]
+        == "PASS"
+    )
     assert verdicts(result, "C1", "TS") == {"C1": "PASS", "TS": "PASS"}
 
 
