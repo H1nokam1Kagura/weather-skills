@@ -838,7 +838,15 @@ def test_kong_transport_retries_a_pre_write_fault_once(tmp_path, monkeypatch):
                 self.faults.pop(0)
                 raise ConnectionResetError("reset before launch")
             self.serial += 1
-            envelope = {"sent": True, "ok": True, "model": "m", "text": json.dumps(GOAL)}
+            # A forced-tool answer (kong_roles structured_output "forced_tool").
+            envelope = {
+                "sent": True,
+                "ok": True,
+                "model": "m",
+                "stop_reason": "tool_use",
+                "answer_source": "tool_use.input",
+                "text": json.dumps(GOAL, sort_keys=True),
+            }
             return {"exit_code": 0, "stdout": json.dumps(envelope), "stderr": ""}
 
     processes = KongTransport(["pre"])

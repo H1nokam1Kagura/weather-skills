@@ -16,9 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from tools.workflow.contracts import Refused
+from tools.workflow.contracts import Refused, digest
 from tools.workflow.kong_roles import KIT_PYTHON, WORKER_SOURCE, KongOutcomeUnknown, KongRoles
 from tools.workflow.processes import Processes
+from tools.workflow.role_schemas import answer_tool
 
 ROOT = Path(__file__).resolve().parents[3]
 RUNNER_KIT = ROOT / "relay" / "runner_kit"
@@ -59,7 +60,7 @@ needs_sdk = pytest.mark.skipif(SDK_PYTHON is None, reason="no interpreter with t
 
 def test_runner_client_provides_every_name_the_worker_uses():
     used = ("KongConfig", "anthropic_client", "check_body_size", "create_message")
-    used += ("describe_error", "text_of", "is_mock_url")
+    used += ("describe_error", "text_of", "is_mock_url", "rate_info")
     for name in used:
         assert f"kong_client.{name}" in WORKER_SOURCE
         assert callable(getattr(kong_client, name))
@@ -159,7 +160,7 @@ def test_client_paths_kit_mode_still_requires_the_kit_interpreter(tmp_path):
 class FakeNativeRoute:
     """Loopback stand-in for /v2/anthropic/v1/messages; records what reached it."""
 
-    def __init__(self, status=200, body=None):
+    def __init__(self, status=200, body=None, headers=None):
         self.seen = []
         outer = self
 
@@ -182,6 +183,8 @@ class FakeNativeRoute:
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("via", "1.1 kong/3.9-fake")
                 self.send_header("x-kong-request-id", "fake-request-1")
+                for name, value in (headers or {}).items():
+                    self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(data)
 
@@ -196,8 +199,16 @@ class FakeNativeRoute:
             "type": "message",
             "role": "assistant",
             "model": "claude-sonnet-4-6",
-            "content": [{"type": "text", "text": json.dumps(ANSWER)}],
-            "stop_reason": "end_turn",
+            # The forced answer tool (role_schemas.answer_tool) answering through tool_use.
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_fake_1",
+                    "name": "submit_verifier_answer",
+                    "input": ANSWER,
+                }
+            ],
+            "stop_reason": "tool_use",
             "stop_sequence": None,
             "usage": {"input_tokens": 11, "output_tokens": 7},
         }
@@ -207,15 +218,16 @@ class FakeNativeRoute:
         self.server.server_close()
 
 
-def runner_roles(tmp_path, gateway_url):
+def runner_roles(tmp_path, gateway_url, **kwargs):
     (tmp_path / "proc").mkdir()
+    kwargs.setdefault("prices", {})
     return KongRoles(
         Processes(tmp_path / "proc", memory_reader=lambda: 64.0),
         tmp_path / "ctx",
         budget=1,
         max_tokens=64,
-        prices={},
         data_policy_ack=True,
+        **kwargs,
         kit_root=RUNNER_KIT,
         kit_python=SDK_PYTHON,
         worker_env={
@@ -240,7 +252,13 @@ def test_runner_client_success_produces_the_kong_receipt(tmp_path):
     assert seen["headers"]["x-kong-key"] == FAKE_KEY
     assert seen["headers"]["x-api-key"] == "kong-managed"
     assert seen["body"]["model"] == "claude-sonnet-4-6" and seen["body"]["max_tokens"] == 64
+    # Structured output reached the wire: one tool, forced by name.
+    assert seen["body"]["tools"] == [answer_tool("verifier", PAYLOAD)]
+    assert seen["body"]["tool_choice"] == {"type": "tool", "name": "submit_verifier_answer"}
     receipt = roles.receipts[-1]
+    assert receipt["settings"]["structured_output"] == "forced_tool"
+    assert receipt["settings"]["answer_source"] == "tool_use.input"
+    assert receipt["stop_reason"] == "tool_use" and receipt["output_hash"] == digest(ANSWER)
     assert receipt["model_observed"] == "claude-sonnet-4-6" and receipt["model_match"] is True
     assert receipt["via"] == "1.1 kong/3.9-fake" and receipt["request_id"] == "fake-request-1"
     assert receipt["gateway_mock"] is True and receipt["transport"] == "kong-native-anthropic"
@@ -260,7 +278,23 @@ def test_runner_client_http_error_is_unknown_with_redacted_evidence(tmp_path):
         route.close()
     evidence = info.value.evidence
     assert evidence["status"] == 401 and evidence["request_id"] == "fake-request-1"
+    assert evidence["retry_after"] is None  # no Retry-After header was sent
     assert FAKE_KEY not in json.dumps(evidence) and roles.spent == roles.budget
+
+
+@needs_sdk
+def test_rate_limited_call_records_status_and_numeric_retry_after(tmp_path):
+    body = {"type": "error", "error": {"type": "rate_limit_error", "message": "slow down"}}
+    route = FakeNativeRoute(status=429, body=body, headers={"retry-after": "7"})
+    try:
+        roles = runner_roles(tmp_path, route.url)
+        with pytest.raises(KongOutcomeUnknown) as info:
+            roles.ask("verifier", PAYLOAD)
+    finally:
+        route.close()
+    assert len(route.seen) == 1  # KONG_SDK_MAX_RETRIES=0: the SDK did not retry the 429
+    evidence = info.value.evidence
+    assert evidence["status"] == 429 and evidence["retry_after"] == 7.0
 
 
 @needs_sdk
@@ -282,7 +316,14 @@ def test_relay_runner_mode_end_to_end_without_the_kit(tmp_path):
     from tools.workflow.relay_roles import RelayRoles
 
     route = FakeNativeRoute()
-    roles = runner_roles(tmp_path, route.url)
+    roles = runner_roles(
+        tmp_path,
+        route.url,
+        prices=host.PINNED_PRICES,
+        temperature=0,
+        role_max_tokens={"planner": 128},
+        session_source="response_id",
+    )
     audit = host.AuditLog(tmp_path / "audit.jsonl")
     token = "r" * 43
     relay = host.Relay(roles, run_id="run-x", token=token, allowed_roles=["verifier"], audit=audit)
@@ -294,7 +335,13 @@ def test_relay_runner_mode_end_to_end_without_the_kit(tmp_path):
         server.shutdown()
         server.server_close()
         route.close()
-    assert agent.receipts[-1]["model_observed"] == "claude-sonnet-4-6"
+    receipt = agent.receipts[-1]
+    assert receipt["model_observed"] == "claude-sonnet-4-6"
+    assert receipt["session_id"] == receipt["response_id"] == "msg_fake_1"
+    assert receipt["cost_usd"] == pytest.approx((11 * 3 + 7 * 15) / 1e6)
+    (seen,) = route.seen  # temperature 0 reached the wire through the SDK's extra_body
+    assert seen["body"]["temperature"] == 0 and seen["body"]["max_tokens"] == 64
+    assert receipt["settings_sent"]["extra_body"] == {"temperature": 0}
     text = (tmp_path / "audit.jsonl").read_text()
     assert FAKE_KEY not in text and token not in text
     (ask,) = [json.loads(x) for x in text.splitlines() if json.loads(x)["event"] == "ask"]

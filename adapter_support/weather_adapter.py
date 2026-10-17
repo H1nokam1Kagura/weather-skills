@@ -134,7 +134,7 @@ class WeatherAdapter(Adapter):
             if callable(getattr(type(self), method_name, None)):
                 implemented.add(capability)
         gated = {c for c, r in self.producers["capabilities"].items() if r.get("d4_gated") is True}
-        gated |= resume_driver.D4_GATED  # wave 7: declared only by a reviewed record
+        gated |= resume_driver.D4_GATED | self.LIVE_WAVE_D4_GATED  # waves 7 + live: D4 only
         return {c for c in implemented if c not in gated or self.d4_declared(c)}
 
     def can_run(self):
@@ -406,27 +406,11 @@ class WeatherAdapter(Adapter):
             ],
         }
 
-    def run_case(self, case, profile):
-        """CAP-NOT-IMPLEMENTED lifecycle (opt-in). Refuses before any side effect unless every
-        capability the case requires is declared; then stages the owned fixture, seeds the
-        ledger, runs the real controller in dispatch + review evidence mode, and returns the
-        projected evidence. The projection report is persisted beside the harness manifest.
-
-        ``profile`` is the harness mapping: profile_document, source_ledger, case_root,
-        source, generator_provenance, presented_fetch_version, definition_source, repo,
-        roles_factory(run_dir), processes_factory(run_dir), input_supplement, and optionally:
-
-        * prepared_fixture: the prepare_fixture record of a fixture the harness already
-          staged (container case mode stages it untraced, before the trace starts); it is
-          re-verified (adopt_prepared_fixture) and nothing is staged here.
-        * projection_inputs_channel: a harness-opened text stream. With it, run_case creates
-          NO file outside the run directory: the seeded ledger, output tags, projection inputs
-          and the in-process projection report leave as one record on the channel
-          (persist_projection_inputs) instead of harness/*.json. Frozen v2.7 confines
-          filesystem_snapshot.created_paths to HARNESS_RUN_DIR (all_under, every case).
-
-        Without either (in-process route) everything is staged and written as before.
-        """
+    def plan_case(self, case, profile):
+        """run_case's admission checks and static plans, before any side effect (AdapterRefusal
+        otherwise): {variant, shadow, scheduled, fixture, schedule, max_repairs}. ``profile`` is
+        read only after the capability refusals (profile_document, repo). Also read by
+        prepare_before_run_fixture, so fixture preparation plans exactly what run_case runs."""
         if not self.enable_run_case:
             raise AdapterRefusal("run_case is disabled; construct with enable_run_case=True")
         if not isinstance(case, dict) or not isinstance(case.get("adapter_requirements"), list):
@@ -449,9 +433,55 @@ class WeatherAdapter(Adapter):
         # the mid-process stop form only with a stopper (the forked route, resume_driver).
         resume_driver.refuse_unsupported_schedule(scheduled, resume_driver.stop_delivery(scheduled))
         resume_driver.refuse_unsupported_route(scheduled, shadow_plan["configured"])
-        fixture_plan = self.apply_fixture_operation(scheduled, profile["repo"])
-        schedule_plan = self.substitute_role_output(scheduled, variant["goal"])
-        max_repairs = self.configure_repair(case)
+        return {
+            "variant": variant,
+            "shadow": shadow_plan,
+            "scheduled": scheduled,
+            "fixture": self.apply_fixture_operation(scheduled, profile["repo"]),
+            "schedule": self.substitute_role_output(scheduled, variant["goal"]),
+            "max_repairs": self.configure_repair(case),
+        }
+
+    def prepare_before_run_fixture(self, case, prepared, profile_document, repo):
+        """CAP-FIXTURE-OP fixture preparation (container case mode: ``case_driver prepare``,
+        untraced, before the trace baseline): the case's before_run fixture operations on the
+        disposable source copy of a prepare_fixture record, applied before the run starts
+        (fixture_rereview_projection.prestage_before_run). -> the record run_case adopts
+        (prepared["before_run_fixture"]), or None when the case schedules none or run_case
+        would refuse the case (nothing applied; run_case refuses it with the same reason)."""
+        try:
+            plans = self.plan_case(case, {"profile_document": profile_document, "repo": repo})
+        except AdapterRefusal:
+            return None
+        return fixture_ops.prestage_before_run(
+            plans["fixture"], plans["schedule"]["native_case"], prepared
+        )
+
+    def run_case(self, case, profile):
+        """CAP-NOT-IMPLEMENTED lifecycle (opt-in). Refuses before any side effect unless every
+        capability the case requires is declared; then stages the owned fixture, seeds the
+        ledger, runs the real controller in dispatch + review evidence mode, and returns the
+        projected evidence. The projection report is persisted beside the harness manifest.
+
+        ``profile`` is the harness mapping: profile_document, source_ledger, case_root,
+        source, generator_provenance, presented_fetch_version, definition_source, repo,
+        roles_factory(run_dir), processes_factory(run_dir), input_supplement, and optionally:
+
+        * prepared_fixture: the prepare_fixture record of a fixture the harness already
+          staged (container case mode stages it untraced, before the trace starts); it is
+          re-verified (adopt_prepared_fixture) and nothing is staged here.
+        * projection_inputs_channel: a harness-opened text stream. With it, run_case creates
+          NO file outside the run directory: the seeded ledger, output tags, projection inputs
+          and the in-process projection report leave as one record on the channel
+          (persist_projection_inputs) instead of harness/*.json. Frozen v2.7 confines
+          filesystem_snapshot.created_paths to HARNESS_RUN_DIR (all_under, every case).
+
+        Without either (in-process route) everything is staged and written as before.
+        """
+        plans = self.plan_case(case, profile)
+        variant, shadow_plan, scheduled = plans["variant"], plans["shadow"], plans["scheduled"]
+        fixture_plan, schedule_plan = plans["fixture"], plans["schedule"]
+        max_repairs = plans["max_repairs"]
         seeded = self.seed_ledger(case, variant, profile["source_ledger"])
         channel = profile.get("projection_inputs_channel")
         if profile.get("prepared_fixture") is not None:
@@ -466,6 +496,13 @@ class WeatherAdapter(Adapter):
                 generator_provenance=profile["generator_provenance"],
                 presented_fetch_version=profile["presented_fetch_version"],
             )
+            # In-process route: the same before_run fixture preparation, before the controller.
+            prepared["before_run_fixture"] = fixture_ops.prestage_before_run(
+                fixture_plan, schedule_plan["native_case"], prepared
+            )
+        before_run = fixture_ops.verify_before_run(
+            prepared.get("before_run_fixture"), fixture_plan, prepared
+        )
         run_dir, harness_dir = Path(prepared["run"]), Path(prepared["harness"])
         # A copy: a before_run FX-LEDGER-APPEND edits seeded["request"] in place (prepare).
         harness_files = {"seeded-ledger.json": copy.deepcopy(seeded)}
@@ -494,6 +531,8 @@ class WeatherAdapter(Adapter):
             chained=shadow_projection.chain(schedule_hooks, shadow_driver)
         )
         if schedule_hooks is not None:
+            if before_run is not None:  # applied in fixture preparation: adopted, never re-applied
+                schedule_hooks.injection.adopt_before_run(before_run["delivery"])
             schedule_hooks.prepare(seeded["request"], prepared["source"])
         build = functools.partial(
             Controller,
@@ -638,9 +677,13 @@ class WeatherAdapter(Adapter):
         if manifest != prepared.get("manifest"):
             raise AdapterRefusal("prepared harness manifest differs from the staging record")
         source_pre = prepared.get("source_pre") or {}
-        if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(
-            layout["source"]
-        ) != source_pre.get("value"):
+        # After fixture preparation applied before_run operations, the staged source is their
+        # result (fixture_rereview_projection.verify_before_run re-verifies the chain from
+        # source_pre in run_case).
+        expected = (prepared.get("before_run_fixture") or {}).get("source_after")
+        if source_pre.get("algorithm") != SOURCE_HASH_ALGORITHM or tree_hash(layout["source"]) != (
+            expected or source_pre.get("value")
+        ):
             raise AdapterRefusal("staged source changed since staging")
         return copy.deepcopy(prepared)
 
@@ -1165,3 +1208,500 @@ class WeatherAdapter(Adapter):
         by design (D31), so this producer only ever records [] (disclosed)."""
         projection = self.capture_evidence(run_dir, harness)
         return resume_projection.trace_report(projection, "mechanical_repairs")
+
+    # ---- Live-role wave, sub-wave 3 (handoffs/completion-20261012/LIVE-WAVE-BRIEF.md).
+    # Appended at the end of the class so no line a CAPABILITY-PRODUCERS.json record pins moves.
+    # Every capability below is D4-gated: its method exists, but it is declared only by a
+    # reviewed producer record (sub-wave 6 writes the records; nothing is signed here).
+
+    LIVE_WAVE_D4_GATED = frozenset(
+        {
+            "CAP-LIVE-ROLE",
+            "CAP-BINDING-PASSTHROUGH",
+            "CAP-ROLE-INPUT-PATCH",
+            "CAP-METRIC",
+            "CAP-TRANSPORT-RETRY",
+            "CAP-TRANSPORT-RETRY-SETUP",
+            "CAP-OPERATOR-NOTIFY-HOOK",
+        }
+    )
+    # The frozen table (simkit.adapter.CAPABILITY_METHODS) already names invoke_live_role,
+    # confirm_binding_passthrough, patch_role_input and inject_metric; these three are not in it.
+    extension_methods = {
+        **extension_methods,
+        "CAP-TRANSPORT-RETRY": "record_transport_retry",
+        "CAP-TRANSPORT-RETRY-SETUP": "setup_planner_transport_retry",
+        "CAP-OPERATOR-NOTIFY-HOOK": "dispatch_after_operator_notification",
+    }
+
+    def invoke_live_role(self, case, goal, run_dir, relay_factory):
+        """CAP-LIVE-ROLE. Frozen ADAPTER-REQUIREMENTS: "Invoke the real model for a role and
+        record model identifier/version/settings in its receipt."
+
+        Driver hook (container_harness/case_driver.py case_profile, roles_factory): the
+        Controller roles of a case with live roles, all live or mixed with substituted ones
+        (live_roles.CombinedRoles, routed by the frozen agent_roles and the controller's own
+        attempt occurrence). Every live role goes to ``relay_factory(run_dir)``: RelayRoles to
+        the host Kong relay in a container run, where the key lives only in the relay's worker.
+        Each live receipt is the relay's KongRoles receipt plus relay_id: model_requested and
+        model_observed, settings (temperature 0, max_tokens, system prompt hash, SDK version),
+        settings_sent, usage, request/response/relay ids, cost_usd with its cost_basis. The
+        gateway reports only the model alias, so the version on record is the alias plus the
+        SDK version (disclosed). The projection carries those fields per live receipt
+        (invocation_receipts[*].live, evidence_projection).
+
+        Refused before any live member exists, never substituted: no relay factory (a live
+        case needs the relay at run time and never falls back to the double), an agent_roles
+        table no route can honour, an unmapped substitution plan, and the schedule checks of
+        CAP-ROLE-INPUT-PATCH, CAP-METRIC and CAP-TRANSPORT-RETRY-SETUP."""
+        from adapter_support import live_roles
+
+        if not callable(relay_factory):
+            raise AdapterRefusal(
+                "a live-role case needs the host relay (relay_factory); live roles never fall "
+                "back to substituted ones"
+            )
+        self.patch_role_input(case)
+        self.inject_metric(case)
+        self.setup_planner_transport_retry(case)
+        return live_roles.live_roles_factory(case, goal, run_dir, relay_factory)
+
+    def confirm_binding_passthrough(self, run_dir):
+        """CAP-BINDING-PASSTHROUGH. Frozen ADAPTER-REQUIREMENTS: "Confirm that the reviewed
+        candidate includes the injected proposal (no hidden proposal outside the review
+        binding)."
+
+        Read from the controller's own run records only (live_roles.confirm_binding_passthrough):
+        a substituted planner/repairer plan must be the plan version the next reviewer's
+        review capture presents (review_evidence.plan_hash); a substituted review's proposal
+        (each finding, the waiver, the reason) must appear verbatim in the next live input. A
+        result that does not pass through is recorded confirmed False with what is missing
+        (e.g. E01-P2-INJ's waiver, which the controller does not hand the verifier); nothing is
+        filled."""
+        from adapter_support import live_roles
+
+        return live_roles.confirm_binding_passthrough(run_dir)
+
+    @staticmethod
+    def _live_table(case, entries, what):
+        """The case's routing table, required once a live-role schedule entry exists."""
+        from adapter_support import live_roles
+
+        if not entries:
+            return None
+        table = live_roles.routing_table(case)
+        for entry in entries:
+            role = entry["native_role"]
+            if role not in table["live"]:
+                raise AdapterRefusal(
+                    f"schedule entry {entry['index']}: {what} targets {role}, which is not a live "
+                    "role in this case"
+                )
+            if role in table["substituted"]:
+                raise AdapterRefusal(
+                    f"schedule entry {entry['index']}: {what} targets {role}, which is split "
+                    "between live and substituted occurrences; not routed"
+                )
+        return table
+
+    @staticmethod
+    def _schedule_records(schedule, index):
+        """The case-schedule delivery records (CaseScheduleHooks.report(), run_case's
+        harness summary "case_schedule") of one schedule entry."""
+        coverage = (schedule or {}).get("coverage") if isinstance(schedule, dict) else None
+        records = (coverage or {}).get("records") if isinstance(coverage, dict) else None
+        return [r for r in records or [] if isinstance(r, dict) and r.get("index") == index]
+
+    @staticmethod
+    def _attempt_receipt(native, role, occurrence):
+        """(role file record, dispatch attempt event) of the controller's attempt ``occurrence``
+        of ``role`` that returned a receipt, or (None, attempt or None)."""
+        attempts = [
+            e
+            for e in native.events
+            if e.get("kind") == "dispatch_attempt"
+            and e.get("role") == role
+            and e.get("occurrence") == occurrence
+        ]
+        attempt = attempts[-1] if attempts else None
+        for receipt, record in zip(native.receipts, native.role_files, strict=True):
+            dispatch = receipt.get("controller_dispatch") or {}
+            if attempt is not None and dispatch.get("attempt_id") == attempt["attempt_id"]:
+                return {**record, "receipt": receipt}, attempt
+        return None, attempt
+
+    def patch_role_input(self, case, run_dir=None, schedule=None):
+        """CAP-ROLE-INPUT-PATCH. Frozen ADAPTER-REQUIREMENTS: "Patch a live role's input at
+        before_role."
+
+        Delivery is the case schedule's InjectionHooks at the controller's own before_role emit
+        (Controller.ask): the JSON Patch is applied in place to the payload the controller then
+        hashes (dispatch_attempt input_hash), sends to the live role and records. The frozen
+        verifier path /evidence/verify-run(<artifact>) is the reviewed mapping to the verifier
+        payload's /gates/<artifact> (e2e_injections.VERIFIER_EVIDENCE_PATH); every other path is
+        applied as written, and a path the actual payload lacks is refused by the strict patch
+        (missing parents never materialize).
+
+        Without ``run_dir``: the plan of every before_role json_patch entry, or AdapterRefusal
+        (not a JSON Patch array, an operation outside add/replace/remove/test, or a target role
+        that is not live, or is split by occurrence: a substituted double would ignore the
+        patched input). With ``run_dir`` (and ``schedule``, run_case's case_schedule report):
+        per entry the delivery record and the live receipt of the selected occurrence, with
+        ``received_patched_input`` = the receipt's input_hash equals the delivery's after_hash.
+        Anything not observed stays null with the reason; nothing is filled."""
+        from adapter_support import live_roles
+
+        entries = []
+        for index, spec in enumerate((case or {}).get("injection_schedule") or []):
+            if not isinstance(spec, dict) or spec.get("hook") != "before_role":
+                continue
+            if spec.get("operation") != "json_patch":
+                continue
+            selector = spec.get("selector") if isinstance(spec.get("selector"), dict) else {}
+            name = selector.get("role_or_tool_or_stage")
+            occurrence = selector.get("occurrence", 1)
+            if type(occurrence) is not int or occurrence < 1:
+                raise AdapterRefusal(f"schedule entry {index}: occurrence must be positive")
+            operations = spec.get("payload")
+            if not isinstance(operations, list):
+                raise AdapterRefusal(f"schedule entry {index}: json_patch must be an array")
+            mapping = None
+            for op in operations:
+                if (
+                    not isinstance(op, dict)
+                    or op.get("op") not in role_substitution.PATCH_OPS
+                    or not isinstance(op.get("path"), str)
+                    or not op["path"].startswith("/")
+                ):
+                    raise AdapterRefusal(
+                        f"schedule entry {index}: only add/replace/remove/test operations on a "
+                        "non-root JSON pointer are delivered"
+                    )
+                if name == "verifier" and InjectionHooks._map_verifier_paths([op], {}) != [op]:
+                    mapping = "/evidence/verify-run(<artifact>) -> /gates/<artifact>"
+            entries.append(
+                {
+                    "index": index,
+                    "selector": copy.deepcopy(selector),
+                    "native_role": live_roles.native(name),
+                    "occurrence": occurrence,
+                    "operations": len(operations),
+                    "frozen_payload_hash": digest(operations),
+                    "adapter_mapping": mapping,
+                }
+            )
+        self._live_table(case, entries, "a before_role input patch")
+        plan = {"capability": "CAP-ROLE-INPUT-PATCH", "entries": entries}
+        if run_dir is None:
+            return plan
+        native = evidence_projection.NativeRun(run_dir)
+        for entry in entries:
+            entry.update(delivery=None, receipt_input_hash=None, received_patched_input=None)
+            records = self._schedule_records(schedule, entry["index"])
+            if not records:
+                entry["reason"] = "no delivery record for this entry (not reached or not supplied)"
+                continue
+            delivery = records[-1]
+            entry["delivery"] = {
+                k: delivery[k]
+                for k in ("status", "before_hash", "after_hash", "adapter_mapping", "error")
+                if k in delivery
+            }
+            if delivery.get("status") != "APPLIED":
+                entry["reason"] = "the patch was not applied"
+                continue
+            record, _attempt = self._attempt_receipt(
+                native, entry["native_role"], entry["occurrence"]
+            )
+            if record is None:
+                entry["reason"] = "the selected invocation returned no receipt"
+                continue
+            receipt = record["receipt"]
+            entry.update(
+                receipt_mode=receipt.get("mode"),
+                invocation_id=receipt.get("invocation_id"),
+                receipt_input_hash=receipt.get("input_hash"),
+                received_patched_input=receipt.get("input_hash") == delivery.get("after_hash"),
+            )
+        return plan
+
+    def inject_metric(self, case, run_dir=None, schedule=None):
+        """CAP-METRIC, budget meters only. Frozen ADAPTER-REQUIREMENTS: "Inject resource/budget
+        readings into the controller's monitor."
+
+        Implemented for the BUDGET half only: readings of the controller's own budget meters
+        (write_boundary.METERED: consumed_model_usd, elapsed_seconds, repair_attempts_used),
+        delivered immediately by the case schedule's InjectionHooks to
+        write_boundary.meter_reading, which applies each as a monotone floor and records it
+        durably in context["budget_readings"]. With live roles consumed_model_usd lands on the
+        live member's meter (CombinedRoles.spent). Resource readings (memory, CPU, ...) have no
+        controller meter to receive them: such an entry is refused, never approximated (E12-P2,
+        with its deferred mid-process form, stays out of reach).
+
+        Without ``run_dir``: the plan of every inject_metric entry, or AdapterRefusal. With
+        ``run_dir``: the controller's budget_readings (MISSING when it recorded none), each
+        marked with the schedule entry that delivered it when ``schedule`` (run_case's
+        case_schedule report) is supplied."""
+        from tools.workflow import e2e_injections, write_boundary
+
+        entries = []
+        for index, spec in enumerate((case or {}).get("injection_schedule") or []):
+            if not isinstance(spec, dict) or spec.get("operation") != "inject_metric":
+                continue
+            payload = spec.get("payload")
+            if not e2e_injections.metered(payload):
+                raise AdapterRefusal(
+                    f"schedule entry {index}: CAP-METRIC is implemented for the controller's "
+                    f"budget meters only {list(write_boundary.METERED)}, immediate timing; "
+                    "this reading has no controller meter (resource readings are not delivered)"
+                )
+            readings = {payload["metric"]: payload.get("value"), **payload.get("also", {})}
+            entries.append(
+                {
+                    "index": index,
+                    "hook": spec.get("hook"),
+                    "selector": copy.deepcopy(spec.get("selector")),
+                    "readings": readings,
+                }
+            )
+        plan = {"capability": "CAP-METRIC", "scope": "budget meters only", "entries": entries}
+        if run_dir is None:
+            return plan
+        native = evidence_projection.NativeRun(run_dir)
+        readings = native.context.get("budget_readings")
+        if not isinstance(readings, list):
+            plan["status"] = "MISSING"
+            plan["reason"] = "the controller recorded no budget reading"
+            return plan
+        delivered = {}
+        for entry in entries:
+            for record in self._schedule_records(schedule, entry["index"]):
+                for reading in record.get("readings") or []:
+                    delivered[reading.get("index")] = entry["index"]
+        plan["budget_readings"] = [
+            {**copy.deepcopy(r), "schedule_index": delivered.get(r.get("index"))}
+            if schedule is not None
+            else copy.deepcopy(r)
+            for r in readings
+        ]
+        return plan
+
+    # Dispatch events that mark a resume boundary (recovery.py: interruption, resume).
+    RESUME_EVENT_KINDS = frozenset({"interruption", "resume"})
+
+    def record_transport_retry(self, run_dir, harness=None):
+        """CAP-TRANSPORT-RETRY. Frozen ADAPTER-REQUIREMENTS: "Capture transport-level retries
+        inside one step before any write (controller_trace.transport_retries); they are not
+        resumes."
+
+        controller_trace.transport_retries as the controller recorded them
+        (recovery.record_transport_retry: one durable record per invocation, before_write,
+        written only when the transport's write serial had not moved), with their event keys,
+        or MISSING. Each record is then checked against the controller's dispatch clock:
+        ``inside_attempt`` (its attempt has exactly one dispatch_attempt and one outcome, and
+        the retry's sequence lies between them) and ``resume_between`` (an interruption or
+        resume event inside that span; True would make it a resume, not a transport retry).
+        The retried call itself is the role transport's own (RelayRoles / agents.Roles
+        transport_call), never synthesized here."""
+        projection = self.capture_evidence(run_dir, harness)
+        out = resume_projection.trace_report(projection, "transport_retries")
+        if "transport_retries" not in out:
+            return out
+        events = evidence_projection.NativeRun(run_dir).events
+        checks = []
+        for retry in out["transport_retries"]:
+            attempt_id = retry.get("attempt_id")
+            attempts = [
+                e
+                for e in events
+                if e.get("kind") == "dispatch_attempt" and e.get("attempt_id") == attempt_id
+            ]
+            outcomes = [
+                e
+                for e in events
+                if e.get("kind") in ("dispatch_returned", "dispatch_failed")
+                and e.get("attempt_id") == attempt_id
+            ]
+            check = {
+                "index": retry.get("index"),
+                "step": retry.get("step"),
+                "attempt_id": attempt_id,
+                "before_write": retry.get("before_write") is True,
+                "attempt_sequence": attempts[0]["sequence"] if len(attempts) == 1 else None,
+                "retry_sequence": retry.get("sequence"),
+                "outcome": outcomes[0]["kind"] if len(outcomes) == 1 else None,
+                "outcome_sequence": outcomes[0]["sequence"] if len(outcomes) == 1 else None,
+            }
+            start, sequence, end = (
+                check["attempt_sequence"],
+                check["retry_sequence"],
+                check["outcome_sequence"],
+            )
+            spans = all(type(v) is int for v in (start, sequence, end))
+            check["inside_attempt"] = spans and start < sequence < end
+            check["resume_between"] = (
+                any(
+                    e.get("kind") in self.RESUME_EVENT_KINDS and start < e["sequence"] < end
+                    for e in events
+                )
+                if spans
+                else None
+            )
+            checks.append(check)
+        out["checks"] = checks
+        return out
+
+    def setup_planner_transport_retry(self, case, run_dir=None, schedule=None):
+        """CAP-TRANSPORT-RETRY-SETUP. Frozen ADAPTER-REQUIREMENTS: "Inject one connection-reset
+        in planner transport before any response/output write and allow one transport retry
+        inside the same logical invocation; never manufacture a successful result."
+
+        Delivery is the case schedule's FX-TRANSPORT-RETRY entry (InjectionHooks
+        _arm_transport_fault at the controller's before_role emit): the next run() of the live
+        role transport (CombinedRoles.processes -> RelayRoles' RelayTransport) raises one
+        ConnectionResetError BEFORE any request byte is written, then restores the real
+        transport. The retry is RelayRoles' own transport_call parity: it retries once, inside
+        the same invocation, only because the write serial did not move and the controller
+        recorded the retry durably. The answer that follows is the relay's real response; no
+        result is manufactured.
+
+        Without ``run_dir``: the plan of every FX-TRANSPORT-RETRY entry, or AdapterRefusal (a
+        hook other than before_role, a role other than the planner, arguments other than the
+        frozen once / one retry / before_write / connection_reset, a selector occurrence that
+        differs from args.occurrence, or a planner that is not a live role: a substituted
+        double has no transport to fault). With ``run_dir`` (and ``schedule``): per entry the
+        delivery record, the controller's transport_retries for that attempt and the receipt
+        that answered it (``answered_by_live_transport``: mode live with a relay_id and an
+        observed response_id), with ``confirmed`` True / False, or null with the reason when
+        nothing was delivered."""
+        from adapter_support import live_roles
+
+        entries = []
+        for index, spec in enumerate((case or {}).get("injection_schedule") or []):
+            payload = spec.get("payload") if isinstance(spec, dict) else None
+            if not isinstance(payload, dict) or spec.get("operation") != "mutate_fixture":
+                continue
+            if payload.get("fixture_operation") != "FX-TRANSPORT-RETRY":
+                continue
+            args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+            selector = spec.get("selector") if isinstance(spec.get("selector"), dict) else {}
+            frozen = {
+                "role": "planner",
+                "failure_class": "connection_reset",
+                "failures": 1,
+                "max_retries": 1,
+                "before_write": True,
+            }
+            exact = all(
+                k in args and args[k] == v and type(args[k]) is type(v) for k, v in frozen.items()
+            )
+            if (
+                spec.get("hook") != "before_role"
+                or selector.get("role_or_tool_or_stage") != "planner"
+                or not exact
+                or set(args) != {*frozen, "occurrence"}
+                or type(args.get("occurrence")) is not int
+                or selector.get("occurrence", 1) != args["occurrence"]
+            ):
+                raise AdapterRefusal(
+                    f"schedule entry {index}: FX-TRANSPORT-RETRY is delivered only as the frozen "
+                    "planner before_role fault (one connection reset before any write, one retry)"
+                )
+            entries.append(
+                {
+                    "index": index,
+                    "id": spec.get("id"),
+                    "native_role": live_roles.native("planner"),
+                    "occurrence": args["occurrence"],
+                    "failure_class": args["failure_class"],
+                }
+            )
+        self._live_table(case, entries, "an FX-TRANSPORT-RETRY fault")
+        plan = {"capability": "CAP-TRANSPORT-RETRY-SETUP", "entries": entries}
+        if run_dir is None:
+            return plan
+        native = evidence_projection.NativeRun(run_dir)
+        book = native.context.get("recovery")
+        retries = book.get("transport_retries") if isinstance(book, dict) else None
+        for entry in entries:
+            entry.update(delivery=None, transport_retries=None, confirmed=None)
+            records = self._schedule_records(schedule, entry["index"])
+            delivery = records[-1] if records else {}
+            entry["delivery"] = delivery.get("delivery")
+            if delivery.get("delivery") != "DELIVERED":
+                entry["reason"] = "the transport fault was not delivered"
+                continue
+            record, attempt = self._attempt_receipt(native, "planner", entry["occurrence"])
+            if attempt is None:
+                entry["reason"] = "no controller attempt of the selected planner occurrence"
+                continue
+            if not isinstance(retries, list):
+                entry.update(confirmed=False, reason="the controller recorded no transport retry")
+                continue
+            mine = [r for r in retries if r.get("attempt_id") == attempt["attempt_id"]]
+            entry["transport_retries"] = copy.deepcopy(mine)
+            receipt = record["receipt"] if record is not None else {}
+            live = (
+                receipt.get("mode") == live_roles.LIVE
+                and bool(receipt.get("relay_id"))
+                and bool(receipt.get("response_id"))
+            )
+            entry["answered_by_live_transport"] = live
+            entry["confirmed"] = len(mine) == 1 and mine[0].get("before_write") is True and live
+            if not entry["confirmed"]:
+                entry["reason"] = (
+                    "delivered, but the attempt has no single before-write retry record"
+                    if len(mine) != 1
+                    else "delivered, but no live transport answer was recorded for the attempt"
+                )
+        return plan
+
+    def dispatch_after_operator_notification(self, hooks):
+        """CAP-OPERATOR-NOTIFY-HOOK. Frozen ADAPTER-REQUIREMENTS: "Emit only after the controller
+        actually records and emits the operator notification, never merely on AUTHORIZED or on
+        an intention to notify."
+
+        The controller emits after_operator_notification itself (recovery.notify) only after
+        the notification is recorded AND emitted (delivered to its run-local outbox); the
+        dependent dispatcher (InjectionHooks with notification_boundary=True) counts an
+        occurrence only for an event carrying recorded and emitted true, once per native
+        notification, and stops on an occurrence that disagrees with the controller's. This
+        returns those dispositions (DELIVERED / INACTIVE / NOT_IMPLEMENTED / HARNESS_ERROR) and
+        the count of notifications seen.
+
+        Refused (AdapterRefusal), never reported as delivered: hooks other than the
+        InjectionHooks path; a schedule without ids/requires (the non-dependent dispatcher does
+        not check recorded/emitted); and hooks built without the notification boundary.
+        run_case's case schedule (role_substitution.CaseScheduleHooks) does not open that
+        boundary yet (e2e_injections NOTIFICATION_HOOK is opt-in), so until live sub-wave 5
+        wires it no run_case run can deliver this hook, and this method says so."""
+        from tools.workflow.e2e_injections import NOTIFICATION_HOOK
+
+        if isinstance(hooks, role_substitution.CaseScheduleHooks):
+            hooks = hooks.injection
+        if not isinstance(hooks, InjectionHooks):
+            raise AdapterRefusal("the existing InjectionHooks delivery path is required")
+        indexes = [i for i, s in enumerate(hooks.schedule) if s.get("hook") == NOTIFICATION_HOOK]
+        if indexes and not hooks.dependent:
+            raise AdapterRefusal(
+                "after_operator_notification is dispatched only by the dependent dispatcher "
+                "(ids/requires), which checks recorded and emitted"
+            )
+        closed = [
+            i
+            for i in indexes
+            if hooks.dispositions.get(i, {}).get("reason")
+            == "controller emits no boundary for hook " + NOTIFICATION_HOOK
+        ]
+        if closed:
+            raise AdapterRefusal(
+                f"schedule entries {closed}: the notification boundary was not opened for these "
+                "hooks (InjectionHooks(notification_boundary=True)); run_case does not open it "
+                "yet (live sub-wave 5)"
+            )
+        report = hooks.dependency_report() if hooks.dependent else {"entries": []}
+        return {
+            "capability": "CAP-OPERATOR-NOTIFY-HOOK",
+            "notifications_seen": hooks.notifications,
+            "entries": [e for e in report["entries"] if e["hook"] == NOTIFICATION_HOOK],
+        }

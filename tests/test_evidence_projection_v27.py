@@ -1635,12 +1635,11 @@ def test_every_frozen_case_stays_not_implemented_unsigned_under_the_real_runner(
     assert all(r["evidence"] is None for r in records)
 
 
-# The frozen cases the committed producer file admits. A change to this set is a change to what
-# is runnable and must be made here deliberately. 31 since the wave-7 signing (D4 w7 reviews,
-# confirm reviews D4-CONFIRM-W7 / -W7B at b524c40): the 24 offline cases admitted before plus
-# E10-P1, E11-P1 and E14-P1 (CTL and INJ each) and E14-P2-INJ. E14-P2-CTL stays refused
-# (CAP-OWNED-STALE-LOCK-SETUP is not built, OWNER-RULINGS scope / D31).
-SIGNED_ADMITTED = {
+# What the committed file admits with every rereview flag cleared (resigned()): the 31 since the
+# wave-7 signing (D4 w7 reviews, confirm reviews D4-CONFIRM-W7 / -W7B at b524c40): the 24 offline
+# cases admitted before plus E10-P1, E11-P1 and E14-P1 (CTL and INJ each) and E14-P2-INJ.
+# E14-P2-CTL stays refused (CAP-OWNED-STALE-LOCK-SETUP is not built, OWNER-RULINGS scope / D31).
+RESIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E01-P1-CTL",
     "DEV-E2E-V2_7-E01-P1-INJ",
     "DEV-E2E-V2_7-E02-P1-CTL",
@@ -1673,15 +1672,59 @@ SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E15-P1-CTL",
     "DEV-E2E-V2_7-E15-P1-INJ",
 }
+# The live cases the committed producer file admits since six live-role records were signed
+# (D4-CONFIRM-LW-A at dd19936): every live case except E12-P2 x2 (CAP-DECOY is not built) and
+# E14-P3 x2 (CAP-OPERATOR-NOTIFY-HOOK stays unsigned until sub-wave 5). Admission is by
+# requirements: E10-P2 x2 depend on unbuilt sub-wave 5 mechanics and E11-P2-INJ is refused at
+# run_case entry, so live batches are dispatched only by explicit case list.
+LIVE_SIGNED_ADMITTED = {
+    "DEV-E2E-V2_7-E01-P2-CTL",
+    "DEV-E2E-V2_7-E01-P2-INJ",
+    "DEV-E2E-V2_7-E02-P2-CTL",
+    "DEV-E2E-V2_7-E02-P2-INJ",
+    "DEV-E2E-V2_7-E03-P2-CTL",
+    "DEV-E2E-V2_7-E03-P2-INJ",
+    "DEV-E2E-V2_7-E04-P2-CTL",
+    "DEV-E2E-V2_7-E04-P2-INJ",
+    "DEV-E2E-V2_7-E05-P2-CTL",
+    "DEV-E2E-V2_7-E05-P2-INJ",
+    "DEV-E2E-V2_7-E06-P1-CTL",
+    "DEV-E2E-V2_7-E06-P1-INJ",
+    "DEV-E2E-V2_7-E06-P2-CTL",
+    "DEV-E2E-V2_7-E06-P2-INJ",
+    "DEV-E2E-V2_7-E07-P2-CTL",
+    "DEV-E2E-V2_7-E07-P2-INJ",
+    "DEV-E2E-V2_7-E08-P2-CTL",
+    "DEV-E2E-V2_7-E08-P2-INJ",
+    "DEV-E2E-V2_7-E09-P2-CTL",
+    "DEV-E2E-V2_7-E09-P2-INJ",
+    "DEV-E2E-V2_7-E10-P2-CTL",
+    "DEV-E2E-V2_7-E10-P2-INJ",
+    "DEV-E2E-V2_7-E11-P2-CTL",
+    "DEV-E2E-V2_7-E11-P2-INJ",
+    "DEV-E2E-V2_7-E12-P1-CTL",
+    "DEV-E2E-V2_7-E12-P1-INJ",
+    "DEV-E2E-V2_7-E13-P2-CTL",
+    "DEV-E2E-V2_7-E13-P2-INJ",
+    "DEV-E2E-V2_7-E15-P2-CTL",
+    "DEV-E2E-V2_7-E15-P2-INJ",
+}
+# The frozen cases the committed producer file admits. A change to this set is a change to what
+# is runnable and must be made here deliberately: the 31 offline cases plus the 30 live ones.
+SIGNED_ADMITTED = set(RESIGNED_ADMITTED) | LIVE_SIGNED_ADMITTED
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
-# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Empty since
-# the wave-7 signing.
-PENDING_D4_REVIEW = set()
+# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Six of the
+# seven live-role records were signed (D4-CONFIRM-LW-A); CAP-OPERATOR-NOTIFY-HOOK must stay here
+# until sub-wave 5 opens the notification boundary in run_case (its record's notes).
+PENDING_D4_REVIEW = {"CAP-OPERATOR-NOTIFY-HOOK"}
 # Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
 # by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty
-# since the wave-7 re-signing.
+# since the 33 records flagged by the controller fixes after the first live frozen-case runs
+# (claim-gate 4790afe, setup-timing 8647ad5 / dbb1444 / f2af31a, N-PRG-1 55b1305, N-PRG-6
+# f50f9f4) were re-signed from D4-REVIEW-LW2-LS (91cd4b3), D4-REVIEW-LW3-SHIFT / -GATE
+# (55b1305) and D4-REVIEW-LW3B-CONFIRM (f50f9f4).
 REREVIEW_REQUIRED = set()
 
 

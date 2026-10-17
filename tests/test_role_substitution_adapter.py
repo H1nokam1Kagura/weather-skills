@@ -500,8 +500,10 @@ def test_e07_p1_wrapped_repairer_output_is_delivered_with_its_rule_recorded(e07_
 
 
 def test_e07_p2_has_no_bare_plan_and_stays_refused_as_live_plus_substituted(lab, frozen, tmp_path):
-    """E07-P2 schedules no bare step list (its repairer is live); it stays refused before any
-    side effect because its replaced reviewer is also a live role (CAP-LIVE-ROLE)."""
+    """E07-P2 schedules no bare step list (its repairer is live). Its replaced reviewer is
+    live and substituted (split by occurrence): the plan maps that entry for the double's
+    occurrence (adapter_support/live_roles.CombinedRoles routes it there), and the
+    substituted-only factory still refuses the case as live + substituted."""
     adapter = WeatherAdapter(enable_run_case=True)
     for kind in ("CTL", "INJ"):
         case = local_case(frozen, f"E07-P2-{kind}")
@@ -509,11 +511,14 @@ def test_e07_p2_has_no_bare_plan_and_stays_refused_as_live_plus_substituted(lab,
             isinstance(s.get("payload"), dict) and isinstance(s["payload"].get("plan"), list)
             for s in case["injection_schedule"]
         )
-        profile = lab.profile(MAP_GOAL, case, stub=None)
-        profile["case_root"] = tmp_path / f"never-E07-P2-{kind}"
-        with pytest.raises(AdapterRefusal, match="live role's output is never replaced"):
-            adapter.run_case(case, profile)
-        assert not profile["case_root"].exists()
+        plan = adapter.substitute_role_output(case, MAP_GOAL)
+        assert [(e["native_role"], e["selector"]["occurrence"]) for e in plan["entries"]] == [
+            ("planner", 1),
+            ("reviewer", 1),
+        ]
+        with pytest.raises(AdapterRefusal, match="live \\+ substituted"):
+            adapter.substituted_roles_factory(case, MAP_GOAL, tmp_path / f"never-{kind}")
+        assert not (tmp_path / f"never-{kind}").exists()
 
 
 # --------------------------------------------------------------------------- refusals
@@ -539,8 +544,18 @@ def test_unmappable_entries_are_refused_never_skipped(frozen):
     # The wrapping rule derives the envelope from the goal-bound stand-in baseline.
     with pytest.raises(AdapterRefusal, match="needs the case goal"):
         adapter.substitute_role_output(local_case(frozen, "E07-P1-CTL"))
+    # E06-P1-INJ's reviewer is split by occurrence (live and substituted): its entry is mapped
+    # for the double (live_roles). A role that is only live is still never replaced.
+    split = adapter.substitute_role_output(local_case(frozen, "E06-P1-INJ"), MAP_GOAL)
+    assert [e["native_role"] for e in split["entries"]] == ["reviewer"]
+    live_only = local_case(frozen, "E13-P2-INJ")
+    live_only["injection_schedule"][0].update(
+        selector={"role_or_tool_or_stage": "reviewer", "occurrence": 1},
+        operation="replace_role_output",
+        payload={"verdict": "APPROVE"},
+    )
     with pytest.raises(AdapterRefusal, match="live role's output is never replaced"):
-        adapter.substitute_role_output(local_case(frozen, "E06-P1-INJ"), MAP_GOAL)
+        adapter.substitute_role_output(live_only, MAP_GOAL)
     base = local_case(frozen, "E02-P1-INJ")
     cases = {
         "no faithful native mapping": [{"op": "replace", "path": "/missing_policy", "value": 1}],

@@ -35,7 +35,7 @@ from pathlib import Path
 from adapter_support.evidence_projection import EvidenceMappingError
 from tools.workflow.catalog import RUNTIME_MANIFEST, safe_path, tree_hash
 from tools.workflow.contracts import digest
-from tools.workflow.e2e_injections import DEFINITIONS_FILE, FIXTURE_OPERATIONS
+from tools.workflow.e2e_injections import DEFINITIONS_FILE, FIXTURE_OPERATIONS, InjectionHooks
 
 FIXTURE_CAPABILITY = "CAP-FIXTURE-OP"
 REREVIEW_CAPABILITY = "CAP-REREVIEW"
@@ -65,8 +65,8 @@ FIXTURE_TARGETS = {
     "FX-SRC-CELL-INCREMENT": "source",
     "FX-ONSET-CELL-SHIFT": "run_artifact",
 }
-# Operations whose delivery creates new directory entries outside HARNESS_RUN_DIR in the traced
-# controller process (frozen U12/all_under confines filesystem_snapshot.created_paths to it).
+# Operations whose delivery creates new entries outside HARNESS_RUN_DIR (frozen U12/all_under) in
+# the traced controller process, unless delivered at before_run (prestage_before_run, untraced).
 CREATES_OUTSIDE_RUN_DIR = {
     "FX-SRC-META-ATTR": "zarr 3 writes source/source.zarr/<key>.<uuid>.partial then renames "
     "(attrs and consolidated metadata): created paths under source/, outside HARNESS_RUN_DIR",
@@ -318,6 +318,7 @@ _DELIVERY_KEYS = (
     "record_hash",
     "assigned_fields",
     "delivery",
+    "prestaged",
 )
 
 
@@ -395,7 +396,9 @@ def fixture_report(plan, schedule_hooks, source_pre):
         "outside_run_dir": [
             {"index": e["index"], "operation": e["fixture_operation"], "why": why}
             for e in entries
-            if (why := e["creates_outside_run_dir"]) and e["status"] == "APPLIED"
+            if (why := e["creates_outside_run_dir"])
+            and e["status"] == "APPLIED"
+            and not e.get("prestaged")  # applied in fixture preparation, before the run
         ],
     }
 
@@ -610,6 +613,95 @@ def rereview_report(projection):
             if key in note:
                 out[key] = note[key]
     return out
+
+
+# --------------------------------------------------------------------------- before_run setup
+
+BEFORE_RUN_SCHEMA = "weather-adapter.before-run-fixture/1"
+# Targets of a before_run fixture operation that exist before the run starts: the staged source
+# copy. A before_run request edit (FX-LEDGER-APPEND) stays in the run process: its target is
+# the seeded request object there, and it writes no file.
+PRESTAGED_TARGETS = frozenset({"source"})
+
+
+def prestaged_entries(plan):
+    """The fixture plan's before_run entries that fixture preparation applies."""
+    return [
+        e for e in plan["entries"] if e["hook"] == "before_run" and e["target"] in PRESTAGED_TARGETS
+    ]
+
+
+def prestage_before_run(plan, native_case, prepared):
+    """Fixture preparation for the case's before_run fixture operations (frozen hook
+    before_run, target the disposable source copy): every such entry applied to the staged
+    source BEFORE the run starts, through InjectionHooks.prestage_before_run (the delivery
+    path ``prepare`` uses). Container case mode runs this untraced in ``case_driver prepare``,
+    before the trace baseline, so its writes (zarr <key>.<uuid>.partial temps, renamed) are
+    not paths the traced run created; the in-process route runs it in run_case.
+
+    ``native_case``: run_case's schedule (substitution_plan native_case), whose indices the
+    plan carries. -> the record (prepared["before_run_fixture"]) or None when the case
+    schedules no such entry. A delivery that raised is carried in the record, never hidden:
+    InjectionHooks.adopt_before_run raises it in run_case, before the controller starts."""
+    entries = prestaged_entries(plan)
+    if not entries:
+        return None
+    source = Path(prepared["source"])
+    hooks = InjectionHooks(native_case, disposable_root=prepared["case_root"])
+    delivery = hooks.prestage_before_run([e["index"] for e in entries], source)
+    return {
+        "schema": BEFORE_RUN_SCHEMA,
+        "case_id": plan["case_id"],
+        "source": str(source),
+        "source_pre": prepared["source_pre"]["value"],
+        "source_after": tree_hash(source),
+        "delivery": delivery,
+    }
+
+
+def verify_before_run(record, plan, prepared):
+    """run_case, right after the fixture is staged or adopted (before any other side effect):
+    the fixture-preparation record re-verified against the staged source, or AdapterRefusal.
+    Refused when the case schedules such an entry and none was prepared: applying it in the
+    run would create paths outside HARNESS_RUN_DIR in the traced process. run_case installs
+    the verified ``delivery`` on its InjectionHooks (adopt_before_run) before ``prepare``, so
+    the report carries the records exactly as delivered and none is delivered again."""
+    entries = prestaged_entries(plan)
+    if not entries:
+        if record is not None:
+            _refuse("a before_run fixture record for a case that schedules no such operation")
+        return None
+    if record is None:
+        _refuse(
+            "the case's before_run fixture operations must be applied in fixture preparation "
+            "(case_driver prepare, before the trace); applying them in the run would create "
+            "paths outside HARNESS_RUN_DIR"
+        )
+    if not isinstance(record, dict) or record.get("schema") != BEFORE_RUN_SCHEMA:
+        _refuse("before_run fixture record has an unknown schema")
+    if record.get("case_id") != plan["case_id"]:
+        _refuse("before_run fixture record belongs to another case")
+    source = Path(prepared["source"])
+    if safe_path(Path(record.get("source", ""))) != safe_path(source):
+        _refuse("before_run fixture record is not for the staged source")
+    if record.get("source_pre") != prepared["source_pre"]["value"]:
+        _refuse("before_run fixture record does not start from the staged source")
+    delivery = record.get("delivery") or {}
+    if delivery.get("indices") != [e["index"] for e in entries]:
+        _refuse("before_run fixture record delivers other entries than the case schedules")
+    if tree_hash(source) != record.get("source_after"):
+        _refuse("staged source changed since the before_run fixture operations")
+    applied = [r for r in delivery.get("records") or [] if r.get("status") == "APPLIED"]
+    if (
+        applied
+        and delivery.get("raised") is None
+        and (
+            applied[0].get("before_hash") != record["source_pre"]
+            or applied[-1].get("after_hash") != record["source_after"]
+        )
+    ):
+        _refuse("before_run fixture record hashes do not chain from source_pre to the source")
+    return copy.deepcopy(record)
 
 
 def _self_check():

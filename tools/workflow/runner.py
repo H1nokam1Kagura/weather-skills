@@ -1411,6 +1411,16 @@ class Controller:
     def claim_gates_enabled(self):
         return "claim_checks" in self.context.get("review_evidence", {})
 
+    def derivable_fact_names(self):
+        """The registered facts the controller's own state defines, sorted (for the planner).
+
+        Before a plan is accepted the names come from the profile template the planner is
+        given (expected_plan(goal)), which is the only plan validation accepts; values are
+        never listed, and compute() always reads the accepted plan itself.
+        """
+        plan = self.plan if self.plan else expected_plan(self.goal)
+        return sorted(claim_gates.derivable_facts(self.date_contract(), self.goal, plan))
+
     def claim_check(self):
         """Gate 1, derivable computation, then gate 2; one durable record per plan version.
 
@@ -1433,7 +1443,17 @@ class Controller:
         claims, sources = evidence["plan_claims"], evidence["sources"]
         contract = self.date_contract()
         index = len(records)
-        args = (index, plan_hash, self.build_hash, self.source_hash, claims, sources, contract)
+        args = (
+            index,
+            plan_hash,
+            self.build_hash,
+            self.source_hash,
+            claims,
+            sources,
+            contract,
+            self.goal,
+            self.plan,
+        )
         gate = claim_gates.build_record(*args)
         occurrence, ruled = None, {}
         judged = [c["claim_id"] for c in claims if not c["derivable"]]
@@ -1961,9 +1981,25 @@ class Controller:
                 "schema": review_evidence.SCHEMA,
                 "sources": self.context["review_evidence"]["sources"],
                 "instruction": "Return schema, plan (the unchanged typed plan), and nonempty "
-                "plan_claims. Each claim contains claim_id, text, citations (source_id, "
-                "source_hash, verbatim quote), and your boolean derivable declaration. "
-                "Use only these bound documentation sources; never invent a source. "
+                "plan_claims. Each claim contains exactly claim_id, text, citations and "
+                "derivable, plus computes only when derivable is true. Each citation contains "
+                "exactly source_id, source_hash and quote; quote is copied character for "
+                "character from that source, including markdown such as backticks. Each claim "
+                "states exactly one fact, and every claim, derivable or not, cites at least one "
+                "of these bound documentation sources; never invent a source. The controller "
+                "computes these facts from its own records: "
+                + ", ".join(self.derivable_fact_names())
+                + " (goal.<field> is that field of goal; plan.<step id>.<argument> is that "
+                "argument of that step of plan). A claim that restates the plan's own "
+                "arguments, the goal's fields or another of these facts is checked against "
+                "the controller's value, never against documentation: set derivable true and "
+                "add computes {fact, value}, where fact is the one fact the claim states and "
+                "value is exactly the value it states, with the same JSON type. Every other "
+                "claim is derivable false and is judged only on whether its own cited quotes "
+                "state its fact; such a claim never rests on the plan or the goal. "
+                "At least one claim is derivable false: a plan is presented for review only "
+                "after the evidence checker has judged its derivable false claims, so a plan "
+                "whose claims are all derivable is routed to repair. "
                 "Declarations and citations are not controller support verdicts. "
                 "For a repair also include response; retain all envelope fields.",
             }

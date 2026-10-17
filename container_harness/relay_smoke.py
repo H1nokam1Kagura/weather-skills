@@ -13,6 +13,13 @@ Prints exactly one JSON object on stdout:
    NOT be.
 3. exactly one synthetic ``verifier`` call through RelayRoles (no retries), with the redacted
    receipt.
+4. the request-cap probe: when that call succeeded AND the relay's health reports its request
+   cap full (``spend.requests >= caps.max_requests``, the smoke relay runs with
+   ``--max-requests 1``), one more ask, which the relay must refuse BEFORE forwarding
+   (``relay_spend_cap``, the client's ``Refused(gate="budget")``). It cannot reach the gateway
+   and spends nothing; it EXHAUSTS the relay's spend guard, so the relay stops itself after
+   writing that refusal. Skipped (and recorded as skipped) otherwise, so it can never become a
+   second live call.
 
 Data policy: the payload is synthetic, Not Sensitive.
 """
@@ -216,9 +223,31 @@ def main():
             answer_keys=sorted(value),
             receipt={k: receipt.get(k) for k in RECEIPT_KEEP},
         )
+        out["cap_probe"] = cap_probe(roles, Refused)
     out["client_spent_reserved"] = roles.spent
     print(json.dumps(out))
     return 0
+
+
+def cap_probe(roles, refused_type, role="verifier", payload=None):
+    """One ask past a FULL request cap; must be refused before forwarding (step 4). ``role``
+    must be one the relay allows, or the role gate refuses it before the cap is tested."""
+    try:
+        spend = roles.health().get("spend") or {}
+    except refused_type as exc:
+        return {"outcome": "SKIPPED", "reason": f"health refused: {exc}"}
+    cap = (spend.get("caps") or {}).get("max_requests")
+    used = spend.get("requests")
+    seen = {"requests": used, "max_requests": cap, "state": spend.get("state")}
+    if type(cap) is not int or type(used) is not int or used < cap:
+        return {"outcome": "SKIPPED", "reason": "request cap not full", **seen}
+    try:
+        roles.ask(role, PAYLOAD if payload is None else payload)
+    except refused_type as exc:
+        return {"outcome": "REFUSED", "gate": exc.gate, "reason": str(exc), **seen}
+    except Exception as exc:  # noqa: BLE001 - recorded, the report fails it
+        return {"outcome": "ERROR", "error_type": type(exc).__name__, **seen}
+    return {"outcome": "SUCCESS", **seen}  # a forwarded call past the cap: the report fails it
 
 
 if __name__ == "__main__":

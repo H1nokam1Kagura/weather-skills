@@ -342,6 +342,7 @@ class InjectionHooks:
             request=request, source=Path(source), paths={"source": Path(source)}
         )
         self._dispatch("before_run", {}, controller)
+        self.records.sort(key=lambda r: r["index"])  # adopt_before_run entries: schedule order
         return request
 
     def __call__(self, point, event, controller):
@@ -1469,10 +1470,94 @@ class InjectionHooks:
         )
         return False
 
+    def prestage_before_run(self, indices, source):
+        """Fixture preparation: deliver exactly the before_run entries ``indices`` to the
+        disposable source copy before the run starts (container case mode: untraced, before the
+        trace baseline), on fresh hooks, through the same _dispatch path ``prepare`` uses with
+        the same stand-in. The schedule's other before_run entries are masked for this one
+        dispatch and stay for ``prepare`` in the run process.
+
+        Returns the delivery state ``adopt_before_run`` installs (JSON): {schema,
+        schedule_digest, indices, records, dispositions, stopped, harness_error, raised}. An
+        entry that raises is recorded exactly as ``prepare`` records it and the exception is
+        carried in ``raised``, for adopt_before_run to raise where prepare would have."""
+        if self.records or self.counts or self.done or self.prepared:
+            raise HarnessDispatchError("before_run prestaging needs fresh hooks")
+        wanted = sorted(set(indices))
+        before_run = [i for i, s in enumerate(self.schedule) if s["hook"] == "before_run"]
+        if not wanted or any(
+            i not in before_run or self.schedule[i]["operation"] != "mutate_fixture" for i in wanted
+        ):
+            raise HarnessDispatchError("only scheduled before_run mutate_fixture entries prestage")
+        masked = [i for i in before_run if i not in wanted]
+        masked_ids = {self.schedule[i].get("id") for i in masked} - {None}
+        if any(masked_ids & set(self.schedule[i].get("requires") or []) for i in wanted):
+            raise HarnessDispatchError("a prestaged entry requires an in-run before_run entry")
+        unmask = [i for i in masked if i not in self.done and i not in self.dispositions]
+        for index in unmask:
+            self.done.add(index)
+            if self.dependent:
+                self.dispositions[index] = {"disposition": "MASKED"}
+        path = Path(source)
+        controller = SimpleNamespace(request=None, source=path, paths={"source": path})
+        raised = None
+        try:
+            self._dispatch("before_run", {}, controller)
+        except Exception as exc:  # noqa: BLE001 - carried, re-raised by adopt_before_run
+            raised = {"type": type(exc).__name__, "message": str(exc)}
+        finally:
+            for index in unmask:
+                self.done.discard(index)
+                self.dispositions.pop(index, None)
+        for record in self.records:
+            record["prestaged"] = True
+        state = {
+            "schema": PRESTAGE_SCHEMA,
+            "schedule_digest": digest(self.schedule),
+            "indices": wanted,
+            "records": self.records,
+            "dispositions": sorted([i, d] for i, d in self.dispositions.items() if i in wanted),
+            "stopped": self.stopped,
+            "harness_error": self.harness_error,
+            "raised": raised,
+        }
+        return json.loads(json.dumps(state, allow_nan=False))
+
+    def adopt_before_run(self, state):
+        """Install a prestage_before_run delivery state on these hooks before ``prepare``: the
+        prestaged entries are done (their records and dispositions as delivered), so prepare
+        dispatches only the remaining before_run entries and keeps schedule order. A
+        prestaged entry that raised is raised here, where prepare would have raised it."""
+        if not isinstance(state, dict) or state.get("schema") != PRESTAGE_SCHEMA:
+            raise HarnessDispatchError("not a before_run prestage state")
+        if state.get("schedule_digest") != digest(self.schedule):
+            raise HarnessDispatchError("before_run prestage state belongs to another schedule")
+        if self.records or self.counts or self.done or self.prepared:
+            raise HarnessDispatchError("a before_run prestage state is adopted into fresh hooks")
+        state = json.loads(json.dumps(state))
+        indices = set(state["indices"])
+        if {r["index"] for r in state["records"]} - indices:
+            raise HarnessDispatchError("before_run prestage records outside its indices")
+        self.records = state["records"]
+        self.done = {r["index"] for r in self.records}
+        self.dispositions.update({int(i): d for i, d in state["dispositions"]})
+        self.stopped = state["stopped"]
+        self.harness_error = state["harness_error"]
+        raised = state["raised"]
+        if raised is not None:
+            kind = {
+                "UnsupportedInjection": UnsupportedInjection,
+                "PermissionError": PermissionError,
+            }
+            if raised["type"] in kind:
+                raise kind[raised["type"]](raised["message"])
+            raise HarnessDispatchError(f"{raised['type']}: {raised['message']}")
+
 
 STOP_MODE = "harness_stop_controller"
 STOP_SCHEMA = "e2e-injections.stop/1"
 STATE_SCHEMA = "e2e-injections.state/1"
+PRESTAGE_SCHEMA = "e2e-injections.before-run-prestage/1"
 RUN_DIR_SYMBOL = re.compile(r"HARNESS_RUN_DIR(?![A-Za-z0-9_:])")
 
 

@@ -4,9 +4,11 @@ usage:
     python container_harness/launch.py build --tag simkit-harness-ctl:<sha> [--context DIR]
     python container_harness/launch.py run MODE --image TAG --out DIR [--case-id ID]
                                        [--no-trace] [--kill-tracer-after S] [--timeout S]
+                                       [--relay-dir RDIR] [--keep-container]
     python container_harness/launch.py admission --image TAG --out ADMISSION.json
                                        [--selector S] [--smoke-ids A,B]
     python container_harness/launch.py relay-smoke --image TAG --out DIR --relay-dir RDIR
+                                       [--client relay_smoke|relay_dedup_smoke|relay_role_smoke]
 
 Live roles (owner ruling container_route_ruling_2026-10-13.live_roles): with ``--relay-dir``
 (written by ``relay_ci.sh net-up`` + ``relay-start``) the container joins the docker
@@ -22,7 +24,9 @@ container under the same run conditions (no network, no mounts) and writes its s
 MODE is an entry.sh mode (canary, tree, kill-tracer). ``run`` creates ONE fresh container under
 the owner-ruled run conditions (container_route_ruling_2026-10-13), starts it attached, waits,
 copies /harness-out out with ``docker cp`` after exit (never ``docker exec``), records
-``docker diff`` as an independent cross-check, removes the container, then projects the trace
+``docker diff`` as an independent cross-check, removes the container (``--keep-container``
+leaves it, named in DIR/container.txt, for the live case job's ``docker export`` key scan; the
+workflow removes it in an always() step), then projects the trace
 with analyze_trace.py into DIR/evidence.json. The conditions are re-read from ``docker inspect``
 and recorded beside the evidence, so a run that drifted from them is visible in its own output.
 """
@@ -68,6 +72,8 @@ RELAY_ENV_NAMES = (
     "SIMKIT_PROBE_TARGETS",
 )
 FORBIDDEN_ENV_MARKERS = ("KONG", "ANTHROPIC", "OPENAI")
+# relay-smoke in-container clients (container_harness/<client>.py), same run conditions.
+SMOKE_CLIENTS = ("relay_smoke", "relay_dedup_smoke", "relay_role_smoke")
 
 
 def relay_settings(relay_dir, probe_targets=False):
@@ -226,6 +232,10 @@ def run(args):
     cmd = ["docker", "create", "--name", name, *run_args, args.image, *entry_args]
     check_cmd(cmd)
     sh(cmd, capture_output=True, env=env)
+    keep = bool(getattr(args, "keep_container", False))
+    if keep:
+        # Named before anything can fail, so the workflow's always() removal step finds it.
+        (out / "container.txt").write_text(name + "\n", encoding="utf-8")
     record = {
         "schema": "simkit.harness-launch/1",
         "mode": args.mode,
@@ -234,6 +244,8 @@ def run(args):
         "docker_create": cmd,
         "entry_args": entry_args,
     }
+    if keep:
+        record["container_kept"] = True  # the caller removes it (docker rm -f, container.txt)
     try:
         observed, checks = conditions_from_inspect(name, relay_net)
         record["run_conditions_observed"] = observed
@@ -267,7 +279,8 @@ def run(args):
         diff = subprocess.run(["docker", "diff", name], capture_output=True, text=True)
         (out / "docker_diff.txt").write_text(diff.stdout, encoding="utf-8")
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        if not keep:
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     hout = out / "harness-out"
     status = analyze_trace.read_status(hout / "harness_status.txt")
     record["harness_status"] = status
@@ -374,7 +387,11 @@ def relay_smoke(args):
     """
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    name = f"simkit-relay-smoke-{uuid.uuid4().hex[:8]}"
+    client = getattr(args, "client", "relay_smoke")
+    if client not in SMOKE_CLIENTS:
+        raise SystemExit(f"unknown smoke client {client!r}")
+    stem = client.replace("_", "-")  # relay-smoke | relay-dedup-smoke | relay-role-smoke
+    name = f"simkit-{stem}-{uuid.uuid4().hex[:8]}"
     run_args, env, net = relay_settings(args.relay_dir, probe_targets=True)
     cmd = [
         "docker",
@@ -394,7 +411,7 @@ def relay_smoke(args):
         "python",
         args.image,
         "-B",
-        "/opt/ctl/container_harness/relay_smoke.py",
+        f"/opt/ctl/container_harness/{client}.py",
     ]
     check_cmd(cmd)
     sh(cmd, capture_output=True, env=env)
@@ -402,6 +419,7 @@ def relay_smoke(args):
     observed, checks = conditions_from_inspect(name, net)
     record = {
         "schema": "simkit.relay-smoke-launch/1",
+        "client": client,
         "image": args.image,
         "container": name,
         "docker_create": cmd,
@@ -434,7 +452,7 @@ def relay_smoke(args):
         (out / "container.stdout.unparsed").write_text(stdout[-4000:], encoding="utf-8")
     record["smoke_parsed"] = smoke is not None
     if smoke is not None:
-        (out / "relay-smoke.container.json").write_text(
+        (out / f"{stem}.container.json").write_text(
             json.dumps(smoke, indent=1) + "\n", encoding="utf-8"
         )
     (out / "launch.json").write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
@@ -458,6 +476,12 @@ def main(argv):
     r.add_argument("--kill-tracer-after", type=float)
     r.add_argument("--timeout", type=int, default=1500)
     r.add_argument("--relay-dir", help="relay_ci.sh DIR: join the relay-only network")
+    r.add_argument(
+        "--keep-container",
+        action="store_true",
+        help="leave the exited container (name in OUT/container.txt) for the host key scan's "
+        "docker export; the caller removes it. Default: removed after docker cp",
+    )
     a = sub.add_parser("admission")
     a.add_argument("--image", required=True)
     a.add_argument("--out", required=True)
@@ -468,6 +492,16 @@ def main(argv):
     s.add_argument("--out", required=True)
     s.add_argument("--relay-dir", required=True)
     s.add_argument("--timeout", type=int, default=600)
+    s.add_argument(
+        "--client",
+        choices=SMOKE_CLIENTS,
+        default="relay_smoke",
+        help="in-container client: relay_smoke (one tiny verifier call), relay_dedup_smoke "
+        "(one reviewer-sized dedup-sha256/1 call whose binding sits only in a shared block) or "
+        "relay_role_smoke (one call per live role and payload variant, each answer judged by "
+        "the controller's own acceptance); writes "
+        "OUT/<client, dashed>.container.json",
+    )
     args = ap.parse_args(argv[1:])
     commands = {"build": build, "run": run, "admission": admission, "relay-smoke": relay_smoke}
     return commands[args.cmd](args)

@@ -2,6 +2,7 @@
 
 usage: python container_harness/cases_report.py ADMISSION.json CASES_DIR --out RESULTS.json
                                                  --markdown RESULTS.md [--run-url URL]
+                                                 [--prior-results ORIGINAL/RESULTS.json]
        python container_harness/cases_report.py gate RESULTS.json   (exit 1 on a FAILed
                                                  execution gate; see execution_gate)
 
@@ -26,6 +27,34 @@ Every EXECUTED case also carries a separate, labelled counterfactual "with AMD-V
 (warn_counterfactual.py; JSON key warn_counterfactual.JSON_KEY, its own RESULTS.md column). It is
 never applied to the headline: dimensions/terminal/assertions and frozen_summary stay exactly as
 the frozen scorer computed them in score.json.
+
+Every EXECUTED case that holds a frozen rubric assertion (rubric_grader.EXPECTED_TARGETS), or
+whose artifacts include rubric_grader.GRADES_FILE, also carries the sub-wave 8 rubric grader's
+verdicts under rubric_grader.JSON_KEY, in their own RESULTS.md column labelled
+"UNRATIFIED grader (diagnostic)" until a valid ratification record exists
+(``--grader-ratification``, default decisions/RUBRIC-GRADER-RATIFICATION.json). It never touches
+the frozen headline or the WARN counterfactual: those assertions stay as score.json has them.
+This module only READS grades files; it never calls a model.
+
+Live-role cases (relay_usage.py) also carry their relay usage (requests, tokens, list-price
+estimate, cap state, faults), a relay outcome label (LIVE_TRANSPORT_FAULT | RELAY_GUARD_ABORT |
+null) and an ``attempts`` list; the top-level ``live`` section totals the run and lists the
+``rerun_eligible`` cases under OWNER-RULINGS live_spend_authorization_2026-10-15
+.rerun_on_gateway_fault. With ``--prior-results`` (the original run's RESULTS.json) a rerun is
+reported ALONGSIDE the original: the case's attempts list holds the original attempt first,
+then this run's; the original is never replaced. Offline runs get an empty ``live`` section
+and nothing else changes.
+
+Every EXECUTED case whose projected invocation_receipts include live receipts carries a
+``gateway_mock`` record (gateway_mock_record): GATEWAY_MOCK when any live receipt shows
+gateway_mock true (a mock gateway answered, no model was called), GATEWAY_UNOBSERVED when one
+lacks the field. Either is flagged in its detail cell and in a prominent RESULTS.md line, listed
+under ``live.gateway_mock_cases`` / ``live.gateway_unobserved_cases``, and is never a live result.
+
+    attempts: [{"attempt": 1, "run_url", "status", "relay_outcome_label", "relay_usage":
+                {requests, input_tokens, output_tokens, est_usd, cap_state}, "fault_kinds",
+                "dimensions"?, "terminal"?, "harness_error_source"?}, {"attempt": 2, ...,
+                "rerun_of_run_url", "authorized_by_prior_rerun_eligible"}]
 """
 
 import argparse
@@ -37,6 +66,8 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 
+import relay_usage  # noqa: E402
+import rubric_grader as rg  # noqa: E402
 import warn_counterfactual as wcf  # noqa: E402
 
 HEADER = (
@@ -202,10 +233,237 @@ def harness_error_detail(entry):
     return " - ".join(p for p in parts if p)
 
 
-def build(admission, cases_dir, run_url=None):
+GATEWAY_MOCK = "GATEWAY_MOCK"
+GATEWAY_UNOBSERVED = "GATEWAY_UNOBSERVED"
+GATEWAY_MOCK_NOTE = (
+    "a projected live receipt carries gateway_mock true: a mock gateway answered and no model "
+    "was called. Such a case is NEVER a live result, whatever its dimensions say"
+)
+
+
+def gateway_mock_record(projection):
+    """B-LR-1: what the projected live receipts of one EXECUTED case say about the gateway.
+
+    None when the case has no live receipt. Otherwise {status, mock, unobserved, real, note}:
+    mock lists the invocation ids whose live.gateway_mock is true (status GATEWAY_MOCK);
+    unobserved those whose gateway_mock is missing or not a boolean (GATEWAY_UNOBSERVED when no
+    receipt is a mock: MISSING stays MISSING, never read as a real call); real the rest (status
+    null). live_result is True only when every live receipt shows gateway_mock false."""
+    evidence = (projection.get("projection") or {}).get("evidence") or {}
+    mock, unobserved, real = [], [], []
+    for record in evidence.get("invocation_receipts") or []:
+        if not isinstance(record, dict) or record.get("mode") != "live":
+            continue
+        value = (record.get("live") or {}).get("gateway_mock")
+        ident = record.get("invocation_id")
+        if value is True:
+            mock.append(ident)
+        elif value is False:
+            real.append(ident)
+        else:
+            unobserved.append(ident)
+    if not (mock or unobserved or real):
+        return None
+    status = GATEWAY_MOCK if mock else (GATEWAY_UNOBSERVED if unobserved else None)
+    return {
+        "status": status,
+        "live_result": status is None,
+        "mock": mock,
+        "unobserved": unobserved,
+        "real": real,
+        "note": GATEWAY_MOCK_NOTE if mock else None,
+    }
+
+
+def gateway_mock_lines(cases):
+    """Prominent RESULTS.md lines naming every case flagged by gateway_mock_record."""
+    lines = []
+    for status, text in (
+        (GATEWAY_MOCK, "GATEWAY MOCK, no model called, NOT a live result"),
+        (GATEWAY_UNOBSERVED, "GATEWAY UNOBSERVED (gateway_mock missing), NOT a live result"),
+    ):
+        ids = [e["case_id"] for e in cases if (e.get("gateway_mock") or {}).get("status") == status]
+        if ids:
+            lines += [f"> **{text}: {', '.join(ids)}**", ""]
+    return lines
+
+
+def live_attempted(row):
+    """A live-role case this run dispatched (so a relay audit is expected)."""
+    return (
+        row.get("role_mode") == "live"
+        and row.get("admitted")
+        and row.get("disposition") == "RUNNABLE"
+        and bool(row.get("selected"))
+    )
+
+
+def attempt_record(entry, usage, run_url):
+    rec = {
+        "attempt": 1,
+        "run_url": run_url,
+        "status": entry["status"],
+        "relay_outcome_label": usage["label"],
+        "relay_usage": {
+            k: usage.get(k)
+            for k in ("requests", "input_tokens", "output_tokens", "est_usd", "cap_state")
+        },
+        "fault_kinds": sorted({f["kind"] for f in usage.get("faults") or []}),
+    }
+    for key in ("dimensions", "terminal", "harness_error_source"):
+        if entry.get(key) is not None:
+            rec[key] = entry[key]
+    return rec
+
+
+def add_live(entry, art, run_url, prior):
+    """Relay usage, label and attempts for one live-role case entry; returns its usage."""
+    if art is None:  # no case artifact: no audit observed (never inferred as zero usage)
+        usage = relay_usage.usage_from_events(None)
+    else:
+        usage = relay_usage.usage_from_relay_dir(art / "relay")
+    entry["relay_usage"] = usage
+    entry["relay_outcome_label"] = usage["label"]
+    this = attempt_record(entry, usage, run_url)
+    previous = (prior["cases"].get(entry["case_id"]) or {}).get("attempts") or []
+    if previous:
+        this.update(
+            attempt=len(previous) + 1,
+            rerun_of_run_url=prior["run_url"],
+            authorized_by_prior_rerun_eligible=entry["case_id"] in prior["eligible"],
+        )
+    entry["attempt"] = this["attempt"]
+    entry["attempts"] = [*previous, this]
+    return usage
+
+
+def live_section(per_case, prior):
+    """Run totals, the two labels and the rerun-eligible list (empty for an offline run)."""
+    live = [e for e in per_case if "relay_usage" in e]
+    totals = {"cases": len(live), "cases_with_audit": 0}
+    for key in ("requests", "input_tokens", "output_tokens", "usage_unobserved_requests"):
+        totals[key] = sum(e["relay_usage"].get(key) or 0 for e in live)
+    ests = [e["relay_usage"].get("est_usd") for e in live]
+    totals["cases_with_audit"] = sum(1 for e in live if e["relay_usage"]["audit_present"])
+    known = [x for x in ests if x is not None]
+    totals["est_usd"] = round(sum(known), 6)
+    totals["est_usd_complete"] = len(known) == len(live)
+    totals["est_usd_basis"] = relay_usage.EST_USD_BASIS
+    eligible, not_eligible, unauthorized, too_early = [], {}, [], []
+    for e in live:
+        usage = e["relay_usage"]
+        ok, reason = relay_usage.rerun_decision(
+            e["status"],
+            usage["label"],
+            clean_case(e.get("dimensions"), e.get("terminal")),
+            e["attempt"],
+        )
+        if ok:
+            eligible.append(relay_usage.rerun_record(e["case_id"], e["attempt"], usage))
+        elif usage["label"] or usage["faults"] or e["attempt"] > 1:
+            not_eligible[e["case_id"]] = reason
+        if e["attempt"] > 1:
+            last = e["attempts"][-1]
+            if not last.get("authorized_by_prior_rerun_eligible"):
+                unauthorized.append(e["case_id"])
+            earliest = (prior["eligible"].get(e["case_id"]) or {}).get("earliest_rerun_utc")
+            start = relay_usage.parse_ts(usage.get("relay_start_ts"))
+            if earliest and start and start < relay_usage.parse_ts(earliest):
+                too_early.append(e["case_id"])
+    return {
+        "ruling": relay_usage.RULING_ID,
+        "ruling_summary": relay_usage.RULING_SUMMARY,
+        "label_note": (
+            f"{relay_usage.LIVE_TRANSPORT_FAULT}: a transient gateway fault, never counted as a "
+            f"failure of the system under test; {relay_usage.RELAY_GUARD_ABORT}: the relay spend "
+            "guard stopped the case (deterministic, never rerun)"
+        ),
+        "totals": totals,
+        "run_token_cap": relay_usage.RUN_TOKEN_CAP,
+        "labels": {
+            label: [e["case_id"] for e in live if e["relay_outcome_label"] == label]
+            for label in relay_usage.LABELS
+        },
+        "attempts_by_case": {e["case_id"]: e["attempts"] for e in live},
+        "rerun_eligible": eligible,
+        "rerun_not_eligible": not_eligible,
+        "prior_run_url": prior["run_url"],
+        "reruns_not_authorized_by_prior": unauthorized,
+        "reruns_before_earliest_time": too_early,
+        # B-LR-1: EXECUTED cases whose projected live receipts do not show a real model call
+        # (gateway_mock_record); none of them is ever a live result.
+        "gateway_mock_note": GATEWAY_MOCK_NOTE,
+        "gateway_mock_cases": [
+            e["case_id"]
+            for e in per_case
+            if (e.get("gateway_mock") or {}).get("status") == GATEWAY_MOCK
+        ],
+        "gateway_unobserved_cases": [
+            e["case_id"]
+            for e in per_case
+            if (e.get("gateway_mock") or {}).get("status") == GATEWAY_UNOBSERVED
+        ],
+    }
+
+
+def prior_index(prior_results):
+    """The original run's RESULTS.json (for a rerun) as {run_url, cases, eligible}."""
+    prior_results = prior_results or {}
+    return {
+        "run_url": prior_results.get("run_url"),
+        "cases": {e["case_id"]: e for e in prior_results.get("cases") or []},
+        "eligible": {
+            r["case_id"]: r for r in (prior_results.get("live") or {}).get("rerun_eligible") or []
+        },
+    }
+
+
+def grader_section(per_case, ratification_path=None):
+    """The labelled rubric-grader block (diagnostic; never applied to the headline)."""
+    graded = [e for e in per_case if rg.JSON_KEY in e]
+    done = [e for e in graded if e[rg.JSON_KEY]["status"] == "GRADED"]
+    record, path = rg.load_ratification(ratification_path)
+    status = rg.ratification_status(record, [e[rg.JSON_KEY].get("grader") for e in done], path)
+    rows, verdicts = [], {}
+    for e in done:
+        for aid, r in e[rg.JSON_KEY]["assertions"].items():
+            verdicts[r.get("verdict")] = verdicts.get(r.get("verdict"), 0) + 1
+            rows.append(
+                {
+                    "case_id": e["case_id"],
+                    "assertion_id": aid,
+                    # the headline, exactly as score.json has it (never the grader's copy)
+                    "as_frozen": (e.get("assertions") or {}).get(aid),
+                    "grader": r.get("verdict"),
+                    "source": r.get("source"),
+                    "downgraded": bool(r.get("downgraded")),
+                    "quote_verified": any(
+                        q.get("found_in") == "graded_output" for q in r.get("quotes") or []
+                    ),
+                    "reason": r.get("reason"),
+                    "rationale": r.get("rationale"),
+                }
+            )
+    return {
+        "label": status["label"],
+        "ratification": status,
+        "applied_to_headline": False,
+        "decision": rg.DECISION,
+        "note": rg.NOTE,
+        "cases": len(graded),
+        "graded_cases": len(done),
+        "not_graded": {e["case_id"]: e[rg.JSON_KEY]["status"] for e in graded if e not in done},
+        "independence": sorted({e[rg.JSON_KEY].get("independence") or "?" for e in done}),
+        "verdict_counts": dict(sorted(verdicts.items(), key=lambda kv: str(kv[0]))),
+        "assertions": rows,
+    }
+
+
+def build(admission, cases_dir, run_url=None, prior_results=None, ratification_path=None):
     root, guarded, score_mod = frozen()
     arts = case_artifacts(cases_dir) if cases_dir and Path(cases_dir).is_dir() else {}
     rows = admission["cases"]
+    prior = prior_index(prior_results)
     per_case = []
     scored_all = []
     cf_scored_all = []
@@ -243,6 +501,9 @@ def build(admission, cases_dir, run_url=None):
             # Labelled counterfactual, computed on a COPY: never written back into entry's
             # frozen dimensions/terminal/assertions or into scored_all.
             projection = load(arts[row["case_id"]] / "projection.json") or {}
+            gateway = gateway_mock_record(projection)
+            if gateway is not None:
+                entry["gateway_mock"] = gateway
             if projection.get("status") != "OK":
                 entry[wcf.JSON_KEY] = wcf.not_computed(
                     f"projection {projection.get('status', 'ABSENT')}"
@@ -254,8 +515,14 @@ def build(admission, cases_dir, run_url=None):
                     row["case_id"], (projection.get("projection") or {}).get("evidence"), scored
                 )
                 cf_scored = cf or scored
+            # Rubric grader verdicts: READ from the case's grades file, in their own key.
+            grades = arts[row["case_id"]] / rg.GRADES_FILE
+            if grades.is_file() or row["case_id"] in rg.EXPECTED_TARGETS:
+                entry[rg.JSON_KEY] = rg.case_record_from_file(grades, row["case_id"])
         cf_scored_all.append(cf_scored)
         entry.pop("scored", None)
+        if live_attempted(row):
+            add_live(entry, arts.get(row["case_id"]), run_url, prior)
     counts = {}
     for e in per_case:
         counts[e["status"]] = counts.get(e["status"], 0) + 1
@@ -337,6 +604,8 @@ def build(admission, cases_dir, run_url=None):
         "missing_capability_reasons": admission.get("missing_capability_reasons"),
         "frozen_summary": score_mod.summarize(scored_all),
         wcf.JSON_KEY: counterfactual,
+        rg.JSON_KEY: grader_section(per_case, ratification_path),
+        "live": live_section(per_case, prior),
         "pairs": sorted(pairs.values(), key=lambda p: p["pair_id"]),
         "cases": per_case,
     }
@@ -366,6 +635,7 @@ def markdown(res):
         f"> {res['header']}",
         "",
         *gate_lines(res.get("execution_gate")),
+        *gateway_mock_lines(res["cases"]),
         f"- Run: {res['run_url'] or 'n/a'}",
         f"- GS1: **{res['gs1']}**",
         f"- Adapter: `{res['adapter']}`; selector `{res['selector']}`",
@@ -394,11 +664,12 @@ def markdown(res):
         "",
         "## Cases",
         "",
-        "`detail` is the result as frozen (the headline). The last column is a labelled "
-        f"counterfactual: {wcf.NOTE}",
+        "`detail` is the result as frozen (the headline). The next column is a labelled "
+        f"counterfactual: {wcf.NOTE} The last column is the rubric grader: {rg.NOTE}",
         "",
-        f"| case | mode | roles | status | detail (as frozen) | {wcf.COLUMN} |",
-        "|---|---|---|---|---|---|",
+        f"| case | mode | roles | status | detail (as frozen) | {wcf.COLUMN} "
+        f"| {grader_column(res)} |",
+        "|---|---|---|---|---|---|---|",
     ]
     for e in res["cases"]:
         if e["status"] == "NOT_IMPLEMENTED":
@@ -413,10 +684,20 @@ def markdown(res):
             detail = harness_error_detail(e)
         else:
             detail = e.get("demoted", "")
+        if e.get("relay_outcome_label"):
+            detail += f"; relay {e['relay_outcome_label']}"
+        gateway = (e.get("gateway_mock") or {}).get("status")
+        if gateway == GATEWAY_MOCK:
+            detail += "; GATEWAY MOCK: no model called, NOT a live result"
+        elif gateway == GATEWAY_UNOBSERVED:
+            detail += "; GATEWAY UNOBSERVED: gateway_mock missing, NOT a live result"
+        if e.get("attempt", 1) > 1:
+            detail += f"; attempt {e['attempt']} (rerun; earlier attempts under Live relay usage)"
         cf = _cell(wcf.summary_cell(e.get(wcf.JSON_KEY)), limit=600)
+        grader = _cell(rg.summary_cell(e.get(rg.JSON_KEY)), limit=400)
         lines.append(
             f"| {e['case_id']} | {e['execution_mode']} | {e['role_mode']} | {e['status']} "
-            f"| {detail} | {cf} |"
+            f"| {detail} | {cf} | {grader} |"
         )
     lines += [
         "",
@@ -467,7 +748,123 @@ def markdown(res):
             "```",
             "",
         ]
+    lines += grader_lines(res.get(rg.JSON_KEY))
+    lines += live_lines(res.get("live"))
     return "\n".join(lines)
+
+
+def grader_column(res):
+    """The rubric-grader column header: its label (UNRATIFIED unless a valid record exists)."""
+    return (res.get(rg.JSON_KEY) or {}).get("label") or rg.LABEL_UNRATIFIED
+
+
+def grader_lines(section):
+    """RESULTS.md section for the rubric grader; nothing when no case carries a rubric."""
+    if not section or not section["cases"]:
+        return []
+    rat = section["ratification"]
+    lines = [
+        f"## {section['label']}: frozen rubric assertions "
+        "(not applied; the frozen result above is the headline)",
+        "",
+        f"> {section['note']}",
+        "",
+        f"- Decision: {section['decision']}",
+        f"- Ratification: {rat['status']}" + (f" ({rat['reason']})" if rat["reason"] else ""),
+        f"- Cases with a rubric assertion: {section['cases']}; graded: "
+        f"{section['graded_cases']}"
+        + (f"; not graded: {section['not_graded']}" if section["not_graded"] else ""),
+        f"- Grader independence: {', '.join(section['independence']) or 'n/a'}",
+        "",
+    ]
+    if section["assertions"]:
+        lines += [
+            f"| case | assertion | as frozen (headline) | {section['label']} | source "
+            "| quote verified | rationale / reason |",
+            "|---|---|---|---|---|---|---|",
+            *[
+                f"| {r['case_id']} | {r['assertion_id']} | {r['as_frozen']} | {r['grader']}"
+                + (" (PASS downgraded)" if r["downgraded"] else "")
+                + f" | {r['source']} | {'yes' if r['quote_verified'] else 'no'} "
+                f"| {_cell(r['reason'] or r['rationale'] or '', limit=300)} |"
+                for r in section["assertions"]
+            ],
+            "",
+        ]
+    return lines
+
+
+def _usd(value):
+    return "n/a" if value is None else f"{value:.4f}"
+
+
+def live_lines(live):
+    """RESULTS.md section for live-role cases; nothing at all for an offline run."""
+    if not live or not live["totals"]["cases"]:
+        return []
+    t = live["totals"]
+    lines = [
+        "## Live relay usage (relay audit; list-price estimate, Kong billing not observed)",
+        "",
+        f"> {live['label_note']}",
+        "",
+        f"- Run totals: {t['cases']} live cases ({t['cases_with_audit']} with a relay audit), "
+        f"{t['requests']} requests, {t['input_tokens']} input / {t['output_tokens']} output "
+        f"tokens, est. USD {_usd(t['est_usd'])}"
+        + ("" if t["est_usd_complete"] else " (incomplete: some cases unpriced or unaudited)")
+        + (
+            f"; {t['usage_unobserved_requests']} requests without observed usage"
+            if t["usage_unobserved_requests"]
+            else ""
+        ),
+        f"- {relay_usage.LIVE_TRANSPORT_FAULT}: "
+        f"{', '.join(live['labels'][relay_usage.LIVE_TRANSPORT_FAULT]) or 'none'}",
+        f"- {relay_usage.RELAY_GUARD_ABORT}: "
+        f"{', '.join(live['labels'][relay_usage.RELAY_GUARD_ABORT]) or 'none'}",
+        "",
+        "| case | attempt | status | requests | input tokens | output tokens | est. USD "
+        "| cap state | relay label | faults |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for cid, attempts in live["attempts_by_case"].items():
+        for a in attempts:
+            u = a["relay_usage"]
+            lines.append(
+                f"| {cid} | {a['attempt']} | {a['status']} | {u['requests']} "
+                f"| {u['input_tokens']} | {u['output_tokens']} | {_usd(u['est_usd'])} "
+                f"| {u['cap_state']} | {a['relay_outcome_label'] or ''} "
+                f"| {_cell(', '.join(a['fault_kinds']))} |"
+            )
+    lines += [
+        "",
+        f"### Rerun-eligible ({live['ruling']})",
+        "",
+        f"> {live['ruling_summary']}",
+        "",
+    ]
+    if live["rerun_eligible"]:
+        lines += [
+            "| case | attempt | fault kinds | wait (s) | earliest rerun (UTC) |",
+            "|---|---|---|---|---|",
+            *[
+                f"| {r['case_id']} | {r['attempt']} | {', '.join(r['fault_kinds'])} "
+                f"| {r['min_wait_seconds']:g} | {r['earliest_rerun_utc'] or 'n/a'} |"
+                for r in live["rerun_eligible"]
+            ],
+        ]
+    else:
+        lines.append("No case is rerun-eligible.")
+    if live["rerun_not_eligible"]:
+        lines += ["", "Not eligible:", ""]
+        lines += [f"- {cid}: {why}" for cid, why in live["rerun_not_eligible"].items()]
+    for key, text in (
+        ("reruns_not_authorized_by_prior", "Reruns NOT listed rerun-eligible by the prior run"),
+        ("reruns_before_earliest_time", "Reruns started before the earliest allowed time"),
+    ):
+        if live[key]:
+            lines += ["", f"> **{text}: {', '.join(live[key])}**"]
+    lines.append("")
+    return lines
 
 
 def main(argv):
@@ -479,8 +876,25 @@ def main(argv):
     ap.add_argument("--out", required=True)
     ap.add_argument("--markdown", required=True)
     ap.add_argument("--run-url")
+    ap.add_argument(
+        "--prior-results",
+        help="the original run's RESULTS.json when this run re-dispatches rerun-eligible cases; "
+        "its attempts are reported alongside this run's, never replaced",
+    )
+    ap.add_argument(
+        "--grader-ratification",
+        default=None,
+        help="the rubric grader's ratification record (default "
+        "decisions/RUBRIC-GRADER-RATIFICATION.json); absent or invalid keeps the grader "
+        "column UNRATIFIED",
+    )
     a = ap.parse_args(argv[1:])
-    res = build(load(a.admission), a.cases_dir, a.run_url)
+    prior = None
+    if a.prior_results:
+        prior = load(a.prior_results)
+        if prior is None:
+            raise SystemExit(f"--prior-results {a.prior_results} is absent or not JSON")
+    res = build(load(a.admission), a.cases_dir, a.run_url, prior, a.grader_ratification)
     Path(a.out).write_text(json.dumps(res, indent=1, default=str) + "\n", encoding="utf-8")
     Path(a.markdown).write_text(markdown(res), encoding="utf-8")
     print(json.dumps(res["counts"], indent=1))

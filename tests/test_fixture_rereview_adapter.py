@@ -16,6 +16,7 @@ by name below, never by result.
 
 import copy
 import hashlib
+import io
 import json
 import shutil
 import tomllib
@@ -403,10 +404,194 @@ def test_repo_copy_is_refused_in_prestaged_mode_and_reverified_when_adopted(lab,
     assert frx.controller_repo({"needs_repo_copy": False}, {"repo": "r"}, prepared) == ("r", None)
 
 
+# --------------------------------------------------------------------------- before_run setup
+
+
+def source_meta_case(frozen):
+    """LOCAL variant (not a frozen case): E03-P1-CTL (substituted roles, CAP-FIXTURE-OP) with
+    E03-P2-CTL's frozen schedule, a before_run FX-SRC-META-ATTR on the disposable source copy
+    (E03-P2 itself is a live-role case)."""
+    case = copy.deepcopy(frozen[PREFIX + "E03-P1-CTL"])
+    case["id"] += "-LOCAL-SRC-META-ATTR"
+    case["injection_schedule"] = copy.deepcopy(frozen[PREFIX + "E03-P2-CTL"]["injection_schedule"])
+    (entry,) = case["injection_schedule"]
+    assert entry["hook"] == "before_run" and entry["selector"]["role_or_tool_or_stage"] == (
+        "source_metadata"
+    )
+    assert entry["payload"]["fixture_operation"] == "FX-SRC-META-ATTR"
+    return case
+
+
+def snapshot(root):
+    return {str(p) for p in Path(root).resolve().rglob("*")}
+
+
+def roles_factory(adapter, case):
+    return lambda run_dir: adapter.substituted_roles_factory(case, MAP_GOAL, run_dir)
+
+
+def prestaged_run(lab, case, before_run=True):
+    """The container case route offline: ``case_driver prepare`` (prepare_fixture, then the
+    before_run fixture preparation, JSON round trip), a baseline, then run_case with the
+    harness channel. ``created``: every path the run created; ``staged``: what the before_run
+    preparation created (after prepare_fixture, before the baseline)."""
+    adapter = WeatherAdapter(enable_run_case=True, producers=signed_producers())
+    profile = lab.profile(MAP_GOAL, case, stub=None)
+    profile["roles_factory"] = roles_factory(adapter, case)
+    prepared = adapter.prepare_fixture(
+        case,
+        profile["case_root"],
+        source=profile["source"],
+        generator_provenance=profile["generator_provenance"],
+        presented_fetch_version=profile["presented_fetch_version"],
+    )
+    fixture_only = snapshot(lab.root)
+    prepared["before_run_fixture"] = (
+        adapter.prepare_before_run_fixture(
+            case, prepared, profile["profile_document"], profile["repo"]
+        )
+        if before_run
+        else None
+    )
+    profile["prepared_fixture"] = json.loads(json.dumps(prepared))
+    channel = profile["projection_inputs_channel"] = io.StringIO()
+    baseline = snapshot(lab.root)
+    source_at_baseline = catalog.tree_hash(Path(prepared["source"]))
+    evidence = adapter.run_case(case, profile)
+    root = Path(profile["case_root"])
+    record = json.loads(channel.getvalue())
+    return SimpleNamespace(
+        case=case,
+        evidence=evidence,
+        report=record["harness_files"]["evidence-projection.json"],
+        prepared=prepared,
+        run=root / "run",
+        root=root,
+        checkpoint=read_checkpoint(root / "run"),
+        staged=sorted(baseline - fixture_only),
+        source_at_baseline=source_at_baseline,
+        created=sorted(snapshot(lab.root) - baseline),
+    )
+
+
+def test_before_run_source_operation_is_fixture_preparation_not_a_run_created_path(lab, frozen):
+    case = source_meta_case(frozen)
+    args = case["injection_schedule"][0]["payload"]["args"]
+    result = prestaged_run(lab, case)
+    run_dir = str(result.run.resolve())
+    source = Path(result.prepared["source"])
+    # The setup's writes (zarr attrs + consolidated metadata; new entries where zarr creates
+    # them, e.g. .zattrs/.zgroup/.zmetadata in the container) happened in preparation, on the
+    # source copy only, and changed it...
+    assert all(Path(p).is_relative_to(source.resolve()) for p in result.staged)
+    assert result.source_at_baseline != result.prepared["source_pre"]["value"]
+    # ...so the run created nothing outside HARNESS_RUN_DIR (frozen U12 / RC10 all_under) and
+    # never wrote the source.
+    outside = [p for p in result.created if not Path(p).is_relative_to(run_dir)]
+    assert outside == []
+    assert catalog.tree_hash(source) == result.source_at_baseline
+    # The applied-setup record is present, exactly as delivered, and chains source_pre -> after.
+    staged = result.prepared["before_run_fixture"]
+    (entry,) = fixture_record(result)["entries"]
+    assert entry["fixture_operation"] == "FX-SRC-META-ATTR" and entry["status"] == "APPLIED"
+    assert entry["hook"] == "before_run" and entry["prestaged"] is True
+    assert entry["before_hash"] == result.prepared["source_pre"]["value"] == staged["source_pre"]
+    assert entry["after_hash"] == staged["source_after"] != entry["before_hash"]
+    assert fixture_record(result)["outside_run_dir"] == []
+    assert result.report["harness"]["case_schedule"]["coverage"]["applied"] == [0]
+    # The controller captured (and read) the mutated source copy.
+    import zarr
+
+    assert zarr.open_group(str(source), mode="r").attrs[args["attribute"]] == args["value"]
+    assert result.checkpoint["source_hash"] == entry["after_hash"] == catalog.tree_hash(source)
+    symbols = result.evidence["symbols"]
+    assert symbols["HARNESS_HASH:source_pre"] == entry["after_hash"]
+    assert symbols["HARNESS_HASH:source_expected_after"] == entry["after_hash"]
+    assert result.evidence["filesystem_snapshot"]["source_cache_hash_after"] == entry["after_hash"]
+    # Scored the same as the in-process route of the same case (setup applied in run_case).
+    twin_case = copy.deepcopy(case)
+    twin_case["id"] += "-IN-PROCESS"  # its own case root
+    in_process = execute(lab, twin_case)
+    (twin,) = fixture_record(in_process)["entries"]
+    assert {k: twin[k] for k in ("status", "after_hash", "prestaged")} == {
+        "status": "APPLIED",
+        "after_hash": entry["after_hash"],
+        "prestaged": True,
+    }
+    assert scored(result, case) == scored(in_process, case)
+    assert unexplained_fails(result) == []
+
+
+def test_prestaged_mode_refuses_a_before_run_operation_left_for_the_run(lab, frozen):
+    case = source_meta_case(frozen)
+    case["id"] += "-UNPREPARED"
+    with pytest.raises(AdapterRefusal, match="fixture preparation"):
+        prestaged_run(lab, case, before_run=False)
+    root = lab.root / f"case-{case['id']}"
+    assert list((root / "run").iterdir()) == []  # the controller never started
+    prepared_source = root / "source" / "source.zarr"
+    import zarr
+
+    attribute = case["injection_schedule"][0]["payload"]["args"]["attribute"]
+    assert attribute not in zarr.open_group(str(prepared_source), mode="r").attrs
+
+
+def test_prestaged_delivery_is_adopted_once_in_schedule_order(lab, frozen, tmp_path):
+    """InjectionHooks: a prestaged entry is not re-applied by prepare; the other before_run
+    entries (a request edit) still are, and the records keep schedule order."""
+    from tools.workflow.e2e_injections import InjectionHooks, UnsupportedInjection
+
+    ledger = copy.deepcopy(frozen[PREFIX + "E03-P1-CTL"]["injection_schedule"][0])
+    meta = copy.deepcopy(frozen[PREFIX + "E03-P2-CTL"]["injection_schedule"][0])
+    case = {"id": "LOCAL-MIXED", "injection_schedule": [ledger, meta]}
+    profile = lab.profile(MAP_GOAL, {"id": "LOCAL-MIXED"}, stub=None)
+    prepared = WeatherAdapter().prepare_fixture(
+        {"id": "LOCAL-MIXED"},
+        tmp_path / "case",
+        source=profile["source"],
+        generator_provenance=profile["generator_provenance"],
+        presented_fetch_version=profile["presented_fetch_version"],
+    )
+    source = Path(prepared["source"])
+    state = InjectionHooks(case, disposable_root=tmp_path / "case").prestage_before_run([1], source)
+    assert [r["index"] for r in state["records"]] == [1] and state["raised"] is None
+    after = catalog.tree_hash(source)
+    assert state["records"][0]["after_hash"] == after != prepared["source_pre"]["value"]
+    hooks = InjectionHooks(case, disposable_root=tmp_path / "case")
+    hooks.adopt_before_run(state)
+    request = {
+        "messages": [{"id": "user", "speaker": "user", "text": "go"}],
+        "authorization": {"message_id": "user"},
+    }
+    hooks.prepare(request, source)
+    assert [(r["index"], r["status"]) for r in hooks.records] == [(0, "APPLIED"), (1, "APPLIED")]
+    assert catalog.tree_hash(source) == after  # not applied a second time
+    assert [m["id"] for m in request["messages"]] == ["user", "ledger-append-0"]
+    # A delivery that raised in preparation is carried and raised at adoption, recorded as is.
+    increment = {
+        "hook": "before_run",
+        "selector": {"role_or_tool_or_stage": "source_metadata", "occurrence": 1},
+        "operation": "mutate_fixture",
+        "payload": {
+            "fixture_operation": "FX-SRC-CELL-INCREMENT",
+            "args": {"variable": "no-such-variable", "amount_mm": 1},
+        },
+    }
+    failing = {"id": "LOCAL-FAILING", "injection_schedule": [increment]}
+    state = InjectionHooks(failing, disposable_root=tmp_path / "case").prestage_before_run(
+        [0], source
+    )
+    assert state["raised"]["type"] == "UnsupportedInjection"
+    hooks = InjectionHooks(failing, disposable_root=tmp_path / "case")
+    with pytest.raises(UnsupportedInjection, match="fixture variable missing"):
+        hooks.adopt_before_run(state)
+    assert [r["status"] for r in hooks.records] == ["UNSUPPORTED"]
+
+
 def test_unsigned_records_keep_the_cases_not_implemented(frozen):
-    # The committed records are signed (re-signed after wave 7, D4 w7 re-review) and declared;
-    # stripping the signatures from the copy must make them undeclared again and the cases
-    # NOT_IMPLEMENTED (the signature alone is the cause).
+    # The committed records are signed and declared (re-signed after the live-role wave, D4-
+    # REVIEW-LW-C at d6c2809). Stripping the signatures from the copy must make them undeclared
+    # again and the cases NOT_IMPLEMENTED (the signature alone is the cause).
     unsign = {"reviewer": None, "reviewed_at": None, "reviewed_commit": None}
     stripped = resigned(**{"CAP-FIXTURE-OP": unsign, "CAP-REREVIEW": unsign})
     for capability in ("CAP-FIXTURE-OP", "CAP-REREVIEW"):

@@ -143,9 +143,14 @@ def _ws(text):
 
 
 def citation_verdict(claim, bound):
-    """PASS only when every citation names a bound source, its hash and a verbatim quote."""
+    """PASS only when every citation names a bound source, its hash and a verbatim quote.
+
+    A non-derivable claim needs at least one citation. A derivable claim may carry none: the
+    controller computes it from its own state, and the frozen contract requires a citation only
+    on non-derivable claims (any citation a derivable claim does carry must still resolve).
+    """
     if not claim["citations"]:
-        return "FAIL"
+        return "PASS" if claim["derivable"] else "FAIL"
     for citation in claim["citations"]:
         source = bound.get(citation["source_id"])
         quote = citation["quote"]
@@ -162,15 +167,63 @@ def citation_verdict(claim, bound):
 # --------------------------------------------------------------------------- derivable facts
 
 
-def _last_eligible_onset_date(date_contract):
-    return date_contract["eligible_onset_window"]["end"]
+# Every producer reads ONLY the controller's own bound state -- the date contract it derives
+# from the trusted goal, the trusted goal itself (Controller.goal, which every retained
+# compiled goal must equal), and the validated plan (Controller.plan) -- and returns
+# {fact name: value}. None of them ever reads a claim: a claim names a fact and states a
+# value, and the controller compares that value with its own.
+
+
+def _last_eligible_onset_date(date_contract, goal, plan):
+    if not isinstance(date_contract, dict):
+        return {}
+    return {"last_eligible_onset_date": date_contract["eligible_onset_window"]["end"]}
+
+
+def _goal_fields(date_contract, goal, plan):
+    """goal.<field>: the value of that field of the controller's goal."""
+    if not isinstance(goal, dict):
+        return {}
+    return {f"goal.{field}": value for field, value in goal.items()}
+
+
+def _plan_step_args(date_contract, goal, plan):
+    """plan.<step id>.<argument>: that argument's value in the controller's plan."""
+    steps = plan.get("steps") if isinstance(plan, dict) else None
+    facts = {}
+    for step in steps if isinstance(steps, list) else ():
+        if (
+            not isinstance(step, dict)
+            or not isinstance(step.get("id"), str)
+            or not isinstance(step.get("args"), dict)
+        ):
+            continue
+        for arg, value in step["args"].items():
+            facts[f"plan.{step['id']}.{arg}"] = value
+    return facts
 
 
 # CLOSED registry. Adding a fact is a reviewed code change, never a model declaration.
-DERIVABLE_FACTS = {"last_eligible_onset_date": _last_eligible_onset_date}
+DERIVABLE_FACTS = {
+    "last_eligible_onset_date": _last_eligible_onset_date,
+    "goal_field": _goal_fields,
+    "plan_step_arg": _plan_step_args,
+}
 
 
-def compute(claim, date_contract):
+def derivable_facts(date_contract, goal, plan):
+    """{fact name: controller value} for every registered fact the bound state defines."""
+    facts = {}
+    for producer in DERIVABLE_FACTS.values():
+        for name, value in producer(date_contract, goal, plan).items():
+            if name in facts:
+                raise Refused(f"derivable fact defined twice: {name}", gate="claim_evidence")
+            facts[name] = value
+    # Detached: a comparison can never alias (or later edit) the controller's own records.
+    return json.loads(json.dumps(facts))
+
+
+def compute(claim, date_contract, goal, plan):
     """MATCH / MISMATCH from the controller's own computation, or None when not computable.
 
     None (no computes block, or a fact outside the closed registry) can never yield
@@ -179,10 +232,10 @@ def compute(claim, date_contract):
     spec = claim.get("computes")
     if not isinstance(spec, dict) or set(spec) != {"fact", "value"}:
         return None
-    producer = DERIVABLE_FACTS.get(spec["fact"]) if isinstance(spec["fact"], str) else None
-    if producer is None:
+    facts = derivable_facts(date_contract, goal, plan)
+    if not isinstance(spec["fact"], str) or spec["fact"] not in facts:
         return None
-    expected = producer(date_contract)
+    expected = facts[spec["fact"]]
     value = spec["value"]
     return "MATCH" if type(value) is type(expected) and value == expected else "MISMATCH"
 
@@ -251,10 +304,16 @@ def build_record(
     claims,
     sources,
     date_contract,
+    goal,
+    plan,
     checker_occurrence=None,
     checker_verdicts=None,
 ):
-    """One controller_trace.claim_checks record, exactly the v2_4 field set."""
+    """One controller_trace.claim_checks record, exactly the v2_4 field set.
+
+    date_contract, goal and plan are the controller's own bound state (Controller.date_contract(),
+    Controller.goal, Controller.plan); derivable claims are computed against them only.
+    """
     bound = registry(sources)
     checker_verdicts = checker_verdicts or {}
     if checker_occurrence is None and checker_verdicts:
@@ -264,7 +323,7 @@ def build_record(
         citation = citation_verdict(claim, bound)
         checker = checker_verdicts.get(claim["claim_id"])
         if claim["derivable"]:
-            computed = compute(claim, date_contract)
+            computed = compute(claim, date_contract, goal, plan)
             verdict = {"MATCH": "SUPPORTED", "MISMATCH": "CONTRADICTED"}.get(
                 computed, "INSUFFICIENT"
             )
@@ -290,7 +349,17 @@ def build_record(
         raise Refused(
             "no evidence checker may run after a citation gate failure", gate="claim_evidence"
         )
-    present = gate == "PASS" and all(c["verdict"] == "SUPPORTED" for c in per_claim)
+    # A plan is presented only after an evidence-checker pass (V24-PRE-REVIEW-GATES requires a
+    # checker occurrence and a SUPPORTED checker receipt for every presented plan): a claim set
+    # with no checker-judged claim routes to repair, however well its computed facts match. The
+    # receipt is the worst of ALL rulings, so a ruling on a derivable claim the checker was not
+    # sent also blocks presentation; it never makes that claim's own verdict.
+    present = (
+        gate == "PASS"
+        and checker_occurrence is not None
+        and all(v == "SUPPORTED" for v in checker_verdicts.values())
+        and all(c["verdict"] == "SUPPORTED" for c in per_claim)
+    )
     return {
         "index": index,
         "plan_hash": plan_hash,
@@ -312,20 +381,37 @@ def presentations(records, plan_hash):
 
 def repair_failure(record):
     """The bounded, factual finding handed to the repairer for a routed plan version."""
-    return json.dumps(
-        {
-            "claim_check_index": record["index"],
-            "citation_gate": record["citation_gate"],
-            "failed_claims": [
-                {k: c[k] for k in ("claim_id", "citation_verdict", "computed", "verdict", "basis")}
-                for c in record["claims"]
-                if c["verdict"] != "SUPPORTED" or c["citation_verdict"] != "PASS"
-            ],
-            "instruction": "Correct the claims or citations; quotes must be verbatim from a "
-            "bound source and derivable facts must match the controller's computation.",
-        },
-        sort_keys=True,
-    )
+    finding = {
+        "claim_check_index": record["index"],
+        "citation_gate": record["citation_gate"],
+        "failed_claims": [
+            {k: c[k] for k in ("claim_id", "citation_verdict", "computed", "verdict", "basis")}
+            for c in record["claims"]
+            if c["verdict"] != "SUPPORTED" or c["citation_verdict"] != "PASS"
+        ],
+        "instruction": "Correct the claims or citations; quotes must be verbatim from a "
+        "bound source and derivable facts must match the controller's computation.",
+    }
+    if not any(not c["derivable"] for c in record["claims"]):
+        # Only on this route, so every other finding keeps its exact bytes.
+        finding["checker_judged_claims"] = 0
+        finding["instruction"] += (
+            " Every claim is derivable, so no evidence checker ran and the plan cannot be "
+            "presented: add at least one derivable false claim whose cited quotes state its fact."
+        )
+    overruled = [
+        c["claim_id"]
+        for c in record["claims"]
+        if c["derivable"] and c["checker_verdict"] not in (None, "SUPPORTED")
+    ]
+    if overruled:
+        # Only on this route, likewise: the checker ruled a derivable claim it was not sent.
+        finding["checker_ruled_derivable_claims"] = overruled
+        finding["instruction"] += (
+            " The evidence checker ruled derivable claims it was not asked to judge, and its "
+            "receipt must be SUPPORTED before the plan is presented: restate or remove them."
+        )
+    return json.dumps(finding, sort_keys=True)
 
 
 def record_hash(record):
