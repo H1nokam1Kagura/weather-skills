@@ -45,7 +45,6 @@ from test_evidence_projection_v27 import (
     CATALOG,
     MAP_GOAL,
     RESIGNED_ADMITTED,
-    RESIGNED_ALL_ADMITTED,
     SIGNED_ADMITTED,
     TOOL_SCRIPT,
     Lab,
@@ -368,13 +367,12 @@ def e14(lab, frozen):  # noqa: F811
 def test_resigned_producers_keep_24_admitted_and_the_signed_records_add_the_seven(frozen):  # noqa: F811
     all_cases = list(frozen.values())
     assert len(all_cases) == 66
-    # The committed file: wave 8 build A and the planner/repairer cap fix flagged 18 signed
-    # records rereview_required, so it admits exactly SIGNED_ADMITTED (none); the test-local
-    # re-signed copy (every flag cleared) admits RESIGNED_ALL_ADMITTED (61), as before.
+    # The committed file (live-role records signed, D4-CONFIRM-LW-A) admits SIGNED_ADMITTED (61),
+    # the same as the test-local re-signed copy.
     assert {PREFIX + c for c in admitted(WeatherAdapter(), all_cases)} == SIGNED_ADMITTED
     committed = WeatherAdapter(producers=resigned())
     assert set(WAVE7) <= committed.implemented_capabilities()
-    assert {PREFIX + c for c in admitted(committed, all_cases)} == RESIGNED_ALL_ADMITTED
+    assert {PREFIX + c for c in admitted(committed, all_cases)} == SIGNED_ADMITTED
     # What wave 7 adds is measured over the offline cases (live cases are admitted by the
     # live-role records and counted in tests/test_live_wave_adapter.py).
     cases = [c for c in all_cases if "CAP-LIVE-ROLE" not in c["adapter_requirements"]]

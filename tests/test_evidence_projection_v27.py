@@ -1672,11 +1672,11 @@ RESIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E15-P1-CTL",
     "DEV-E2E-V2_7-E15-P1-INJ",
 }
-# The live cases the committed producer file admits since six live-role records were signed
-# (D4-CONFIRM-LW-A at dd19936): every live case except E12-P2 x2 (CAP-DECOY is not built) and
-# E14-P3 x2 (CAP-OPERATOR-NOTIFY-HOOK stays unsigned until sub-wave 5). Admission is by
-# requirements: E10-P2 x2 depend on unbuilt sub-wave 5 mechanics and E11-P2-INJ is refused at
-# run_case entry, so live batches are dispatched only by explicit case list.
+# The live cases the committed producer file admits: every live case except E12-P2 x2 (CAP-DECOY
+# is not built; build B parked by owner ruling live_breadth_before_build_b_2026-10-17). E14-P3 x2
+# joined when CAP-OPERATOR-NOTIFY-HOOK was signed (wave 8 batch A, D4-REVIEW-LW6-BEH at fb9fa8a).
+# Admission is by requirements: E11-P2-INJ's budget-override channel is still unbuilt (build B's
+# e2e_injections hunk), so live batches are dispatched only by explicit case list.
 LIVE_SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E01-P2-CTL",
     "DEV-E2E-V2_7-E01-P2-INJ",
@@ -1706,57 +1706,28 @@ LIVE_SIGNED_ADMITTED = {
     "DEV-E2E-V2_7-E12-P1-INJ",
     "DEV-E2E-V2_7-E13-P2-CTL",
     "DEV-E2E-V2_7-E13-P2-INJ",
+    "DEV-E2E-V2_7-E14-P3-CTL",
+    "DEV-E2E-V2_7-E14-P3-INJ",
     "DEV-E2E-V2_7-E15-P2-CTL",
     "DEV-E2E-V2_7-E15-P2-INJ",
 }
-# What the committed file admits with every rereview flag cleared (resigned()): the 31 offline
-# cases plus the 30 live ones, as signed at 91cd4b3 / 55b1305 / f50f9f4 (D4-REVIEW-LW2-LS,
-# D4-REVIEW-LW3-SHIFT / -GATE, D4-REVIEW-LW3B-CONFIRM). E14-P3 x2 join it only when
-# CAP-OPERATOR-NOTIFY-HOOK is signed (not yet: it is still in PENDING_D4_REVIEW).
-RESIGNED_ALL_ADMITTED = set(RESIGNED_ADMITTED) | LIVE_SIGNED_ADMITTED
 # The frozen cases the committed producer file admits. A change to this set is a change to what
-# is runnable and must be made here deliberately. Empty since wave 8 build A (A1 notify route,
-# A2 relay attribution, the nan-mask fix and the relay worker timeout, merged on
-# feat/simkit-w8-integA-snowyowl at 5b9a5a3) and the planner/repairer cap fix: they changed
-# producer files of 18 signed records (CAP-RECEIPTS among them, which every frozen case
-# requires), so those records are flagged rereview_required below and undeclared, and nothing is
-# admitted until the D4 re-review re-signs them. The 61 cases admitted before
-# (RESIGNED_ALL_ADMITTED) return when the flags are cleared.
-SIGNED_ADMITTED = set()
+# is runnable and must be made here deliberately: the 31 offline cases plus the 32 live ones (63).
+SIGNED_ADMITTED = set(RESIGNED_ADMITTED) | LIVE_SIGNED_ADMITTED
 # Committed d4_gated records awaiting their independent D4 review: wholly unsigned (reviewer,
 # reviewed_at, reviewed_commit null), hence undeclared. Moving one out of this set is signing
-# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Six of the
-# seven live-role records were signed (D4-CONFIRM-LW-A); CAP-OPERATOR-NOTIFY-HOOK must stay here
-# until sub-wave 5 opens the notification boundary in run_case (its record's notes).
-PENDING_D4_REVIEW = {"CAP-OPERATOR-NOTIFY-HOOK"}
+# it, deliberately (and may change SIGNED_ADMITTED). Nothing else may be unsigned. Empty since
+# CAP-OPERATOR-NOTIFY-HOOK was signed at fb9fa8a (wave 8 batch A opened the notification route).
+PENDING_D4_REVIEW = set()
 # Signed records whose producer files changed after their reviewed_commit, flagged
 # rereview_required and therefore undeclared (WeatherAdapter.d4_declared; listed, not failed,
-# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. The 18
-# signed records whose producer files changed after their reviewed_commit: 16 by wave 8 build A
-# (evidence_projection.py: the nan-mask hook; resume_driver.py and project_in_container.py: the
-# A1 notify route, A3 and the E10-P2 tripwire; analyze_trace.py: the A2 relay attribution), plus
-# CAP-REASON-MAP and CAP-LIVE-ROLE by the planner/repairer cap fix (kong_roles.py; CAP-LIVE-ROLE
-# also by the relay worker timeout, kong_relay_host.py, and the nan-mask hook).
-REREVIEW_REQUIRED = {
-    "CAP-AUTO-RESUME",
-    "CAP-DENY-WRITE",
-    "CAP-DIAGNOSIS",
-    "CAP-EXHAUSTIVE-WRITES",
-    "CAP-HARNESS-OBS",
-    "CAP-INTERRUPT",
-    "CAP-LIVE-ROLE",
-    "CAP-MECHANICAL-REPAIR",
-    "CAP-MIDPROCESS",
-    "CAP-OPERATOR-NOTIFY",
-    "CAP-REASON-MAP",
-    "CAP-RECEIPTS",
-    "CAP-RESUME",
-    "CAP-RESUME-ATTRIBUTION",
-    "CAP-RUN-PROVENANCE",
-    "CAP-SIGNAL-CAPTURE",
-    "CAP-SYMBOLS",
-    "CAP-TRANSPORT-RETRY",
-}
+# by tools/check_capability_signatures.py). Removing one is re-signing it, deliberately. Empty
+# since the 33 records flagged by the controller fixes after the first live frozen-case runs
+# (claim-gate 4790afe, setup-timing 8647ad5 / dbb1444 / f2af31a, N-PRG-1 55b1305, N-PRG-6
+# f50f9f4) were re-signed from D4-REVIEW-LW2-LS (91cd4b3), D4-REVIEW-LW3-SHIFT / -GATE
+# (55b1305) and D4-REVIEW-LW3B-CONFIRM (f50f9f4); and the 18 records wave 8 batch A flagged were
+# re-signed from D4-REVIEW-LW6-SHIFT / -BEH (fb9fa8a) and D4-REVIEW-LW6B-CONFIRM (e3f0eac).
+REREVIEW_REQUIRED = set()
 
 
 def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
@@ -1772,13 +1743,6 @@ def test_signed_producers_admit_exactly_the_expected_frozen_cases(frozen):
         if not missing:
             admitted.add(case["id"])
     assert admitted == SIGNED_ADMITTED
-    # Re-signing the flagged records (test-local: every flag cleared) restores exactly the
-    # admission they had when last signed; the flags alone are why SIGNED_ADMITTED shrank.
-    implemented = WeatherAdapter(producers=resigned()).implemented_capabilities()
-    readmitted = {
-        c["id"] for c in frozen["cases"] if not set(c["adapter_requirements"]) - implemented
-    }
-    assert readmitted == RESIGNED_ALL_ADMITTED
 
 
 def producers_with(**changes):

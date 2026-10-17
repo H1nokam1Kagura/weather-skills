@@ -32,9 +32,10 @@ CASES = ("E01-P1-INJ", "E07-P1-INJ", "E03-P3-INJ", "E03-P3-CTL")
 # Wave-7 stop-and-resume cases that also need these records (signed since the D4 w7 review);
 # admitted by them, executed by tests/test_resume_family_adapter.py, not here.
 WAVE7_CASES = ("E10-P1-CTL", "E10-P1-INJ", "E11-P1-CTL", "E11-P1-INJ")
-# Live cases that also need these records (live-role records signed, D4-CONFIRM-LW-A); admitted
-# by them, not executed here (live cases run only through the relay, by explicit case list).
-LIVE_CASES = ("E10-P2-CTL", "E10-P2-INJ", "E11-P2-CTL", "E11-P2-INJ", "E15-P2-CTL")
+# Live cases that also need these records (live-role records signed, D4-CONFIRM-LW-A; E14-P3-CTL
+# since CAP-OPERATOR-NOTIFY-HOOK was signed, D4-REVIEW-LW6-BEH); admitted by them, not executed
+# here (live cases run only through the relay, by explicit case list).
+LIVE_CASES = ("E10-P2-CTL", "E10-P2-INJ", "E11-P2-CTL", "E11-P2-INJ", "E14-P3-CTL", "E15-P2-CTL")
 # Flagged rereview_required by the live-role wave (LIVE-WAVE-BRIEF sub-wave 6).
 LIVE_WAVE_FLAGGED = ()  # all three re-signed after the live-role wave (D4-REVIEW-LW-B / -C)
 
