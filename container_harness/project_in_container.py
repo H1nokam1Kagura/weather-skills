@@ -396,9 +396,13 @@ def classify_ram_readings(readings):
         value = _first(entry, "delivered_value", "value")
         offset = _first(entry, "delivered_offset_seconds", "offset_seconds")
         if not _number(value) or not _number(offset):
-            return [], [], (
-                f"{RAM_READINGS_KEY}[{index}] has no finite non-negative value and offset seconds "
-                f"(value {value!r}, offset {offset!r})"
+            return (
+                [],
+                [],
+                (
+                    f"{RAM_READINGS_KEY}[{index}] has no finite non-negative value and offset seconds "
+                    f"(value {value!r}, offset {offset!r})"
+                ),
             )
         in_run.append({"value": value, "offset_seconds": offset})
     return in_run, excluded, None
