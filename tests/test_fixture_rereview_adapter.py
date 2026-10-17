@@ -309,9 +309,14 @@ def test_fixture_plan_refuses_incomplete_or_unreachable_operations_before_side_e
     with pytest.raises(AdapterRefusal, match="complete frozen set"):
         frx.fixture_plan(incomplete, lab.repo)
     unknown = copy.deepcopy(frozen[PREFIX + "E05-P1-INJ"])
-    unknown["injection_schedule"][0]["payload"]["fixture_operation"] = "FX-DECOY-SPAWN"
+    # Wave 8 B1 classifies FX-DECOY-SPAWN (no longer unknown); an operation the delivery path
+    # does not implement is still refused.
+    unknown["injection_schedule"][0]["payload"]["fixture_operation"] = "FX-NOT-DELIVERED"
     with pytest.raises(AdapterRefusal, match="unavailable"):
         frx.fixture_plan(unknown, lab.repo)
+    (decoy,) = frx.fixture_plan(frozen[PREFIX + "E12-P2-INJ"], lab.repo)["entries"]
+    assert decoy["fixture_operation"] == "FX-DECOY-SPAWN"
+    assert decoy["target"] == "harness_process" and not decoy["creates_outside_run_dir"]
     # A runtime-manifest bump on a repository that carries none: refused, nothing seeded.
     bare = tmp_path / "bare-repo"
     bare.mkdir()
