@@ -1096,6 +1096,27 @@ def test_uncited_derivable_claims_pass_gate_one_and_the_plan_is_presented(tmp_pa
         assert by_id[claim_id]["computed"] == "MATCH"
 
 
+def test_only_uncited_derivable_claims_pass_gate_one_but_still_route_to_repair(
+    tmp_path, monkeypatch
+):
+    """Gate 1 now passes them, but no checker runs, so N-PRG-1 still routes the plan to repair."""
+
+    def planner(payload, n):
+        value = all_derivable_planner(payload, n)
+        for claim in value["claims"]:
+            claim["citations"] = []
+        return value
+
+    stub = Stub(planner=planner)
+    c = make_controller(tmp_path, monkeypatch, stub, max_repairs=0)
+    with pytest.raises(Refused, match="bounded plan repair exhausted"):
+        c._run()
+    (record,) = saved_records(c)
+    assert record["citation_gate"] == "PASS"
+    assert record["decision"] == "ROUTE_TO_REPAIR" and record["evidence_checker_occurrence"] is None
+    assert stub.count("evidence_checker") == 0 and stub.count("reviewer") == 0
+
+
 def test_citation_gate_still_fails_an_uncited_judged_claim_or_a_bad_derivable_quote():
     sources = [
         {"source_id": SOURCE_ID, "source_hash": FROZEN_SOURCE_HASH, "text": REFERENCE_DEFINITION}

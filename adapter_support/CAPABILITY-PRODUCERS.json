@@ -153,12 +153,11 @@
         "HARNESS_PLAN_HASH:current and :vN are plan-version hashes (contracts.plan_version_hash: the plan plus its claims envelope, else the plan's own digest), not digest(plan): a claims-only repair is a new plan version with its own :vN, as v2_5.plan_symbols and v2_4.claim_checks (one per plan version) require",
         "HARNESS_CONTROLLER_PID with two controller incarnations (stop-and-resume route, OI-05): the traced root, the parent of incarnation 1 and itself incarnation 2, accepted only when each of the controller's own incarnation pids is declared by the harness (a one-way subset check, stated in CAP-INTERRUPT: an extra declared incarnation is accepted, and the root is not required to be a controller pid). On the in-process route, several incarnations without a route record give HARNESS_CONTROLLER_PID MISSING (the value is honest) but with the single-process reason 'no launched process names the controller as parent and no harness observation' (evidence_projection.py:1249); the real reason is the controller_incarnations_unattributed note. The project_in_container tests use a project_run stand-in that copies the observed_signal_capture rule, so the composition of the real Projection with apply_route_disclosures is untested [UNVERIFIED until a container run]. On the scored container route the harness route record is an input of project_in_container (INPUT_KEYS resume_route), so the analyzer's value is cross-checked there too; a stop case whose route record was not carried has HARNESS_CONTROLLER_PID withheld as MISSING (project_in_container.apply_route_disclosures), never taken unchecked"
       ],
-      "rereview_required": "producer file changed after reviewed_commit by fix A (branch fix/simkit-lw-cite-snowyowl; DIAGNOSIS-LIVE-2 cause A): tools/workflow/claim_gates.py citation_verdict passes an uncited derivable claim (docstring +5 lines at 146; every line from 149 on +5; re-pinned: DERIVABLE_FACTS 202 -> 207 (in-text 172/178/185/209/221 -> 177/183/190/214/226), checker_payload 241 -> 246, build_record 294 -> 299; bind_definition_source 35 unmoved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T23:24:40Z",
-      "reviewed_commit": "f50f9f4d7f5c8f5773145ec16979d06054d6236b",
+      "reviewed_at": "2026-10-17T01:04:58Z",
+      "reviewed_commit": "116c63afeadc19bcdb3b6f2263d6854ede789ee2",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW3B-CONFIRM.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW4-CITE.md"
     },
     "CAP-REASON-MAP": {
       "d4_gated": true,
@@ -239,12 +238,11 @@
         "test_claim_checks_and_evidence_checker_project_one_reviewer_numbering"
       ],
       "notes": "Frozen manifest method name is record_review_snapshots; this adapter's method is capture_bound_sources (the frozen runner reads capability ids only). snapshot() trusts the envelope's request/goal/plan hashes (hash-pinned capture file); the diagnostic path recomputes them.",
-      "rereview_required": "producer file changed after reviewed_commit by fix A (branch fix/simkit-lw-cite-snowyowl; DIAGNOSIS-LIVE-2 cause A): tools/workflow/claim_gates.py citation_verdict passes an uncited derivable claim (docstring +5 lines at 146; every line from 149 on +5; re-pinned: DERIVABLE_FACTS 202 -> 207 (in-text 172/178/185/209/221 -> 177/183/190/214/226), checker_payload 241 -> 246, build_record 294 -> 299; bind_definition_source 35 unmoved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T23:24:40Z",
-      "reviewed_commit": "f50f9f4d7f5c8f5773145ec16979d06054d6236b",
+      "reviewed_at": "2026-10-17T01:04:58Z",
+      "reviewed_commit": "116c63afeadc19bcdb3b6f2263d6854ede789ee2",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW3B-CONFIRM.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW4-CITE.md"
     },
     "CAP-RUN-PROVENANCE": {
       "d4_gated": true,
@@ -446,12 +444,11 @@
         "test_tampered_claim_check_or_operator_record_refuses_projection",
         "tools/workflow/tests/test_claim_gates_v27.py::test_plan_and_goal_restatements_pass_gate_one_without_a_checker_verdict"
       ],
-      "rereview_required": "producer file changed after reviewed_commit by fix A (branch fix/simkit-lw-cite-snowyowl; DIAGNOSIS-LIVE-2 cause A): tools/workflow/claim_gates.py citation_verdict passes an uncited derivable claim (docstring +5 lines at 146; every line from 149 on +5; re-pinned: DERIVABLE_FACTS 202 -> 207 (in-text 172/178/185/209/221 -> 177/183/190/214/226), checker_payload 241 -> 246, build_record 294 -> 299; bind_definition_source 35 unmoved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T23:24:40Z",
-      "reviewed_commit": "f50f9f4d7f5c8f5773145ec16979d06054d6236b",
+      "reviewed_at": "2026-10-17T01:04:58Z",
+      "reviewed_commit": "116c63afeadc19bcdb3b6f2263d6854ede789ee2",
       "review_verdict": "APPROVE",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW3B-CONFIRM.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW4-CITE.md"
     },
     "CAP-PRE-REVIEW-GATES": {
       "d4_gated": true,
@@ -490,14 +487,13 @@
         "tools/workflow/tests/test_claim_gates_v27.py::test_plan_and_goal_restatements_pass_gate_one_without_a_checker_verdict",
         "tools/workflow/tests/test_claim_gates_v27.py::test_false_plan_or_goal_restatement_is_contradicted_by_computation",
         "tools/workflow/tests/test_claim_gates_v27.py::test_evidence_request_lists_the_registered_facts_and_no_values",
-        "tools/workflow/tests/test_claim_gates_v27.py::test_frozen_substituted_claims_compute_exactly_as_before"
+        "tools/workflow/tests/test_claim_gates_v27.py::test_frozen_substituted_claims_compute_exactly_as_before", "tools/workflow/tests/test_claim_gates_v27.py::test_uncited_derivable_claims_pass_gate_one_and_the_plan_is_presented", "tools/workflow/tests/test_claim_gates_v27.py::test_only_uncited_derivable_claims_pass_gate_one_but_still_route_to_repair", "tools/workflow/tests/test_claim_gates_v27.py::test_citation_gate_still_fails_an_uncited_judged_claim_or_a_bad_derivable_quote"
       ],
-      "rereview_required": "producer file changed after reviewed_commit by fix A (branch fix/simkit-lw-cite-snowyowl; DIAGNOSIS-LIVE-2 cause A): tools/workflow/claim_gates.py citation_verdict passes an uncited derivable claim (docstring +5 lines at 146; every line from 149 on +5; re-pinned: DERIVABLE_FACTS 202 -> 207 (in-text 172/178/185/209/221 -> 177/183/190/214/226), checker_payload 241 -> 246, build_record 294 -> 299; bind_definition_source 35 unmoved)",
       "reviewer": "independent D4 review agent (Claude, read-only), commissioned by cc:simkit-run-snowyowl",
-      "reviewed_at": "2026-10-16T23:24:40Z",
-      "reviewed_commit": "f50f9f4d7f5c8f5773145ec16979d06054d6236b",
+      "reviewed_at": "2026-10-17T01:04:58Z",
+      "reviewed_commit": "116c63afeadc19bcdb3b6f2263d6854ede789ee2",
       "review_verdict": "APPROVE_WITH_NOTES",
-      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW3B-CONFIRM.md"
+      "review_report": "SIMKIT simkit/handoffs/completion-20261012/d4-review-lw3/D4-REVIEW-LW4-CITE.md"
     },
     "CAP-OPERATOR-ACTIONS": {
       "d4_gated": true,
