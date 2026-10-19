@@ -5,16 +5,10 @@
 #   "pandas",
 # ]
 # ///
-"""Fetch daily 3D-PAWS weather-station observations from a CHORDS portal as a station Zarr."""
+"""Fetch daily 3D-PAWS weather-station observations from the FEWS NET CHORDS portal as a station Zarr."""
 # 3D-PAWS (3D-Printed Automatic Weather Stations, UCAR/NCAR) stream raw
 # readings to CHORDS portals. Credentials: CHORDS_EMAIL and CHORDS_API_KEY,
-# issued per portal on the portal's /users page.
-#
-# List stations in a region (no ``-o``)::
-#
-#     3dpaws-fetch --list-stations --bbox N/W/S/E
-#
-# Then fetch chosen station ids (or every station in a bbox).
+# issued on the portal's /users page.
 
 import csv
 import json
@@ -26,17 +20,15 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from weather_skills_core import DataError, UsageError, weather_skill
-from weather_skills_core.standard_utils import is_transient, require_env
+from weather_skills_core.standard_utils import require_env
 from weather_skills_core.units import stamp_data_interval
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.1"
 
-DEFAULT_PORTAL = "https://3d-fewsnet.icdp.ucar.edu"
-DEFAULT_WORKERS = 8
-# CHORDS refuses a request over its max_download_points (200,000 on the FEWS
-# NET portal). A 1-minute station with ~23 variables sends ~33,000 points a
-# day, so 3-day requests stay well under the cap.
+PORTAL = "https://3d-fewsnet.icdp.ucar.edu"
+# CHORDS refuses a request over 200,000 points. A 1-minute station with ~23
+# variables sends ~33,000 points a day, so 3-day requests stay under the cap.
 CHUNK_DAYS = 3
 
 # Output variable -> (CHORDS short name, daily statistic). Precip comes from
@@ -64,9 +56,6 @@ VALID_RANGE = {
 # A station with no sensor fitted reports exactly 0 for it, so an exact 0 is
 # missing for these (calm wind and no rain are real zeros and stay).
 ZERO_IS_MISSING = {"mt1", "sh1", "bp1"}
-# Two gauges agree when their daily totals differ by at most this much.
-GAUGE_TOLERANCE_MM = 1.0
-GAUGE_TOLERANCE_FRAC = 0.25
 CF_META = {
     "precip": ("lwe_precipitation_rate", "mm day-1", "time: sum", "daily rainfall"),
     "temperature": (
@@ -85,39 +74,33 @@ CF_META = {
 
 
 def _get_json(url: str, params: dict | None = None):
-    """GET ``url`` and decode JSON, retrying one transient error after a short backoff."""
+    """GET ``url`` and decode JSON, retrying once after a network or server error."""
     if params:
         url = url + "?" + urllib.parse.urlencode(params)
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
     for attempt in range(2):
         try:
-            with urllib.request.urlopen(request, timeout=300) as response:
+            with urllib.request.urlopen(url, timeout=300) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
             if exc.code == 403:
                 raise UsageError(
-                    "CHORDS refused CHORDS_EMAIL / CHORDS_API_KEY (HTTP 403). Keys are "
-                    "issued per portal: use the key from this portal's /users page, and "
-                    "the account needs data-download access."
+                    "CHORDS refused CHORDS_EMAIL / CHORDS_API_KEY (HTTP 403). Use the key from "
+                    f"{PORTAL}/users; the account needs data-download access."
                 ) from None
-            if attempt == 0 and is_transient(exc):
-                time.sleep(2.0)
-                continue
-            body = exc.read().decode(errors="replace")[:300]
-            raise DataError(f"CHORDS HTTP {exc.code}: {body}") from None
+            if attempt == 1 or exc.code < 500:
+                raise DataError(f"CHORDS HTTP {exc.code}: {exc.read()[:300]!r}") from None
         except (urllib.error.URLError, TimeoutError) as exc:
-            if attempt == 0:
-                time.sleep(2.0)
-                continue
-            raise DataError(f"could not reach CHORDS ({exc})") from None
+            if attempt == 1:
+                raise DataError(f"could not reach CHORDS ({exc})") from None
+        time.sleep(2.0)
 
 
-def _station_daily(portal, station_id, start, end, day_start_hour, auth):
+def _station_daily(station_id, start, end, day_start_hour, auth):
     """Download one station's readings and reduce them to daily values.
 
     Days ``start`` .. ``end`` inclusive, each starting at ``day_start_hour`` UTC.
-    Returns ``(daily DataFrame, reporting interval in minutes)``, or ``(None, None)``
-    when the station sent nothing. Days without a complete record are NaN.
+    Returns a daily DataFrame (NaN where the day's record is incomplete), or
+    None when the station sent nothing.
     """
     import pandas as pd
 
@@ -133,7 +116,7 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
             "end": chunk_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
             **auth,
         }
-        payload = _get_json(f"{portal}/api/v1/data/{station_id}.json", params)
+        payload = _get_json(f"{PORTAL}/api/v1/data/{station_id}.json", params)
         for feature in payload.get("features", []):
             for point in feature["properties"]["data"]:
                 # CHORDS sends the test flag as the string "true" / "false".
@@ -141,7 +124,7 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
                     rows.append({"time": point["time"], **point["measurements"]})
         chunk_start = chunk_end
     if not rows:
-        return None, None
+        return None
 
     raw = pd.DataFrame(rows)
     raw["time"] = pd.to_datetime(raw["time"], utc=True).dt.tz_convert(None)
@@ -149,15 +132,9 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
     raw = raw[(raw.index >= first) & (raw.index < last)].apply(pd.to_numeric, errors="coerce")
     # Gauge 1 is "rg1" on newer stations and "rg" on older ones.
     raw = raw.rename(columns={"rg": "rg1"})
-
-    # The station's reporting interval (1, 10 or 15 minutes on most portals).
-    interval_min = max(1, round(raw.index.to_series().diff().dt.total_seconds().median() / 60))
-    # A day is complete when every slot of the day holds at least one valid
-    # reading. The slot is 3 reporting intervals (at least 5 minutes) rounded up
-    # to a divisor of the day, so a few late or dropped readings are tolerated
-    # but any longer outage blanks the day.
-    need = max(5, 3 * interval_min)
-    slot_min = next(m for m in range(need, 1441) if 1440 % m == 0)
+    # Shift by the day-start hour so each day bins as one calendar day labelled
+    # by the date it starts on.
+    raw.index = raw.index - offset
 
     clean = pd.DataFrame(index=raw.index)
     for short, (lo, hi) in VALID_RANGE.items():
@@ -169,11 +146,11 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
         # A sensor that sent only missing codes is treated as not fitted.
         if values.notna().any():
             clean[short] = values
-    # Shift by the day-start hour so each day bins as one calendar day labelled
-    # by the date it starts on.
-    clean.index = clean.index - offset
-    filled_slots = clean.notna().resample(f"{slot_min}min").sum() > 0
-    complete = filled_slots.resample("D").sum() == 1440 // slot_min
+
+    # A day is complete only when every one of its 24 hours holds a valid
+    # reading; any longer gap blanks the day rather than undercounting it.
+    hours_with_data = (clean.notna().resample("h").sum() > 0).resample("D").sum()
+    complete = hours_with_data == 24
     days = clean.resample("D")
 
     daily = pd.DataFrame(index=complete.index)
@@ -183,15 +160,14 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
     if "rg1" in clean.columns:
         total = days["rg1"].sum().where(complete["rg1"])
         if "rg2" in clean.columns:
-            # Both gauges must report a complete day and agree; a disagreement
-            # means one gauge is faulty and there is no way to tell which.
+            # Both gauges must report a complete day and agree within
+            # max(1 mm, 25 %); otherwise one is faulty and there is no way to
+            # tell which.
             total2 = days["rg2"].sum().where(complete["rg2"])
-            larger = pd.concat([total, total2], axis=1).max(axis=1)
-            tolerance = (GAUGE_TOLERANCE_FRAC * larger).clip(lower=GAUGE_TOLERANCE_MM)
+            tolerance = (0.25 * pd.concat([total, total2], axis=1).max(axis=1)).clip(lower=1.0)
             total = total.where((total - total2).abs() <= tolerance)
         daily["precip"] = total
-    daily = daily.reindex(pd.date_range(start, end, freq="D", name="time"))
-    return daily, interval_min
+    return daily.reindex(pd.date_range(start, end, freq="D", name="time"))
 
 
 @weather_skill(
@@ -213,20 +189,6 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
     help="CHORDS instrument id (repeatable), e.g. 4. Discover ids with --list-stations.",
 )
 @weather_skill.argument(
-    "--portal",
-    default=DEFAULT_PORTAL,
-    help=(
-        f"CHORDS portal base URL (default {DEFAULT_PORTAL}, the FEWS NET 3D-PAWS "
-        "network). Another 3D-PAWS portal, e.g. https://3d-kenya.chordsrt.com, needs that portal's key."
-    ),
-)
-@weather_skill.argument(
-    "--workers",
-    type=int,
-    default=DEFAULT_WORKERS,
-    help=f"Max concurrent station downloads (default {DEFAULT_WORKERS}).",
-)
-@weather_skill.argument(
     "--day-start-hour",
     type=int,
     default=0,
@@ -245,44 +207,19 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
         "(station_id, name, site, latitude, longitude) and exit. No -o."
     ),
 )
-@weather_skill.argument(
-    "--probe-latest",
-    nargs="?",
-    const="",
-    metavar="IDENT",
-    probe=True,
-    help=(
-        "Print the latest day with a complete record in the last 14 days "
-        "(YYYY-MM-DD) on stdout and exit. Any IDENT passed is ignored."
-    ),
-)
-def fetch(
-    start_time,
-    end_time,
-    bbox,
-    station,
-    portal,
-    workers,
-    day_start_hour,
-    list_stations,
-    probe_latest,
-    **kwargs,
-):
+def fetch(start_time, end_time, bbox, station, day_start_hour, list_stations, **kwargs):
     """Fetch daily 3D-PAWS weather-station observations as a weather-skills station Zarr."""
-    from datetime import UTC, datetime
-
     import pandas as pd
     import xarray as xr
 
     if not 0 <= day_start_hour <= 23:
         raise UsageError(f"--day-start-hour must be 0-23, got {day_start_hour}.")
-    if not list_stations and probe_latest is None and not station and bbox is None:
+    if not list_stations and not station and bbox is None:
         raise UsageError("pass --station ID (repeatable) or --bbox N/W/S/E.")
 
     # Stations are the portal's instruments joined to their site coordinates.
-    portal = portal.rstrip("/")
-    instruments = pd.DataFrame(_get_json(f"{portal}/instruments.json"))
-    sites = pd.DataFrame(_get_json(f"{portal}/sites.json"))
+    instruments = pd.DataFrame(_get_json(f"{PORTAL}/instruments.json"))
+    sites = pd.DataFrame(_get_json(f"{PORTAL}/sites.json"))
     sites = sites.rename(columns={"id": "site_id", "name": "site"})
     stations = instruments.merge(sites[["site_id", "site", "lat", "lon"]], on="site_id", how="left")
     stations["station_id"] = stations["id"].astype(str)
@@ -295,10 +232,10 @@ def fetch(
         north, west, south, east = bbox
         lon = stations["longitude"]
         lon_in = lon.between(west, east) if west <= east else (lon >= west) | (lon <= east)
-        in_box = stations[stations["latitude"].between(south, north) & lon_in]
+        stations_in_box = stations[stations["latitude"].between(south, north) & lon_in]
 
     if list_stations:
-        listed = stations if bbox is None else in_box
+        listed = stations if bbox is None else stations_in_box
         writer = csv.writer(sys.stdout, dialect="excel-tab", lineterminator="\n")
         writer.writerow(["station_id", "name", "site", "latitude", "longitude"])
         for _, row in listed.iterrows():
@@ -311,93 +248,65 @@ def fetch(
     email, api_key = require_env(
         "CHORDS_EMAIL",
         "CHORDS_API_KEY",
-        message="CHORDS_EMAIL and CHORDS_API_KEY must be set (from the portal's /users page).",
+        message=f"CHORDS_EMAIL and CHORDS_API_KEY must be set (from {PORTAL}/users).",
     )
     auth = {"email": email, "api_key": api_key}
 
-    located = stations.dropna(subset=["latitude", "longitude"])
     if station:
         wanted = [s.strip() for s in station]
         unknown = [s for s in wanted if s not in set(stations["station_id"])]
         if unknown:
             raise UsageError("unknown station id(s): " + ", ".join(unknown))
-        no_coords = [s for s in wanted if s not in set(located["station_id"])]
+        selected = stations.set_index("station_id", drop=False).loc[wanted]
+        no_coords = selected.loc[selected["latitude"].isna(), "station_id"].tolist()
         if no_coords:
             raise DataError(
                 "station(s) have no site coordinates on the portal: " + ", ".join(no_coords)
             )
-        selected = located.set_index("station_id", drop=False).loc[wanted]
-    elif bbox is not None:
-        selected = in_box
+    else:
+        selected = stations_in_box
         if selected.empty:
             raise DataError(f"no stations in --bbox {north:g}/{west:g}/{south:g}/{east:g}.")
-    else:
-        selected = located.head(3)  # --probe-latest with no stations named
 
-    if probe_latest is not None:
-        # The probe runs the normal fetch over the last 14 days.
-        end = pd.Timestamp(datetime.now(UTC).date())
-        start = end - pd.Timedelta(days=14)
-    else:
-        start = pd.Timestamp(start_time)
-        end = pd.Timestamp(end_time)
+    start = pd.Timestamp(start_time)
+    end = pd.Timestamp(end_time)
     print(
-        f"Fetching {len(selected)} 3D-PAWS station(s) from {portal} {start:%Y-%m-%d} → "
-        f"{end:%Y-%m-%d}, days starting {day_start_hour:02d}:00 UTC",
+        f"Fetching {len(selected)} 3D-PAWS station(s) {start_time} → {end_time}, "
+        f"days starting {day_start_hour:02d}:00 UTC",
         file=sys.stderr,
     )
-
     frames = []
-    meta_rows = []
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {
-            pool.submit(
-                _station_daily, portal, row["station_id"], start, end, day_start_hour, auth
-            ): row
+            pool.submit(_station_daily, row["station_id"], start, end, day_start_hour, auth): row
             for _, row in selected.iterrows()
         }
         for fut in as_completed(futures):
             row = futures[fut]
             sid = row["station_id"]
             try:
-                daily, interval_min = fut.result()
+                daily = fut.result()
             except UsageError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 print(f"{sid}: DROPPED, fetch failed ({exc})", file=sys.stderr)
                 continue
-            if daily is None:
-                print(f"{sid}: no readings in range", file=sys.stderr)
-                continue
-            complete = int(daily.notna().any(axis=1).sum())
-            if complete == 0:
-                print(f"{sid}: no complete day for any variable", file=sys.stderr)
-                continue
-            print(
-                f"{sid} ({row['name']}): reports every {interval_min} min, "
-                f"{complete}/{len(daily)} days with a complete record",
-                file=sys.stderr,
-            )
-            daily["station_id"] = sid
-            frames.append(daily)
-            meta_rows.append(row)
+            complete = 0 if daily is None else int(daily.notna().any(axis=1).sum())
+            print(f"{sid} ({row['name']}): {complete} complete days", file=sys.stderr)
+            if complete:
+                frames.append(daily.assign(station_id=sid))
 
     if not frames:
         raise DataError("no complete daily data for any station.")
 
     df = pd.concat(frames).reset_index().set_index(["time", "station_id"])
-    if probe_latest is not None:
-        observed = df.dropna(how="all").index.get_level_values("time")
-        print(observed.max().strftime("%Y-%m-%d"))
-        return
-    meta = pd.DataFrame(meta_rows).set_index("station_id")
     ds = xr.Dataset.from_dataframe(df)
-    ids = ds["station_id"].values
+    meta = selected.set_index("station_id", drop=False).loc[ds["station_id"].values]
     ds = ds.assign_coords(
-        latitude=("station_id", meta.loc[ids, "latitude"].astype(float).values),
-        longitude=("station_id", meta.loc[ids, "longitude"].astype(float).values),
-        name=("station_id", meta.loc[ids, "name"].astype(str).values),
-        site=("station_id", meta.loc[ids, "site"].fillna("").astype(str).values),
+        latitude=("station_id", meta["latitude"].astype(float).values),
+        longitude=("station_id", meta["longitude"].astype(float).values),
+        name=("station_id", meta["name"].astype(str).values),
+        site=("station_id", meta["site"].fillna("").astype(str).values),
     )
     ds["latitude"].attrs.update(standard_name="latitude", units="degrees_north", axis="Y")
     ds["longitude"].attrs.update(standard_name="longitude", units="degrees_east", axis="X")
@@ -422,16 +331,15 @@ def fetch(
         featureType="timeSeries",
         Conventions="CF-1.13",
         weather_skills_source="3dpaws",
-        source_url=portal,
+        source_url=PORTAL,
     )
     # A station is complete when it reported every requested day; multi-day
     # totals are only meaningful for those (missing days are never filled).
-    n_days = (end - start).days + 1
+    n_days = ds.sizes["time"]
     for name in sorted(ds.data_vars):
-        complete = int((ds[name].notnull().sum("time") == n_days).sum())
+        n_complete = int((ds[name].notnull().sum("time") == n_days).sum())
         print(
-            f"{name}: {complete} of {ds.sizes['station_id']} stations complete "
-            f"(all {n_days} days {start:%Y-%m-%d} → {end:%Y-%m-%d})",
+            f"{name}: {n_complete} of {ds.sizes['station_id']} stations complete (all {n_days} days)",
             file=sys.stderr,
         )
     return stamp_data_interval(ds, period="1 day")

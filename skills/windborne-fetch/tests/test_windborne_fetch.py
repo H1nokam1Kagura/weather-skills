@@ -60,16 +60,6 @@ def _fake_api(monkeypatch, mod, tmp_path, gridded):
             calls.append((url.rsplit("/", 1)[-1], dict(params or {})))
             if url.endswith("/initialization_times"):
                 return _Resp(200, {"available": ["2026-10-19T00:00:00Z", "2026-10-19T20:00:00Z"]})
-            if url.endswith("/variables"):
-                return _Resp(
-                    200,
-                    {
-                        "sfc_variables": ["total_precipitation_3h", "temperature_2m", "cape"],
-                        "derived_sfc_variables": [],
-                        "upper_variables": ["temperature"],
-                        "levels": [500, 850],
-                    },
-                )
             lead = params["forecast_hour"]
             return _Resp(200, content=_zipped_zarr(tmp_path, lead, gridded(params)))
 
@@ -120,8 +110,6 @@ def test_members_and_levels(mod, monkeypatch, tmp_path):
         mod.fetch,
         "--date",
         "2026-10-19",
-        "--run",
-        "0",
         "-v",
         "t",
         "--level",
@@ -174,17 +162,16 @@ def test_date_outside_live_runs_errors(mod, monkeypatch, tmp_path, capsys):
     assert "last two days" in capsys.readouterr().err
 
 
-def test_probe_latest(mod, monkeypatch, tmp_path, capsys):
+def test_unknown_variable_exits_2(mod, monkeypatch, tmp_path):
     _fake_api(monkeypatch, mod, tmp_path, lambda p: {})
-    run_skill(mod.fetch, "--probe-latest")
-    captured = capsys.readouterr()
-    assert captured.out.strip() == "2026-10-19"
-    assert "--date 2026-10-19 --run 20" in captured.err
+    with pytest.raises(SystemExit) as exc:
+        run_skill(mod.fetch, "-v", "boundary_layer_height", "-o", str(tmp_path / "x.zarr"))
+    assert exc.value.code == 2
 
 
 def test_missing_credentials_exit(mod, monkeypatch, tmp_path):
     monkeypatch.delenv("WB_CLIENT_ID", raising=False)
     monkeypatch.delenv("WB_API_KEY", raising=False)
     with pytest.raises(SystemExit) as exc:
-        run_skill(mod.fetch, "--probe-latest")
+        run_skill(mod.fetch, "-o", str(tmp_path / "x.zarr"))
     assert exc.value.code == 2

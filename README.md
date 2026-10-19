@@ -32,7 +32,7 @@ credentialed or source-specific fetcher only when it does not.
 | `imerg-fetch` | Earthdata **daily** IMERG Late/Final fallback (`GPM_3IMERGDL` / `GPM_3IMERGDF`) → Zarr. Default IMERG is `dynamical-fetch`, not this skill. |
 | `clim-fetch` | Climatology (mean + std) for a `--dataset` (`imerg_final`, `era5`, `chirps`, `ecmwf_ifs`, `oisst`, …), at a selected `--prediction-timedelta` lead and `--window` (days; correctly rolled up, centered, with circular padding if not pre-mirrored), expanded to a `--start-time`/`--end-time` window → Zarr. OISST SST is `--dataset oisst --variable sst`. |
 | `tahmo-fetch` | TAHMO station observations (daily-aggregated) → Zarr |
-| `3dpaws-fetch` | 3D-PAWS station observations from a CHORDS portal (default: FEWS NET Kenya; daily precip, temperature, humidity, pressure, wind) → station Zarr. Requires credentials. |
+| `3dpaws-fetch` | 3D-PAWS station observations from the FEWS NET CHORDS portal (Kenya; daily precip, temperature, humidity, pressure, wind) → station Zarr. Requires credentials. |
 | `cumulus-fetch` | Cumulus AI operational ensemble precip (Aurora S2S run) — 30 members, 46 daily leads, 0.25° or 1° global (`--dataset precip`, `precip_1deg`, `precip_era5`) → Zarr. Requires credentials. |
 | `neuralgcm-fetch` | NeuralGCM S2S ensemble (IMERG precip `tp`, ERA5 surface `t2m`/`d2m`) — up to 50 members, 6-hour leads to 60 days, ~2.8° → Zarr. Requires credentials. |
 | `weathernext-fetch` | Google WeatherNext 2 ensemble (2025 on) — 64 members, 6-hour leads to 15 days, 0.25° global, 13 pressure levels → Zarr. Pass `-v` and `--member` (full cube ~1 TB). Requires credentials. |
