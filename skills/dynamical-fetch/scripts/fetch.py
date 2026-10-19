@@ -275,7 +275,8 @@ def _open_dataset(state, dataset) -> dict:
 @weather_skill.argument(
     "--max-lead",
     help=(
-        "Forecasts only: keep leads up to this one (pandas timedelta: 240h, 10D). "
+        "Forecasts only: keep leads up to this one (pandas timedelta: 240h, 10D; "
+        "0h keeps only the initial state of instant fields). "
         "Only those leads are downloaded. Default: every lead."
     ),
 )
@@ -362,8 +363,9 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, max
                 raise UsageError(
                     f"--max-lead {max_lead!r} is not a timedelta (240h, 10D)"
                 ) from None
-            if limit <= np.timedelta64(0):
-                raise UsageError("--max-lead must be positive")
+            # 0h keeps only lead 0 (the initial state of instant fields).
+            if limit < np.timedelta64(0, "ns"):
+                raise UsageError("--max-lead must not be negative")
             ds = ds.sel(lead_time=slice(None, limit))
         if init_target not in inits:
             raise _no_init()
@@ -418,6 +420,12 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, max
         for name in ds.data_vars:
             other = [d for d in ds[name].dims if d != "step"]
             empty &= ds[name].isnull().all(other).values
+        if empty.all() and ds.sizes["step"] == 1 and ds["step"].values[0] == np.timedelta64(0, "ns"):
+            raise UsageError(
+                f"{', '.join(ds.data_vars)} has no value at lead 0: {dataset} labels averaged "
+                "and accumulated fields at the end of their interval. Pass --max-lead with "
+                "the first interval (e.g. 3h or 6h) instead of 0h."
+            )
         if empty.all():
             raise DataError(
                 f"{dataset} {date_iso} init has no data for the requested variables and "
