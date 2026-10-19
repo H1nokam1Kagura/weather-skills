@@ -33,8 +33,9 @@ _MAX_LEAD_HOURS = 360
 # Parallel gridded requests: each is one (field, level, lead) zipped Zarr.
 _WORKERS = 8
 
-# `-v` names (the cfgrib names other fetchers use) mapped onto WindBorne names.
-# The bool marks pressure-level fields.
+# Short `-v` tokens for the most-used fields (mirroring the cfgrib names other
+# fetchers use), mapped onto WindBorne names. Any other WindBorne name listed
+# by /variables is accepted as-is. The bool marks pressure-level fields.
 VARIABLES: dict[str, tuple[str, bool]] = {
     "tp": ("total_precipitation_3h", False),
     "t2m": ("temperature_2m", False),
@@ -113,14 +114,21 @@ def _get(session, url, params=None, *, binary=False):
     help="Init date. Default: the latest run. Only about the last two days are served.",
 )
 @weather_skill.argument(
+    "--run",
+    type=int,
+    choices=range(24),
+    metavar="HOUR",
+    help="Init hour UTC (0-23). Default: the latest available run on --date.",
+)
+@weather_skill.argument(
     "--variable",
     "-v",
     action="append",
-    choices=list(VARIABLES),
     help=(
-        "Field to retrieve (repeatable): tp, t2m, d2m, msl, u10, v10, u100, v100, "
-        "ws10, ws100, tmax, tmin, sp, tcwv, cape, tcc, ssrd, skt; pressure-level "
-        "t, z, q, u, v (need --level). Default tp."
+        "Field to retrieve (repeatable). Short names: tp, t2m, d2m, msl, u10, v10, "
+        "u100, v100, ws10, ws100, tmax, tmin, sp, tcwv, cape, tcc, ssrd, skt; "
+        "pressure-level t, z, q, u, v (need --level). Any WindBorne variable name "
+        "is also accepted. Default tp."
     ),
 )
 @weather_skill.argument(
@@ -144,7 +152,18 @@ def _get(session, url, params=None, *, binary=False):
     default=_MAX_LEAD_HOURS,
     help="Last lead hour to fetch (multiple of 3, up to 360). Default 360.",
 )
-def fetch(bbox, date, variable, level, ensemble, max_lead, **kwargs):
+@weather_skill.argument(
+    "--probe-latest",
+    nargs="?",
+    const="",
+    metavar="IDENT",
+    probe=True,
+    help=(
+        "Print the latest init date (YYYY-MM-DD, usable as --date) on stdout and "
+        "exit; stderr lists every available run. Does not download fields."
+    ),
+)
+def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **kwargs):
     """Fetch a WindBorne WeatherMesh-6 gridded forecast from the WindBorne API as a weather-skills Zarr."""
     import numpy as np
     import requests
@@ -167,29 +186,74 @@ def fetch(bbox, date, variable, level, ensemble, max_lead, **kwargs):
     if not available:
         raise DataError("WindBorne lists no available WeatherMesh-6 runs.")
 
-    # The latest run overall, or the latest run on --date.
+    if probe_latest is not None:
+        latest = max(available)
+        print(
+            "Available runs: " + ", ".join(f"{t:%Y-%m-%d %HZ}" for t in sorted(available)),
+            file=sys.stderr,
+        )
+        print(
+            f"Latest run: {latest:%Y-%m-%d %H} UTC (--date {latest:%Y-%m-%d} --run {latest.hour})",
+            file=sys.stderr,
+        )
+        print(latest.strftime("%Y-%m-%d"))
+        return
+
+    # Pick the init: an explicit date+run, the latest run on a date, or the latest overall.
+    if date is None and run is not None:
+        raise UsageError("--run needs --date.")
     if date is None:
         init = max(available)
-    else:
+    elif run is None:
         same_day = [t for t in available if t.date() == date]
         if not same_day:
             raise DataError(
                 f"no WeatherMesh-6 run on {date} among the available runs "
                 f"({min(available):%Y-%m-%d %HZ} to {max(available):%Y-%m-%d %HZ}). "
-                "WindBorne serves only about the last two days."
+                "WindBorne serves only about the last two days; archive runs mostly return 404."
             )
         init = max(same_day)
+    else:
+        init = dt.datetime.combine(date, dt.time(run))
+        if init not in available:
+            print(
+                f"Warning: {init:%Y-%m-%d %HZ} is not in the live run list; trying the archive, "
+                "which mostly returns 404.",
+                file=sys.stderr,
+            )
 
     if max_lead % 3 or not 0 <= max_lead <= _MAX_LEAD_HOURS:
         raise UsageError(f"--max-lead must be a multiple of 3 in 0..{_MAX_LEAD_HOURS}.")
 
-    # Resolve -v names to (output name, WindBorne name, levels or None).
+    # Resolve -v tokens to (output name, WindBorne name, level or None).
+    catalog = _get(session, f"{_API}/variables")
+    surface_names = set(catalog["sfc_variables"]) | set(catalog["derived_sfc_variables"])
+    upper_names = set(catalog["upper_variables"])
+    wb_to_short = {wb: short for short, (wb, _) in VARIABLES.items()}
     fields = []
-    for name in dict.fromkeys(variable or DEFAULT_VARIABLES):
-        wb_name, upper = VARIABLES[name]
-        if upper and not level:
-            raise UsageError(f"{name} is a pressure-level field; pass --level (hPa).")
-        fields.append((name, wb_name, sorted(level) if upper else None))
+    for token in variable or DEFAULT_VARIABLES:
+        if token in VARIABLES:
+            wb_name, upper = VARIABLES[token]
+        elif token in surface_names or token in upper_names:
+            wb_name, upper = token, token in upper_names
+        else:
+            raise UsageError(
+                f"unknown variable {token!r}.\nShort names: {', '.join(VARIABLES)}\n"
+                f"WindBorne surface: {', '.join(sorted(surface_names))}\n"
+                f"WindBorne pressure-level: {', '.join(sorted(upper_names))}"
+            )
+        short = wb_to_short.get(wb_name, wb_name)
+        if upper:
+            if not level:
+                raise UsageError(f"{token} is a pressure-level field; pass --level (hPa).")
+            bad = [lev for lev in level if lev not in catalog["levels"]]
+            if bad:
+                raise UsageError(
+                    f"level(s) {bad} not served; available: {', '.join(map(str, catalog['levels']))}."
+                )
+        if any(f[1] == wb_name for f in fields):
+            continue
+        fields.append((short, wb_name, sorted(level) if upper else None))
 
     leads = list(range(0, max_lead + 1, 3))
     # Request flag and the group the array sits in, per --ensemble.
@@ -223,8 +287,8 @@ def fetch(bbox, date, variable, level, ensemble, max_lead, **kwargs):
         key = group_prefix + array_name
         if key not in group:
             raise DataError(
-                f"{wb_name}{'' if lev is None else f' at {lev} hPa'} has no {ensemble} output; "
-                "members exist only for tp, t2m, d2m, msl, u10, v10, u100, v100, tcc and z at 500 hPa."
+                f"{wb_name}{'' if lev is None else f' at {lev} hPa'} has no {ensemble} output "
+                f"(run /forecasts/v1/wm-6/variables for each field's distribution flavours)."
             )
         lat = group["latitude"][:]
         lon = group["longitude"][:]

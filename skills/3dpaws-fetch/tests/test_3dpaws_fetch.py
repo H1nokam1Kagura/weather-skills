@@ -9,6 +9,7 @@ import pytest
 import xarray as xr
 from conftest import load_skill, run_skill
 
+PORTAL = "https://3d-fewsnet.icdp.ucar.edu"
 CREDS = {"CHORDS_EMAIL": "user@example.org", "CHORDS_API_KEY": "key"}
 
 
@@ -224,3 +225,19 @@ def test_test_readings_are_dropped(tmp_path, mod, fetch):
     points.append({"time": "2026-10-01T12:07:00Z", "test": "true", "measurements": {"mt1": 45.0}})
     ds = _run(tmp_path, mod, fetch, {"1": points})
     assert ds["tmax"].values[0, 0] == pytest.approx(20.0)
+
+
+def test_probe_latest_prints_last_complete_day(capsys, mod, fetch):
+    def make(t):
+        return {"rg1": 0.0, "rg2": 0.0, "mt1": 20.0}
+
+    today = pd.Timestamp.now(tz="UTC").tz_convert(None).normalize()
+    # Complete days up to three days ago; the station is silent after that.
+    points = _readings(today - pd.Timedelta(days=10), 8, 15, make)
+    with (
+        patch.dict(os.environ, CREDS),
+        patch.object(mod, "_get_json", side_effect=_fake_get_json({"1": points})),
+    ):
+        run_skill(fetch, "--probe-latest", "--station", "1")
+    out = capsys.readouterr().out.strip()
+    assert out == (today - pd.Timedelta(days=3)).strftime("%Y-%m-%d")
