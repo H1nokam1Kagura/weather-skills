@@ -104,10 +104,6 @@ def _get(session, url, params=None, *, binary=False):
     raise AssertionError("unreachable")
 
 
-def _parse_time(text: str) -> dt.datetime:
-    return dt.datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
-
-
 @weather_skill(
     name="windborne-fetch",
     version=_SKILL_VERSION,
@@ -184,7 +180,9 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
     session.auth = (client_id, api_key)
 
     runs = _get(session, f"{_API}/initialization_times")
-    available = [_parse_time(t) for t in runs.get("available", [])]
+    available = [
+        dt.datetime.fromisoformat(t).replace(tzinfo=None) for t in runs.get("available", [])
+    ]
     if not available:
         raise DataError("WindBorne lists no available WeatherMesh-6 runs.")
 
@@ -258,10 +256,11 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
         fields.append((short, wb_name, sorted(level) if upper else None))
 
     leads = list(range(0, max_lead + 1, 3))
-    flags = {
-        "mean": {},
-        "std": {"include_distribution": "true"},
-        "members": {"include_members": "true"},
+    # Request flag and the group the array sits in, per --ensemble.
+    flags, group_prefix = {
+        "mean": ({}, ""),
+        "std": ({"include_distribution": "true"}, "ensemble_std/"),
+        "members": ({"include_members": "true"}, "members/"),
     }[ensemble]
     print(
         f"Fetching WindBorne WM-6 run {init:%Y-%m-%d %HZ} {ensemble} for "
@@ -285,12 +284,7 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
         path.write_bytes(content)
         group = zarr.open_group(zarr.storage.ZipStore(path, mode="r"), mode="r")
         array_name = wb_name if lev is None else f"{wb_name}_{lev}"
-        if ensemble == "std":
-            key = f"ensemble_std/{array_name}"
-        elif ensemble == "members":
-            key = f"members/{array_name}"
-        else:
-            key = array_name
+        key = group_prefix + array_name
         if key not in group:
             raise DataError(
                 f"{wb_name}{'' if lev is None else f' at {lev} hPa'} has no {ensemble} output "
@@ -298,13 +292,9 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
             )
         lat = group["latitude"][:]
         lon = group["longitude"][:]
-        if bbox is None:
-            lat_sel = np.ones(lat.size, bool)
-            lon_sel = np.ones(lon.size, bool)
-        else:
-            north, west, south, east = bbox
-            lat_sel = (lat <= north) & (lat >= south)
-            lon_sel = (lon >= west) & (lon <= east)
+        north, west, south, east = bbox or (np.inf, -np.inf, -np.inf, np.inf)
+        lat_sel = (lat <= north) & (lat >= south)
+        lon_sel = (lon >= west) & (lon <= east)
         if not lat_sel.any() or not lon_sel.any():
             raise UsageError(
                 f"--bbox {list(bbox)} does not overlap the served grid "
@@ -370,7 +360,8 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
     )
     # Leads count from forecast_zero, which for off-synoptic inits is earlier
     # than the initialization (publish) time.
-    ds = ds.assign_coords(time=np.datetime64(_parse_time(forecast_zero), "ns"))
+    forecast_zero = dt.datetime.fromisoformat(forecast_zero).replace(tzinfo=None)
+    ds = ds.assign_coords(time=np.datetime64(forecast_zero, "ns"))
     ds = ds.sortby("latitude")
 
     if "tp" in ds.data_vars:
@@ -397,8 +388,8 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
     # A spread is a difference: keep it in kelvin and pascals rather than
     # shifting temperatures by 273.15 as a unit conversion would.
     if ensemble != "std":
-        tp = ds["tp"] if "tp" in ds.data_vars else None
-        ds = to_standard_units(ds.drop_vars("tp") if tp is not None else ds)
+        # tp is already a mm day-1 rate.
+        ds = to_standard_units(ds, [name for name in ds.data_vars if name != "tp"])
         for name in ds.data_vars:
             if (
                 ds[name].attrs.get("windborne_name") in _KELVIN
@@ -407,8 +398,6 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
                 converted, _ = convert_dataarray(ds[name], "degree_Celsius")
                 converted.attrs["units"] = "degree_Celsius"
                 ds[name] = converted
-        if tp is not None:
-            ds["tp"] = tp
     ds = stamp_data_interval(ds, "3 hour")
     return ds
 
