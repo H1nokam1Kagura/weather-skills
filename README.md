@@ -36,6 +36,7 @@ credentialed or source-specific fetcher only when it does not.
 | `cumulus-fetch` | Cumulus AI operational ensemble precip (Aurora S2S run) — 30 members, 46 daily leads, 0.25° or 1° global (`--dataset precip`, `precip_1deg`, `precip_era5`) → Zarr. Requires credentials. |
 | `neuralgcm-fetch` | NeuralGCM S2S ensemble (IMERG precip `tp`, ERA5 surface `t2m`/`d2m`) — up to 50 members, 6-hour leads to 60 days, ~2.8° → Zarr. Requires credentials. |
 | `weathernext-fetch` | Google WeatherNext 2 ensemble (2025 on) — 64 members, 6-hour leads to 15 days, 0.25° global, 13 pressure levels → Zarr. Pass `-v` and `--member` (full cube ~1 TB). Requires credentials. |
+| `windborne-fetch` | WindBorne WeatherMesh-6 ensemble (recent runs only) — 128 members (mean, std or all), 3-hour leads to 15 days, 0.25°, 25 pressure levels, limited to the key's region → Zarr. Requires credentials. |
 | `pbc-fetch` | PBC / StillLearning AI Weather Quest precip **quintile probabilities** (`era5-p_pr_19` week 3, `era5-p_pr_26` week 4), 1.5° global → Zarr. Requires credentials. |
 | `ecmwf-hres-fetch` | Deterministic ECMWF HRES forecast — 0.25°, out to 15 days, surface and pressure-level fields → Zarr. No credentials; needs the eccodes system library. |
 | `arco-era5-fetch` | ERA5 hourly reanalysis (ARCO-ERA5) → Zarr. No credentials. |
