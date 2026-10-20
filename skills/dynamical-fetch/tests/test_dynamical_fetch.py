@@ -573,7 +573,9 @@ def test_max_lead_zero_keeps_only_initial_state(tmp_path, mod, fetch):
     ds = _end_labelled_forecast_ds()
     written = _fetch_forecast(tmp_path, mod, fetch, ds, "-v", "temperature_2m", "--max-lead", "0h")
     assert (written["step"].values / np.timedelta64(1, "h")).tolist() == [0]
-    np.testing.assert_array_equal(written["temperature_2m"].values, ds["temperature_2m"].values[0, :1])
+    np.testing.assert_array_equal(
+        written["temperature_2m"].values, ds["temperature_2m"].values[0, :1]
+    )
 
 
 def test_max_lead_zero_on_end_labelled_field_exits_2(tmp_path, mod, fetch, capsys):

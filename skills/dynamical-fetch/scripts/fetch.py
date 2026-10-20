@@ -420,7 +420,11 @@ def fetch(bbox, dataset, date, start_time, end_time, variable, probe_latest, max
         for name in ds.data_vars:
             other = [d for d in ds[name].dims if d != "step"]
             empty &= ds[name].isnull().all(other).values
-        if empty.all() and ds.sizes["step"] == 1 and ds["step"].values[0] == np.timedelta64(0, "ns"):
+        if (
+            empty.all()
+            and ds.sizes["step"] == 1
+            and ds["step"].values[0] == np.timedelta64(0, "ns")
+        ):
             raise UsageError(
                 f"{', '.join(ds.data_vars)} has no value at lead 0: {dataset} labels averaged "
                 "and accumulated fields at the end of their interval. Pass --max-lead with "
