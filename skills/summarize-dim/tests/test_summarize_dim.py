@@ -136,3 +136,72 @@ def test_accepts_precip_totals(tmp_path, summarize_dim):
     result = xr.open_zarr(out, consolidated=True)
     assert "time" not in result.dims
     assert "sum" in result["precip"].attrs["cell_methods"]
+
+
+def _labeled(n_time=4):
+    import numpy as np
+
+    ds = make_gridded(n_time=n_time, lats=(1.0, 2.0), lons=(10.0, 11.0, 12.0))
+    ds["precip"].values[:] = np.arange(n_time * 6, dtype=float).reshape(n_time, 2, 3)
+    regions = np.array([["a", "a", ""], ["b", "b", "b"]])
+    return ds.assign_coords(
+        region=(("latitude", "longitude"), regions),
+        region_name=(("latitude", "longitude"), np.char.upper(regions)),
+        half=("time", ["x", "x", "y", "y"][:n_time]),
+    )
+
+
+def test_by_label_collapses_its_dims(tmp_path, summarize_dim):
+    src = write_zarr(_labeled(), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+
+    run_skill(summarize_dim, "-i", str(src), "-o", str(out), "--by", "region", "--method", "mean")
+
+    ds = xr.open_zarr(out, consolidated=True)
+    assert ds["precip"].dims == ("time", "region")
+    assert ds["region"].values.tolist() == ["a", "b"]  # "" dropped
+    # time 0: a = mean(0, 1), b = mean(3, 4, 5)
+    assert ds["precip"].isel(time=0).values.tolist() == [0.5, 4.0]
+    assert "latitude" not in ds.dims and "region_name" not in ds.coords
+    assert "(grouped by region)" in ds["precip"].attrs["cell_methods"]
+
+
+def test_by_two_labels_with_extra_dim(tmp_path, summarize_dim):
+    src = write_zarr(_labeled(), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+
+    run_skill(
+        summarize_dim,
+        "-i",
+        str(src),
+        "-o",
+        str(out),
+        "--by",
+        "region",
+        "--by",
+        "half",
+        "--method",
+        "sum",
+    )
+
+    ds = xr.open_zarr(out, consolidated=True)
+    assert set(ds["precip"].dims) == {"region", "half"}
+    # region a, half x: cells 0, 1 at times 0, 1 -> 0 + 1 + 6 + 7
+    assert ds["precip"].sel(region="a", half="x").item() == 14.0
+
+
+def test_by_rejects_dim_coord(tmp_path, summarize_dim, capsys):
+    src = write_zarr(_labeled(), tmp_path / "in.zarr")
+    with pytest.raises(SystemExit):
+        run_skill(
+            summarize_dim,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "o.zarr"),
+            "--by",
+            "time",
+            "--method",
+            "mean",
+        )
+    assert "not a label coord" in capsys.readouterr().err
