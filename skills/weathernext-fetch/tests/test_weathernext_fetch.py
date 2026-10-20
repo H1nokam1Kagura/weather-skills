@@ -525,3 +525,30 @@ def test_max_lead_trims_before_load(tmp_path, fetch_mod, monkeypatch):
     )  # fmt: skip
     with xr.open_zarr(out, consolidated=True) as ds:
         assert _lead_hours(ds) == list(range(1, 9))  # t2m keeps its native 1..8h leads
+
+
+def test_v3_reads_store_without_dask(tmp_path, fetch_mod, monkeypatch):
+    """The real open path reads a Zarr lazily without dask, subsets, then flattens."""
+    import fsspec
+
+    store = tmp_path / "predictions.zarr"
+    _native_v3_ensemble(n_lead=3).to_zarr(store, consolidated=True)
+    monkeypatch.setattr(fetch_mod, "_store_exists", lambda *args: True)
+    monkeypatch.setattr(fetch_mod, "_store_url", lambda *args: str(store))
+    monkeypatch.setattr(fetch_mod, "_filesystem", lambda *args: fsspec.filesystem("file"))
+    out = tmp_path / "wn3_disk.zarr"
+    run_skill(
+        fetch_mod.fetch,
+        "--version", "3",
+        "--date", "2026-10-02",
+        "--billing-project", "p",
+        "--bbox", "0.05/9/-1/10.05",
+        "-v", "t2m",
+        "--member", "1",
+        "--max-lead", "8",
+        "-o", str(out),
+    )  # fmt: skip
+    with xr.open_zarr(out, consolidated=True) as ds:
+        assert _lead_hours(ds) == list(range(1, 9))
+        assert ds.sizes["lat"] == 1 and ds.sizes["lon"] == 1
+        assert list(ds["number"].values) == [1]

@@ -2,7 +2,6 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/weather-skills/weather-skills-core@dev",
-#   "dask",
 #   "gcsfs",
 # ]
 # ///
@@ -385,9 +384,9 @@ def _open_remote(stamp: str, product: _Product, billing_project: str | None = No
     url = _store_url(stamp, product)
     try:
         fs = _filesystem(product, billing_project)
-        # Dask-backed with the store's native chunks, so clip/stack stay lazy and
-        # only chunks touched by the --member/--variable/--bbox subset are read.
-        return xr.open_zarr(fs.get_mapper(url), consolidated=True, chunks={})
+        # Lazy without dask: indexing stays lazy, so only the chunks left after the
+        # --member/--variable/--max-lead/--bbox subset are read at load().
+        return xr.open_zarr(fs.get_mapper(url), consolidated=True, chunks=None)
     except (DataError, UsageError):
         raise
     except Exception as exc:  # noqa: BLE001
@@ -525,17 +524,15 @@ def _flatten_leads(ds):
     return ds
 
 
-def _prepare_dataset(ds, product: _Product, variable=None, statistic=None):
-    """Native WeatherNext cube → standard ensemble-forecast dims and attrs."""
+def _prepare_dataset(ds, product: _Product):
+    """Loaded native WeatherNext cube → standard ensemble-forecast dims and attrs."""
     import numpy as np
 
     if product.version == "3":
-        ds = _select_v3(ds, variable, statistic)
         ds = ds.drop_vars("datetime", errors="ignore")
         ds = _flatten_leads(ds)
         rename = {"sample": "number", "init_time": "time"}
     else:
-        ds = _select_v2(ds, variable)
         rename = {"sample": "number", "time": "step", "datetime": "valid_time", "init_time": "time"}
     rename = {src: dst for src, dst in rename.items() if src in ds.dims or src in ds.variables}
     ds = ds.rename(rename)
@@ -594,15 +591,28 @@ def _prepare_dataset(ds, product: _Product, variable=None, statistic=None):
     return ds
 
 
-def _trim_leads(ds, max_lead: int):
-    """Keep leads up to ``max_lead`` hours (lazy, so dropped leads are never read)."""
+def _trim_leads(ds, product: _Product, max_lead: int):
+    """Keep native leads up to ``max_lead`` hours, before anything is read.
+
+    WeatherNext 3 hourly fields sit in 6 h ``lead_time`` blocks; a block is kept
+    when its first hour is in range, and the hours past ``max_lead`` are cut
+    after the leads are flattened.
+    """
     import numpy as np
 
-    keep = ds["step"].values <= np.timedelta64(max_lead, "h")
+    if product.version == "2":
+        dim = "time"
+        lead = np.asarray(ds["time"].values).astype("timedelta64[ns]")
+    else:
+        dim = "lead_time"
+        lead = _as_hours(ds["lead_time"].values)
+        if "lead_subtime" in ds.dims:
+            lead = lead + _as_hours(ds["lead_subtime"].values).min()
+    keep = lead <= np.timedelta64(max_lead, "h")
     if not keep.any():
-        first = int(ds["step"].values[0] / np.timedelta64(1, "h"))
+        first = int(lead[0] / np.timedelta64(1, "h"))
         raise UsageError(f"--max-lead {max_lead} keeps no leads (first lead is {first}h).")
-    return ds.isel(step=np.flatnonzero(keep))
+    return ds.isel({dim: np.flatnonzero(keep)})
 
 
 @weather_skill(
@@ -690,6 +700,8 @@ def fetch(
     # ensemble-forecast cube (WeatherNext 3 leads flattened to one hourly
     # ``step``), optionally subsets by ``--bbox`` / ``--variable``, and returns a
     # Dataset for the decorator to write.
+    import numpy as np
+
     product = _resolve_product(model_version, product)
     billing_project = _billing_project(billing_project)
     _check_cycle(product, cycle)
@@ -716,9 +728,12 @@ def fetch(
         if bad:
             raise UsageError(f"--member {bad} out of range for {n} members (valid: {-n}..{n - 1})")
         ds = ds.isel(sample=[m % n for m in member])
-    ds = _prepare_dataset(ds, product, variable, statistic)
+    if product.version == "3":
+        ds = _select_v3(ds, variable, statistic)
+    else:
+        ds = _select_v2(ds, variable)
     if max_lead is not None:
-        ds = _trim_leads(ds, max_lead)
+        ds = _trim_leads(ds, product, max_lead)
     if not variable:
         print(
             f"Note: no --variable given; selecting all data variables. {product.size_note}",
@@ -729,7 +744,9 @@ def fetch(
     else:
         ds = ensure_normalized_longitude(ds)
 
-    ds = ds.load()
+    ds = _prepare_dataset(ds.load(), product)
+    if max_lead is not None:
+        ds = ds.isel(step=np.flatnonzero(ds["step"].values <= np.timedelta64(max_lead, "h")))
     ds.attrs.update(
         Conventions="CF-1.13",
         title=product.title,
