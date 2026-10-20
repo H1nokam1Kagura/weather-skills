@@ -53,6 +53,8 @@ credentialed or source-specific fetcher only when it does not.
 | `smap-fetch` | NASA SMAP Enhanced L3 (`SPL3SMP_E`) daily 9 km surface soil moisture → Zarr. Requires credentials. |
 | `ghcn-daily-fetch` | NOAA GHCN-Daily station observations (daily precip and max/min/mean temperature, ~130,000 stations) → station Zarr. No credentials. |
 | `openaq-fetch` | OpenAQ air-quality station observations (daily mean PM2.5, PM10, NO2, O3, SO2, CO) → station Zarr. Requires credentials. |
+| `cams-fetch` | CAMS global air-quality fields (PM2.5, PM10, near-surface NO2/O3/SO2/CO, AOD, total columns) — 5-day forecast at 0.4° (2015 on) or EAC4 reanalysis at 0.75° (2003 on) → Zarr. Requires credentials. |
+| `meteosat-fetch` | A few Meteosat FCI or SEVIRI scans (0° or Indian Ocean) — visible reflectance and infrared brightness temperature on a regular lat/lon grid at native sampling → Zarr. Requires credentials. |
 
 ### Generic middle (operate on any standard dataset)
 | Skill | What it does |
@@ -77,7 +79,7 @@ credentialed or source-specific fetcher only when it does not.
 | `summarize-dim` | Summarize named dims with a statistic (mean/std/min/max/sum/median) — e.g. ensemble spread as the std across `number`, or a time-mean baseline |
 | `point-value` | Sample a gridded dataset at point locations (station Zarr, `--point LAT,LON[,ID]`, or CSV) into a `station_id` point_obs dataset — nearest, bilinear, or N×N cell-mean — for grid-vs-station `difference` / `verify` |
 | `local-extrema` | Find the local highs or lows of a gridded field (pressure centres, rainfall maxima) into a `station_id` point_obs dataset of locations and central values — for H / L map labels or listing centres |
-| `csv-io` | Export a Zarr to a CSV table (units in the headers), or read a CSV — station records, a gridded table, or one gauge (`--point`) — into a standard dataset. Day-first dates need `--date-format`; missing codes need `--na-value`. |
+| `csv-io` | Export a Zarr to a CSV table (units in the headers), or read a CSV — station records, a gridded table, or one gauge (`--point`) — into a Zarr. Day-first dates need `--date-format`; missing codes need `--na-value`. |
 | `difference` | Subtract one dataset from another (A − B) with inner-join alignment and broadcasting — anomalies vs a baseline, scenario-minus-historical change maps |
 | `standardize-anomaly` | Standardized anomaly aka z-score: `(field − clim_avg) / clim_std` against a climatology (e.g. `clim-fetch`) — dimensionless output, errors on units mismatch. For a plain physical-unit anomaly, use `difference` instead. |
 | `zonal-moisture-transport` | Eastward moisture flux `q·u`, default column-integrated to IVT (`viwve`, kg m-1 s-1). Compose after `dynamical-fetch` (46-day `pressure_level` group) with `q` and `u` |

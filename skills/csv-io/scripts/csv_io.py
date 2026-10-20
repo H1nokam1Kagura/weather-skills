@@ -1,14 +1,14 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core>=0.1.1",
 #   "cftime>=1.6",
 #   "numpy>=2.4",
 #   "pandas>=2.2",
 #   "xarray>=2026.4",
 # ]
 # ///
-"""Export a standard dataset Zarr to CSV, or read a CSV into a standard dataset Zarr."""
+"""Export a weather-skills Zarr to a CSV table, or read a CSV into a weather-skills Zarr."""
 
 import hashlib
 import re
@@ -337,7 +337,7 @@ def csv_io(
     index,
     **kwargs,
 ):
-    """Export a standard dataset Zarr to CSV, or read a CSV into a standard dataset Zarr."""
+    """Export a weather-skills Zarr to a CSV table, or read a CSV into a weather-skills Zarr."""
     if (ds is None) == (csv is None):
         raise UsageError("pass exactly one of -i/--input (Zarr to export) or --csv (CSV to read)")
     if ds is not None:

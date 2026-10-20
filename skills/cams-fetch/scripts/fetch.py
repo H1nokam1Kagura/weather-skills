@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core>=0.1.1",
 #   "cftime",
 #   "ecmwf-datastores-client==0.4.2",
 #   "requests",
@@ -16,16 +16,12 @@
 #   "pint-xarray>=0.6",
 # ]
 # ///
-"""Fetch CAMS global air-quality fields from the Copernicus Atmosphere Data Store (ADS) for a bbox.
+"""Fetch CAMS global air-quality fields (forecast or EAC4 reanalysis) over a bbox from the Copernicus ADS."""
 
-Two products: the CAMS global atmospheric composition **forecast** (0.4 deg,
-00/12 UTC inits, 5-day leads, 2015 onward) and the **EAC4** global reanalysis
-(0.75 deg, 3-hourly, 2003 onward). The bbox is cut server-side via the ADS
-`area` key, so only the region is downloaded. Requests go through the ADS
-retrieve API (the same API `cdsapi` talks to) with a personal ADS key.
-
-Credentials: ADS_API_KEY, or a ~/.cdsapirc whose `url:` points at the ADS.
-"""
+# The forecast is 0.4 deg, 00/12 UTC inits, 5-day leads, 2015 on; EAC4 is
+# 0.75 deg, 3-hourly, 2003 on. The bbox is cut server-side via the ADS `area`
+# key. Requests go through the ADS retrieve API (the one cdsapi uses) with a
+# personal key: ADS_API_KEY, or a ~/.cdsapirc whose `url:` points at the ADS.
 
 from __future__ import annotations
 
@@ -516,7 +512,7 @@ def fetch(
     lead_step,
     **kwargs,
 ):
-    """Fetch CAMS global air-quality fields (forecast or EAC4) for a bbox from the ADS."""
+    """Fetch CAMS global air-quality fields (forecast or EAC4 reanalysis) over a bbox from the Copernicus ADS."""
     probe = kwargs.get("probe_latest")
     if probe is not None:
         product = probe or dataset

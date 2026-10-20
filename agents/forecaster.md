@@ -125,9 +125,10 @@ Required names (from each skill's `metadata.openclaw.requires.env`):
 - `tahmo-fetch` — `TAHMO_API_USERNAME`, `TAHMO_API_PASSWORD`
 - `openaq-fetch` — `OPENAQ_API_KEY`
 - `cams-fetch` — `ADS_API_KEY` (not needed for `--probe-latest`)
+- `meteosat-fetch` — `EUMETSAT_CONSUMER_KEY`, `EUMETSAT_CONSUMER_SECRET`
 
 `--probe-latest` still needs credentials when the probe talks to a keyed
-API (`openaq-fetch`, `tahmo-fetch`, `imerg-fetch`, `smap-fetch`). ECMWF
+API (`openaq-fetch`, `tahmo-fetch`, `imerg-fetch`, `smap-fetch`, `meteosat-fetch`). ECMWF
 `--probe-latest` is calendar math only and does not. Never read, print, or echo the
 values, and never open a `.env` or credential file. If a named secret is not
 available to inject, report that to the user instead of calling the skill.

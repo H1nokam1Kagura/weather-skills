@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core @ git+https://github.com/rhiza-research/weather-skills-core@dev",
+#   "weather-skills-core>=0.1.1",
 #   "cftime",
 #   "xarray",
 #   "zarr",
@@ -15,17 +15,14 @@
 #   "dask[array]",
 # ]
 # ///
-"""Fetch Meteosat SEVIRI / FCI visible and infrared imagery from the EUMETSAT Data Store for a bbox.
+"""Fetch Meteosat SEVIRI or FCI visible and infrared scans over a bbox from the EUMETSAT Data Store."""
 
-Each requested scan is downloaded to a temporary directory, calibrated with satpy
-(visible -> reflectance %, infrared -> brightness temperature K), cropped and
-nearest-neighbour resampled from the satellite's geostationary projection onto a
-regular lat/lon grid at the instrument's native sampling, and the raw files are
-deleted before the next scan. Only the bbox is ever kept.
-
-Credentials: EUMETSAT_CONSUMER_KEY + EUMETSAT_CONSUMER_SECRET, or the
-``key,secret`` file eumdac writes at ~/.eumdac/credentials.
-"""
+# Each scan is downloaded to a temporary directory, calibrated with satpy
+# (visible -> reflectance %, infrared -> brightness temperature K), cropped and
+# nearest-neighbour resampled from the geostationary projection onto a regular
+# lat/lon grid at native sampling, and the raw files are deleted before the next
+# scan. Credentials: EUMETSAT_CONSUMER_KEY + EUMETSAT_CONSUMER_SECRET, or the
+# `key,secret` file eumdac writes at ~/.eumdac/credentials.
 
 import math
 import os
@@ -133,7 +130,7 @@ def _resolve_bands(requested, instrument):
                 )
             out.extend(n for n in names if n not in out)
     if not out:
-        raise UsageError("pass --band vis, --band ir, or explicit band names.")
+        raise UsageError("pass -v vis, -v ir, or explicit band names.")
     return out
 
 
@@ -345,7 +342,8 @@ def _latest(collection, instrument):
     help="N/W/S/E region to keep (required; whole disks are never stored).",
 )
 @weather_skill.argument(
-    "--band",
+    "--variable",
+    "-v",
     action="append",
     required=True,
     help=(
@@ -386,12 +384,12 @@ def _latest(collection, instrument):
     metavar="IDENT",
     probe=True,
     help=(
-        "Print the latest available scan as `YYYY-MM-DD HH:MM` (UTC) for "
-        "--service/--instrument and exit. Downloads nothing. IDENT is unused."
+        "Print the day of the latest scan (YYYY-MM-DD) for --service/--instrument "
+        "and exit; stderr gives its HH:MM UTC. Downloads nothing. IDENT is unused."
     ),
 )
-def fetch(date, time, bbox, band, service, instrument, max_scans, workers, **kwargs):
-    """Fetch Meteosat SEVIRI/FCI VIS and IR imagery for a bbox from the EUMETSAT Data Store."""
+def fetch(date, time, bbox, variable, service, instrument, max_scans, workers, **kwargs):
+    """Fetch Meteosat SEVIRI or FCI visible and infrared scans over a bbox from the EUMETSAT Data Store."""
     import eumdac
 
     if kwargs.get("probe_latest") is not None:
@@ -403,7 +401,8 @@ def fetch(date, time, bbox, band, service, instrument, max_scans, workers, **kwa
         latest = _latest(coll, instrument)
         if latest is None:
             raise DataError(f"no {instrument} {service} scans in the last week.")
-        print(f"{latest:%Y-%m-%d %H:%M}")
+        print(f"{latest:%Y-%m-%d}")
+        print(f"meteosat-fetch: latest scan {latest:%Y-%m-%d %H:%M} UTC", file=sys.stderr)
         return None
 
     import numpy as np
@@ -411,7 +410,7 @@ def fetch(date, time, bbox, band, service, instrument, max_scans, workers, **kwa
     import xarray as xr
 
     instrument = _resolve_instrument(instrument, service, date)
-    bands = _resolve_bands(band, instrument)
+    bands = _resolve_bands(variable, instrument)
     requested = _parse_times(date, time)
     slots = sorted({_slot(t, instrument) for t in requested})
     if len(slots) < len(requested):
