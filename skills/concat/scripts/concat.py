@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "weather-skills-core>=0.1.1",
+#   "weather-skills-core @ git+https://github.com/weather-skills/weather-skills-core@dev",
 # ]
 # ///
 """Join two or more Zarrs into one along a named dimension."""
