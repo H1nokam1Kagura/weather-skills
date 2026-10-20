@@ -225,3 +225,71 @@ def test_by_all_empty_labels_is_an_error(tmp_path, summarize_dim, capsys):
             "mean",
         )
     assert "empty label" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--by", "region", "--method", "mean"),
+        ("--dim", "latitude", "--dim", "longitude", "--method", "mean", "--lat-weighted"),
+    ],
+)
+def test_units_text_is_kept(tmp_path, summarize_dim, args):
+    """Grouped and lat-weighted results keep the input's units spelling (mm day-1)."""
+    src = write_zarr(_labeled(), tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+
+    run_skill(summarize_dim, "-i", str(src), "-o", str(out), *args)
+
+    assert xr.open_zarr(out, consolidated=True)["precip"].attrs["units"] == "mm day-1"
+
+
+def test_by_labels_sharing_some_dims_is_an_error(tmp_path, summarize_dim, capsys):
+    ds = _labeled().assign_coords(band=("latitude", ["s", "n"]))
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    with pytest.raises(SystemExit):
+        run_skill(
+            summarize_dim,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "o.zarr"),
+            "--by",
+            "region",
+            "--by",
+            "band",
+            "--method",
+            "mean",
+        )
+    assert "share some but not all dims" in capsys.readouterr().err
+
+
+def test_by_same_dims_combination_without_cells_is_nan(tmp_path, summarize_dim):
+    """Two labels on the same dims: a pair that never co-occurs is NaN, not dropped."""
+    import numpy as np
+
+    zone = np.array([["w", "e", "e"], ["w", "w", "e"]])
+    ds = _labeled().assign_coords(zone=(("latitude", "longitude"), zone))
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    out = tmp_path / "out.zarr"
+
+    run_skill(
+        summarize_dim,
+        "-i",
+        str(src),
+        "-o",
+        str(out),
+        "--by",
+        "region",
+        "--by",
+        "zone",
+        "--method",
+        "max",
+    )
+
+    r = xr.open_zarr(out, consolidated=True)["precip"].isel(time=0)
+    # region a = cells (0,0) w, (0,1) e; region b = (1,0) w, (1,1) w, (1,2) e
+    assert r.sel(region="a", zone="w").item() == 0.0
+    assert r.sel(region="a", zone="e").item() == 1.0
+    assert r.sel(region="b", zone="e").item() == 5.0
+    assert r.sel(region="b", zone="w").item() == 4.0

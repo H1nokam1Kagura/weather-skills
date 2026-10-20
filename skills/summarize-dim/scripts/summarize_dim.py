@@ -6,6 +6,10 @@
 # ///
 """Collapse named dimensions of a Zarr, or each group of a label coord, with a statistic."""
 
+import itertools
+
+import numpy as np
+import xarray as xr
 from weather_skills_core import DataError, Dataset, UsageError, weather_skill
 from weather_skills_core.standard_dataset import detect_spatial_dims
 from weather_skills_core.standard_utils import latitude_weights
@@ -62,6 +66,43 @@ def summarize_dim(ds, variable, dim, by, method, lat_weighted, **kwargs):
     ds = ds.drop_vars(
         [c for c in ds.coords if c not in (*by, *ds.dims) and set(ds[c].dims) & set(group_dims)]
     )
+    # Groups, built once for every variable. Labels on the same dims are matched together;
+    # labels on different dims (a county and a year) combine as a product. Each group keeps
+    # only the rows/columns/times it touches, plus a mask when that box holds other cells,
+    # so no step copies more than one group.
+    label_values = {}
+    groups = []
+    for dset in dict.fromkeys(ds[b].dims for b in by):
+        names = [b for b in by if ds[b].dims == dset]
+        for b in by:
+            if b not in names and set(ds[b].dims) & set(dset):
+                raise UsageError(f"--by {b!r} and {names[0]!r} share some but not all dims")
+        for b in names:
+            values = np.unique(ds[b].values)
+            label_values[b] = values[values != ""] if values.dtype.kind in "UO" else values
+            if label_values[b].size == 0:
+                raise DataError(f'--by {b!r}: every value is the empty label ""; nothing to group')
+        entries = []
+        for combo in itertools.product(*(range(label_values[b].size) for b in names)):
+            mask = np.ones([ds.sizes[d] for d in dset], dtype=bool)
+            for b, i in zip(names, combo, strict=True):
+                mask &= ds[b].values == label_values[b][i]
+            if not mask.any():
+                continue
+            index = [
+                np.nonzero(mask.any(axis=tuple(a for a in range(mask.ndim) if a != axis)))[0]
+                for axis in range(mask.ndim)
+            ]
+            box = mask[np.ix_(*index)]
+            entries.append(
+                (
+                    dict(zip(names, combo, strict=True)),
+                    dict(zip(dset, index, strict=True)),
+                    None if box.all() else xr.DataArray(box, dims=dset),
+                )
+            )
+        groups.append(entries)
+
     lat_dim = None
     if lat_weighted:
         if method != "mean":
@@ -83,19 +124,36 @@ def summarize_dim(ds, variable, dim, by, method, lat_weighted, **kwargs):
         if not rdims or not set(group_dims) <= set(da.dims):
             continue
         if by:
-            # min_count=1 / ddof=1 as below; the "" label (outside every group) is dropped.
+            # min_count=1 / ddof=1 as below. Combinations with no cells stay NaN.
             kw = {"min_count": 1} if method == "sum" else {"ddof": 1} if method == "std" else {}
-            # Stack every collapsed dim into one so labels on different dims group together.
-            stacked = da.stack(_cells=rdims)
-            grouped = getattr(stacked.groupby(by), method)(dim="_cells", keep_attrs=True, **kw)
-            for b in by:
-                if grouped[b].dtype.kind in "UO" and "" in grouped[b].values:
-                    grouped = grouped.drop_sel({b: ""})
-                if grouped.sizes[b] == 0:
-                    raise DataError(
-                        f'--by {b!r}: every value is the empty label ""; nothing to group'
-                    )
-            out[var] = grouped
+            kept = [d for d in da.dims if d not in rdims]
+            units = da.pint.units
+            da = da.pint.dequantify()  # values are filled into numpy; units go back on below
+            values = None
+            for parts in itertools.product(*groups):
+                index = {d: i for _, isel, _ in parts for d, i in isel.items()}
+                sub = da.isel(index)
+                for _, _, box in parts:
+                    if box is not None:
+                        sub = sub.where(box)
+                reduced = getattr(sub, method)(dim=rdims, keep_attrs=True, **kw)
+                if values is None:
+                    template = reduced
+                    shape = [da.sizes[d] for d in kept] + [label_values[b].size for b in by]
+                    values = np.full(shape, np.nan, dtype=np.result_type(reduced.dtype, np.float32))
+                where = {b: i for labels, _, _ in parts for b, i in labels.items()}
+                values[(..., *(where[b] for b in by))] = reduced.transpose(*kept).values
+            out[var] = xr.DataArray(
+                values,
+                dims=[*kept, *by],
+                coords={
+                    **{c: v for c, v in template.coords.items() if set(v.dims) <= set(kept)},
+                    **{b: label_values[b] for b in by},
+                },
+                attrs=template.attrs,
+            )
+            if units is not None:
+                out[var] = out[var].copy(data=out[var].data * units)
         elif method == "sum":
             # min_count=1: all-NaN → NaN, not 0
             out[var] = da.sum(dim=rdims, keep_attrs=True, min_count=1)
@@ -107,6 +165,8 @@ def summarize_dim(ds, variable, dim, by, method, lat_weighted, **kwargs):
                 .weighted(latitude_weights(ds[lat_dim]))
                 .mean(dim=rdims, keep_attrs=True)
             )
+            if da.pint.units is not None:
+                out[var] = out[var].copy(data=out[var].data * da.pint.units)
         else:
             out[var] = getattr(da, method)(dim=rdims, keep_attrs=True)
         # Record the statistic (CF cell_methods). A spread or a sum is not the
