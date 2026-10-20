@@ -252,8 +252,9 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
     metavar="IDENT",
     probe=True,
     help=(
-        "Print the latest day with a complete record in the last 14 days "
-        "(YYYY-MM-DD) on stdout and exit. Any IDENT passed is ignored."
+        "Print the latest day that has ended at a reporting station (YYYY-MM-DD) "
+        "on stdout and exit, from one latest-reading request per station. Any "
+        "IDENT passed is ignored."
     ),
 )
 def fetch(
@@ -269,8 +270,6 @@ def fetch(
     **kwargs,
 ):
     """Fetch daily 3D-PAWS weather-station observations as a weather-skills station Zarr."""
-    from datetime import UTC, datetime
-
     import pandas as pd
     import xarray as xr
 
@@ -332,15 +331,44 @@ def fetch(
         if selected.empty:
             raise DataError(f"no stations in --bbox {north:g}/{west:g}/{south:g}/{east:g}.")
     else:
-        selected = located.head(3)  # --probe-latest with no stations named
+        selected = located  # --probe-latest with no stations named
 
     if probe_latest is not None:
-        # The probe runs the normal fetch over the last 14 days.
-        end = pd.Timestamp(datetime.now(UTC).date())
-        start = end - pd.Timedelta(days=14)
-    else:
-        start = pd.Timestamp(start_time)
-        end = pd.Timestamp(end_time)
+        # Ask each station for its single latest reading (CHORDS `last`), all at
+        # once; downloading days of 1-minute data would take minutes. The latest
+        # day is the last one that ended before the newest reading. Completeness
+        # is only checked by a fetch.
+        offset = pd.Timedelta(hours=day_start_hour)
+        now = pd.Timestamp.now(tz="UTC").tz_convert(None)
+        newest = None
+        with ThreadPoolExecutor(max_workers=min(len(selected), 32)) as pool:
+            futures = {
+                pool.submit(_get_json, f"{portal}/api/v1/data/{sid}.json", {"last": 1, **auth}): sid
+                for sid in selected["station_id"]
+            }
+            for fut in as_completed(futures):
+                try:
+                    payload = fut.result()
+                except UsageError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    print(f"{futures[fut]}: no latest reading ({exc})", file=sys.stderr)
+                    continue
+                for feature in payload.get("features", []):
+                    for point in feature["properties"]["data"]:
+                        t = pd.Timestamp(point["time"]).tz_convert(None)
+                        # Some station clocks run ahead (one reports 2027).
+                        if t <= now:
+                            newest = t if newest is None else max(newest, t)
+        if newest is None:
+            raise DataError("no station reported a latest reading.")
+        print(f"Newest reading: {newest:%Y-%m-%d %H:%M} UTC", file=sys.stderr)
+        latest_day = (newest - offset).normalize() - pd.Timedelta(days=1)
+        print(latest_day.strftime("%Y-%m-%d"))
+        return
+
+    start = pd.Timestamp(start_time)
+    end = pd.Timestamp(end_time)
     print(
         f"Fetching {len(selected)} 3D-PAWS station(s) from {portal} {start:%Y-%m-%d} → "
         f"{end:%Y-%m-%d}, days starting {day_start_hour:02d}:00 UTC",
@@ -386,10 +414,6 @@ def fetch(
         raise DataError("no complete daily data for any station.")
 
     df = pd.concat(frames).reset_index().set_index(["time", "station_id"])
-    if probe_latest is not None:
-        observed = df.dropna(how="all").index.get_level_values("time")
-        print(observed.max().strftime("%Y-%m-%d"))
-        return
     meta = pd.DataFrame(meta_rows).set_index("station_id")
     ds = xr.Dataset.from_dataframe(df)
     ids = ds["station_id"].values

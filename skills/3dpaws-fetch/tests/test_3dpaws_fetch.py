@@ -53,6 +53,9 @@ def _fake_get_json(points_by_station):
         if url.endswith("/sites.json"):
             return SITES
         sid = url.rsplit("/", 1)[-1].removesuffix(".json")
+        if "last" in params:
+            data = points_by_station.get(sid, [])[-1:]
+            return {"type": "FeatureCollection", "features": [{"properties": {"data": data}}]}
         lo = pd.Timestamp(params["start"]).tz_convert(None)
         hi = pd.Timestamp(params["end"]).tz_convert(None)
         data = [
@@ -227,17 +230,20 @@ def test_test_readings_are_dropped(tmp_path, mod, fetch):
     assert ds["tmax"].values[0, 0] == pytest.approx(20.0)
 
 
-def test_probe_latest_prints_last_complete_day(capsys, mod, fetch):
+def test_probe_latest_prints_last_ended_day(capsys, mod, fetch):
     def make(t):
         return {"rg1": 0.0, "rg2": 0.0, "mt1": 20.0}
 
     today = pd.Timestamp.now(tz="UTC").tz_convert(None).normalize()
-    # Complete days up to three days ago; the station is silent after that.
+    # Readings until 23:45 three days ago: that day has not ended at the newest
+    # reading, so the latest ended day is four days ago.
     points = _readings(today - pd.Timedelta(days=10), 8, 15, make)
+    # A station whose clock runs ahead is ignored.
+    ahead = [{"time": "2099-01-01T00:00:00Z", "test": "false", "measurements": {"mt1": 20.0}}]
     with (
         patch.dict(os.environ, CREDS),
-        patch.object(mod, "_get_json", side_effect=_fake_get_json({"1": points})),
+        patch.object(mod, "_get_json", side_effect=_fake_get_json({"1": points, "2": ahead})),
     ):
-        run_skill(fetch, "--probe-latest", "--station", "1")
+        run_skill(fetch, "--probe-latest", "--station", "1", "--station", "2")
     out = capsys.readouterr().out.strip()
-    assert out == (today - pd.Timedelta(days=3)).strftime("%Y-%m-%d")
+    assert out == (today - pd.Timedelta(days=4)).strftime("%Y-%m-%d")

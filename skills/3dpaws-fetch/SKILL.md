@@ -47,7 +47,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest [--station ID | --bbo
 - `--day-start-hour` — UTC hour each day starts at, 0-23. Default: 0 (UTC calendar days). Day D runs from D HH:00 to D+1 HH:00 UTC and is labelled D. Most Kenyan stations reset their own rain total at 06 UTC (09 EAT), the KMD rainfall day; pass 6 to match it.
 - `--portal` — CHORDS portal base URL. Default: `https://3d-fewsnet.icdp.ucar.edu` (3D-PAWS FEWS NET). Other 3D-PAWS portals work too, e.g. `https://3d-kenya.chordsrt.com` (GLOBE Kenya schools), each with its own key.
 - `--workers` — concurrent station downloads. Default: 8.
-- `--probe-latest` — print the latest day with a complete record in the last 14 days for the `--station` / `--bbox` stations (default: the first three located stations) and exit. Any value passed is ignored.
+- `--probe-latest` — print the latest day that has ended (on the `--day-start-hour` day) before the newest reading from the `--station` / `--bbox` stations (default: every located station) and exit. One latest-reading request per station, so it takes seconds; it does not check that the day is complete, which only a fetch does. Any value passed is ignored.
 - `--output`, `-o` — output Zarr, overwritten.
 
 ### Output
