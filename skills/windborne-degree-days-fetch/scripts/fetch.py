@@ -58,7 +58,7 @@ def _parse_time(text: str) -> dt.datetime:
 )
 @weather_skill.argument(
     "--date",
-    help="Init date. Default: the latest run. Only about the last two days are served.",
+    help="Init date. Default: the latest run. Archived runs need --run too.",
 )
 @weather_skill.argument(
     "--run",
@@ -94,7 +94,7 @@ def fetch(date, run, **kwargs):
         if not same_day:
             raise DataError(
                 f"no WeatherMesh-6 run on {date} among the available runs. "
-                "WindBorne serves only about the last two days."
+                "For an archived run pass --run too."
             )
         init = max(same_day)
     else:

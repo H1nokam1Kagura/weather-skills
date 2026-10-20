@@ -60,6 +60,19 @@ def _fake_api(monkeypatch, mod, tmp_path, gridded):
             calls.append((url.rsplit("/", 1)[-1], dict(params or {})))
             if url.endswith("/initialization_times"):
                 return _Resp(200, {"available": ["2026-10-19T00:00:00Z", "2026-10-19T20:00:00Z"]})
+            if url.endswith("/initialization_times/archive"):
+                # Archive pages run backwards from page_end; 28 Sep has two runs.
+                return _Resp(
+                    200,
+                    {
+                        "archived_initialization_times": [
+                            "2026-09-29T00:00:00.000Z",
+                            "2026-09-28T12:00:00.000Z",
+                            "2026-09-28T00:00:00.000Z",
+                            "2026-09-27T23:00:00.000Z",
+                        ]
+                    },
+                )
             if url.endswith("/variables"):
                 return _Resp(
                     200,
@@ -167,11 +180,32 @@ def test_missing_members_flavour_errors(mod, monkeypatch, tmp_path):
     assert not (tmp_path / "x.zarr").exists()
 
 
-def test_date_outside_live_runs_errors(mod, monkeypatch, tmp_path, capsys):
+def test_archived_date_picks_latest_run_that_day(mod, monkeypatch, tmp_path):
+    def gridded(params):
+        return {"temperature_2m": (np.full((5, 3), 300.0, "float32"), "K")}
+
+    calls = _fake_api(monkeypatch, mod, tmp_path, gridded)
+    run_skill(
+        mod.fetch,
+        "--date",
+        "2026-09-28",
+        "-v",
+        "t2m",
+        "--max-lead",
+        "0",
+        "-o",
+        str(tmp_path / "x.zarr"),
+    )
+    archive = [c for c in calls if c[0] == "archive"]
+    assert archive[0][1] == {"page_end": "2026-09-29T00:00:00Z"}
+    assert calls[-1][1]["initialization_time"] == "2026-09-28T12:00:00Z"
+
+
+def test_date_with_no_run_errors(mod, monkeypatch, tmp_path, capsys):
     _fake_api(monkeypatch, mod, tmp_path, lambda p: {})
     with pytest.raises(SystemExit):
         run_skill(mod.fetch, "--date", "2026-09-01", "-o", str(tmp_path / "x.zarr"))
-    assert "last two days" in capsys.readouterr().err
+    assert "live or archived" in capsys.readouterr().err
 
 
 def test_probe_latest(mod, monkeypatch, tmp_path, capsys):

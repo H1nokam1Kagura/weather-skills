@@ -111,7 +111,7 @@ def _get(session, url, params=None, *, binary=False):
 @weather_skill.argument("--bbox")
 @weather_skill.argument(
     "--date",
-    help="Init date. Default: the latest run. Only about the last two days are served.",
+    help="Init date. Default: the latest run. Archived runs back to mid-2026 are served.",
 )
 @weather_skill.argument(
     "--run",
@@ -207,20 +207,23 @@ def fetch(bbox, date, run, variable, level, ensemble, max_lead, probe_latest, **
     elif run is None:
         same_day = [t for t in available if t.date() == date]
         if not same_day:
-            raise DataError(
-                f"no WeatherMesh-6 run on {date} among the available runs "
-                f"({min(available):%Y-%m-%d %HZ} to {max(available):%Y-%m-%d %HZ}). "
-                "WindBorne serves only about the last two days; archive runs mostly return 404."
+            # Older runs come from the archive list, paged backwards from page_end.
+            page_end = dt.datetime.combine(date + dt.timedelta(days=1), dt.time(0))
+            archive = _get(
+                session,
+                f"{_API}/initialization_times/archive",
+                {"page_end": f"{page_end:%Y-%m-%dT%H:00:00Z}"},
             )
+            same_day = [
+                dt.datetime.fromisoformat(t).replace(tzinfo=None)
+                for t in archive.get("archived_initialization_times", [])
+            ]
+            same_day = [t for t in same_day if t.date() == date]
+        if not same_day:
+            raise DataError(f"no WeatherMesh-6 run on {date} in the live or archived run lists.")
         init = max(same_day)
     else:
         init = dt.datetime.combine(date, dt.time(run))
-        if init not in available:
-            print(
-                f"Warning: {init:%Y-%m-%d %HZ} is not in the live run list; trying the archive, "
-                "which mostly returns 404.",
-                file=sys.stderr,
-            )
 
     if max_lead % 3 or not 0 <= max_lead <= _MAX_LEAD_HOURS:
         raise UsageError(f"--max-lead must be a multiple of 3 in 0..{_MAX_LEAD_HOURS}.")

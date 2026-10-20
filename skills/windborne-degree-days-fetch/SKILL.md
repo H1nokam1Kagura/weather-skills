@@ -29,7 +29,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py [--date YYYY-MM-DD [--run HOUR]] -o 
 ```
 
 ### Arguments
-- `--date`, `--run` — init date and hour UTC. Default: the latest run. Only about the last two days are served.
+- `--date`, `--run` — init date and hour UTC. Default: the latest run. For an archived run (older than about two days), pass both `--date` and `--run`.
 - `--output`, `-o` — output Zarr, overwritten.
 
 ### Output

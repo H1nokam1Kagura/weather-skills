@@ -1,6 +1,6 @@
 ---
 name: windborne-sounding-fetch
-description: "Fetch WindBorne WeatherMesh-6 AI forecast vertical soundings (temperature, dewpoint, specific humidity, winds and height on 21 levels, 1000–100 hPa) at chosen lat/lon locations and lead hours, as a weather-skills Zarr. Needs WindBorne API credentials. Use for skew-T style profiles, inversions or wind shear at a site; serves only about the last two days of runs."
+description: "Fetch WindBorne WeatherMesh-6 AI forecast vertical soundings (temperature, dewpoint, specific humidity, winds and height on 21 levels, 1000–100 hPa) at chosen lat/lon locations and lead hours, as a weather-skills Zarr. Needs WindBorne API credentials. Use for skew-T style profiles, inversions or wind shear at a site; serves only about the last two days of runs (older runs: use windborne-fetch)."
 license: MIT
 compatibility: Requires Python 3.12 and uv. Reads the WindBorne Forecasts API (api.windbornesystems.com). Requires WB_CLIENT_ID and WB_API_KEY in the environment.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
@@ -34,7 +34,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --point LAT,LON[,ID] [--point ...] [
 
 ### Arguments
 - `--point` — `LAT,LON[,ID]`, repeatable; at least one. IDs default to `P0`, `P1`, …. Points outside the region the key may read return 403.
-- `--date`, `--run` — init date and hour UTC. Default: the latest run. Only about the last two days are served.
+- `--date`, `--run` — init date and hour UTC. Default: the latest run. Only runs on the live list (about the last two days) are served: older runs return 404 or 400. For an archived run, fetch the grid with windborne-fetch and sample it with point-value.
 - `--lead` — lead hour from forecast zero, a multiple of 3 up to 360; repeatable. Default: 0.
 - `--output`, `-o` — output Zarr, overwritten.
 

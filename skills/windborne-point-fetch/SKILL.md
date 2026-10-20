@@ -1,6 +1,6 @@
 ---
 name: windborne-point-fetch
-description: "Fetch a WindBorne WeatherMesh-6 AI point forecast (3-hourly to 15 days) at chosen lat/lon locations as a weather-skills station Zarr: 2 m temperature, dewpoint, precipitation, pressure and 10/100 m winds by default, or any surface or pressure-level field with its ensemble spread, percentiles and rain-exceedance probabilities. Needs WindBorne API credentials. Use for site forecasts or meteograms; serves only about the last two days of runs."
+description: "Fetch a WindBorne WeatherMesh-6 AI point forecast (3-hourly to 15 days) at chosen lat/lon locations as a weather-skills station Zarr: 2 m temperature, dewpoint, precipitation, pressure and 10/100 m winds by default, or any surface or pressure-level field with its ensemble spread, percentiles and rain-exceedance probabilities. Needs WindBorne API credentials. Use for site forecasts or meteograms; serves only about the last two days of runs (older runs: use windborne-fetch)."
 license: MIT
 compatibility: Requires Python 3.12 and uv. Reads the WindBorne Forecasts API (api.windbornesystems.com). Requires WB_CLIENT_ID and WB_API_KEY in the environment.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py *)
@@ -38,7 +38,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --point LAT,LON[,ID] [--point ...] [
 
 ### Arguments
 - `--point` — `LAT,LON[,ID]`, repeatable; at least one. IDs default to `P0`, `P1`, …. Points outside the region the key may read return 403.
-- `--date`, `--run` — init date and hour UTC. Default: the latest run. Only about the last two days are served.
+- `--date`, `--run` — init date and hour UTC. Default: the latest run. Only runs on the live list (about the last two days) are served: older runs return 404 or 400. For an archived run, fetch the grid with windborne-fetch and sample it with point-value.
 - `--variable`, `-v` — default: `t2m`, `d2m`, `tp`, `msl`, `u10`, `v10`, `u100`, `v100`, `ws10`, `ws100` in one request. With `-v`, one request per field: the short names of windborne-fetch (`tmax`, `cape`, `tcc`, `ssrd`, pressure-level `t`, `z`, `q`, `u`, `v`, …) or any WindBorne variable name.
 - `--level` — hPa, repeatable; required for pressure-level fields, which are written as `<name><level>` (`t850`).
 - `--distribution` — with `-v`, also write `<name>_std`, the percentiles a field has (`<name>_p01` … `_p99`) and, for `tp`, exceedance probabilities `tp_gt_0p25mm` … `tp_gt_50mm` (0–1, per 3 h).
