@@ -6,7 +6,7 @@
 # ///
 """Collapse named dimensions of a Zarr, or each group of a label coord, with a statistic."""
 
-from weather_skills_core import Dataset, UsageError, weather_skill
+from weather_skills_core import DataError, Dataset, UsageError, weather_skill
 from weather_skills_core.standard_dataset import detect_spatial_dims
 from weather_skills_core.standard_utils import latitude_weights
 
@@ -91,6 +91,10 @@ def summarize_dim(ds, variable, dim, by, method, lat_weighted, **kwargs):
             for b in by:
                 if grouped[b].dtype.kind in "UO" and "" in grouped[b].values:
                     grouped = grouped.drop_sel({b: ""})
+                if grouped.sizes[b] == 0:
+                    raise DataError(
+                        f'--by {b!r}: every value is the empty label ""; nothing to group'
+                    )
             out[var] = grouped
         elif method == "sum":
             # min_count=1: all-NaN → NaN, not 0

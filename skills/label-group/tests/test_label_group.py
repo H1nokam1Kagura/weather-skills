@@ -121,7 +121,13 @@ def test_time_parts_and_month_groups(tmp_path, label_group):
 
 @pytest.mark.parametrize(
     ("spec", "message"),
-    [("J", "more than one"), ("MAX", "no run"), ("MAM,AMJ", "share a month")],
+    [
+        ("J", "more than one"),
+        ("MAX", "not a run"),
+        ("mam", "not a run"),
+        ("MAM,", "not a run"),
+        ("MAM,AMJ", "share a month"),
+    ],
 )
 def test_bad_month_groups(tmp_path, label_group, spec, message, capsys):
     src = write_zarr(make_gridded(), tmp_path / "in.zarr")
@@ -161,3 +167,36 @@ def test_unit_without_cells_is_reported(tmp_path, label_group, capsys):
 
     assert "tiny" in capsys.readouterr().err
     assert set(np.unique(xr.open_zarr(out, consolidated=True)["basin"].values)) == {"all"}
+
+
+def test_point_value_output_with_grid_coords(tmp_path, label_group):
+    """Stations that also carry grid_latitude/grid_longitude (point-value output) still label."""
+    ds = make_point_obs(n_points=2)
+    ds = ds.assign_coords(
+        grid_latitude=("point_id", [1.0, 2.0]), grid_longitude=("point_id", [10.0, 11.0])
+    )
+    ds["grid_latitude"].attrs.update(standard_name="latitude", units="degrees_north")
+    ds["grid_longitude"].attrs.update(standard_name="longitude", units="degrees_east")
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    zones = _geojson(tmp_path, _box("north", 10.5, 1.5, 11.5, 2.5))
+    out = tmp_path / "out.zarr"
+
+    run_skill(
+        label_group, "-i", str(src), "-o", str(out), "--geojson", zones, "--property", "basin"
+    )
+
+    assert xr.open_zarr(out, consolidated=True)["basin"].values.tolist() == ["", "north"]
+
+
+def test_overlapping_units_are_reported(tmp_path, label_group, capsys):
+    src = write_zarr(make_gridded(), tmp_path / "in.zarr")
+    zones = _geojson(tmp_path, _box("a", 9.5, 0.5, 11.5, 3.5), _box("b", 10.5, 0.5, 13.5, 3.5))
+    out = tmp_path / "out.zarr"
+
+    run_skill(
+        label_group, "-i", str(src), "-o", str(out), "--geojson", zones, "--property", "basin"
+    )
+
+    # Column lon=11 is in both boxes: 3 cells, kept by the first unit.
+    assert "3 cell(s)/station(s) lie in two overlapping units" in capsys.readouterr().err
+    assert (xr.open_zarr(out, consolidated=True)["basin"].sel(longitude=11.0) == "a").all()

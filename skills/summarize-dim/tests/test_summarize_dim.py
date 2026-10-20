@@ -205,3 +205,23 @@ def test_by_rejects_dim_coord(tmp_path, summarize_dim, capsys):
             "mean",
         )
     assert "not a label coord" in capsys.readouterr().err
+
+
+def test_by_all_empty_labels_is_an_error(tmp_path, summarize_dim, capsys):
+    import numpy as np
+
+    ds = _labeled().assign_coords(region=(("latitude", "longitude"), np.full((2, 3), "")))
+    src = write_zarr(ds, tmp_path / "in.zarr")
+    with pytest.raises(SystemExit):
+        run_skill(
+            summarize_dim,
+            "-i",
+            str(src),
+            "-o",
+            str(tmp_path / "o.zarr"),
+            "--by",
+            "region",
+            "--method",
+            "mean",
+        )
+    assert "empty label" in capsys.readouterr().err

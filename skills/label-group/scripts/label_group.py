@@ -16,7 +16,7 @@ import shapely
 from shapely.geometry import shape
 from weather_skills_core import Dataset, UsageError, weather_skill
 from weather_skills_core.region import LEVELS, level_features
-from weather_skills_core.standard_dataset import detect_spatial_dims
+from weather_skills_core.standard_dataset import detect_spatial_dims, names_for
 
 # Auto-populated by the version-bump CI workflow. Do not edit manually.
 _SKILL_VERSION = "0.0.1"
@@ -32,9 +32,16 @@ def _month_group(token):
         for start in range(12)
         if len(token) <= 12 and all(_INITIALS[(start + i) % 12] == c for i, c in enumerate(token))
     ]
-    if len(hits) != 1:
-        why = "matches no run of months" if not hits else "matches more than one run of months"
-        raise UsageError(f"--time month group {token!r} {why}; use initials like MAM, OND, DJF")
+    if not token or len(hits) != 1:
+        why = (
+            "matches more than one run of months"
+            if len(hits) > 1 and token
+            else "is not a run of months"
+        )
+        raise UsageError(
+            f"--time {token!r} {why}; pass month, year, dayofyear, or uppercase month "
+            "initials like MAM,OND or DJF"
+        )
     return [(hits[0] + i) % 12 + 1 for i in range(len(token))]
 
 
@@ -68,7 +75,15 @@ def label_group(ds, level, geojson, property, time, **kwargs):
 
     if level is not None or geojson is not None:
         # Grid (lat/lon dims) or stations (1-D lat/lon coords on one station dim).
-        lat_dim, lon_dim = detect_spatial_dims(ds)
+        try:
+            lat_dim, lon_dim = detect_spatial_dims(ds)
+        except UsageError:
+            # point-value output carries grid_latitude/grid_longitude too, which CF detection
+            # cannot tell apart from the station coords.
+            lat_dim = next((n for n in names_for("lat") if n in ds.coords), None)
+            lon_dim = next((n for n in names_for("lon") if n in ds.coords), None)
+            if lat_dim is None or lon_dim is None:
+                raise
         if lat_dim in ds.dims and lon_dim in ds.dims:
             space_dims = (lat_dim, lon_dim)
             lon2d, lat2d = np.meshgrid(ds[lon_dim].values, ds[lat_dim].values)
@@ -115,15 +130,20 @@ def label_group(ds, level, geojson, property, time, **kwargs):
         out = np.full(lat2d.shape, "", dtype=object)
         out_names = np.full(lat2d.shape, "", dtype=object)
         empty = []
+        contested = {}
         for i, feature in enumerate(features):
             geom = shape(feature["geometry"])
             west, south, east, north = geom.bounds
-            near = (out == "") & (lon2d >= west) & (lon2d <= east)
-            near &= (lat2d >= south) & (lat2d <= north)
+            near = (lon2d >= west) & (lon2d <= east) & (lat2d >= south) & (lat2d <= north)
             inside = np.zeros(lat2d.shape, dtype=bool)
             inside[near] = shapely.contains_xy(geom, lon2d[near], lat2d[near])
             if not inside.any():
                 empty.append(labels[i])
+            # Overlapping outlines (neighbouring countries' admin layers): first unit keeps it.
+            for other in np.unique(out[inside & (out != "")]):
+                pair = f"{other} / {labels[i]}"
+                contested[pair] = contested.get(pair, 0) + int((inside & (out == other)).sum())
+            inside &= out == ""
             out[inside] = labels[i]
             if names is not None:
                 out_names[inside] = names[i]
@@ -131,6 +151,13 @@ def label_group(ds, level, geojson, property, time, **kwargs):
             shown = ", ".join(empty[:10]) + (" ..." if len(empty) > 10 else "")
             print(
                 f"{len(empty)} unit(s) contain no cell centre or station: {shown}",
+                file=sys.stderr,
+            )
+        if contested:
+            shown = ", ".join(f"{pair} ({n})" for pair, n in list(contested.items())[:10])
+            print(
+                f"{sum(contested.values())} cell(s)/station(s) lie in two overlapping units and "
+                f"keep the first: {shown}",
                 file=sys.stderr,
             )
         print(f"{int((out == '').sum())} cell(s)/station(s) in no unit", file=sys.stderr)
