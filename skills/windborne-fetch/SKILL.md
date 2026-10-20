@@ -72,6 +72,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/fetch.py --probe-latest
 - Set `WB_CLIENT_ID` and `WB_API_KEY` in the environment for every call, including `--probe-latest`; without them it exits 2. Never write their values into files or commands.
 - Each field, level and lead is a separate request, so a full run of one field is 121 requests (a few seconds). `--ensemble members` is ~7 MB per lead over the key region: about 1 GB for a full run of one field.
 - History is not reliably served: archive runs mostly return 404. Save outputs if you need them later.
+- For points, soundings, plain-language conditions or climatology, use windborne-point-fetch, windborne-sounding-fetch, windborne-conditions-fetch or windborne-clim-fetch.
 - `tmax`, `tmin` and the other `_3h` fields cover the 3 h ending at the step. `ssrd` stays an amount per 3 h in J m-2.
 
 ### Example
