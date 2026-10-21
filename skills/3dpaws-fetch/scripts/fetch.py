@@ -103,16 +103,17 @@ def _get_json(url: str, params: dict | None = None):
             if attempt == 0 and is_transient(exc):
                 time.sleep(2.0)
                 continue
-            body = exc.read().decode(errors="replace")[:300]
-            raise DataError(f"CHORDS HTTP {exc.code}: {body}") from None
+            raise DataError(f"CHORDS HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError) as exc:
             if attempt == 0:
                 time.sleep(2.0)
                 continue
-            raise DataError(f"could not reach CHORDS ({exc})") from None
+            raise DataError(f"could not reach CHORDS ({type(exc).__name__})") from None
 
 
-def _station_daily(portal, station_id, start, end, day_start_hour, auth):
+def _station_daily(
+    portal, station_id, start, end, day_start_hour, auth, reporting_interval_minutes=None
+):
     """Download one station's readings and reduce them to daily values.
 
     Days ``start`` .. ``end`` inclusive, each starting at ``day_start_hour`` UTC.
@@ -144,20 +145,25 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
         return None, None
 
     raw = pd.DataFrame(rows)
-    raw["time"] = pd.to_datetime(raw["time"], utc=True).dt.tz_convert(None)
+    raw["time"] = pd.to_datetime(
+        raw["time"], utc=True, errors="coerce", format="mixed"
+    ).dt.tz_convert(None)
+    raw = raw.dropna(subset=["time"])
     raw = raw.drop_duplicates("time").set_index("time").sort_index()
     raw = raw[(raw.index >= first) & (raw.index < last)].apply(pd.to_numeric, errors="coerce")
     # Gauge 1 is "rg1" on newer stations and "rg" on older ones.
     raw = raw.rename(columns={"rg": "rg1"})
 
-    # The station's reporting interval (1, 10 or 15 minutes on most portals).
-    interval_min = max(1, round(raw.index.to_series().diff().dt.total_seconds().median() / 60))
-    # A day is complete when every slot of the day holds at least one valid
-    # reading. The slot is 3 reporting intervals (at least 5 minutes) rounded up
-    # to a divisor of the day, so a few late or dropped readings are tolerated
-    # but any longer outage blanks the day.
-    need = max(5, 3 * interval_min)
-    slot_min = next(m for m in range(need, 1441) if 1440 % m == 0)
+    if raw.empty:
+        return None, None
+    interval_min = reporting_interval_minutes
+    if interval_min is None:
+        if len(raw) < 2:
+            return None, None
+        inferred = raw.index.to_series().diff().dt.total_seconds().median() / 60
+        if not 0 < inferred <= 1440 or inferred != int(inferred) or 1440 % int(inferred):
+            return None, None
+        interval_min = int(inferred)
 
     clean = pd.DataFrame(index=raw.index)
     for short, (lo, hi) in VALID_RANGE.items():
@@ -166,14 +172,22 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
         values = raw[short].where(raw[short].between(lo, hi))
         if short in ZERO_IS_MISSING:
             values = values.where(values != 0)
-        # A sensor that sent only missing codes is treated as not fitted.
-        if values.notna().any():
+        # A present but failed gauge must still veto rainfall; absence is different.
+        if short in {"rg1", "rg2"} or values.notna().any():
             clean[short] = values
     # Shift by the day-start hour so each day bins as one calendar day labelled
     # by the date it starts on.
     clean.index = clean.index - offset
-    filled_slots = clean.notna().resample(f"{slot_min}min").sum() > 0
-    complete = filled_slots.resample("D").sum() == 1440 // slot_min
+    # Require each expected timestamp, not merely one reading in a broad slot.
+    # Off-grid timestamps fail the day closed, rather than silently losing rain.
+    expected = pd.date_range(
+        start, end + pd.Timedelta(days=1), freq=f"{interval_min}min", inclusive="left"
+    )
+    off_grid = (~clean.index.isin(expected)).astype(int)
+    off_grid_days = pd.Series(off_grid, index=clean.index).resample("D").sum()
+    clean = clean.reindex(expected)
+    complete = clean.notna().resample("D").sum() == 1440 // interval_min
+    complete.loc[off_grid_days[off_grid_days > 0].index] = False
     days = clean.resample("D")
 
     daily = pd.DataFrame(index=complete.index)
@@ -191,6 +205,7 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
             total = total.where((total - total2).abs() <= tolerance)
         daily["precip"] = total
     daily = daily.reindex(pd.date_range(start, end, freq="D", name="time"))
+    daily.index = daily.index + offset
     return daily, interval_min
 
 
@@ -227,12 +242,18 @@ def _station_daily(portal, station_id, start, end, day_start_hour, auth):
     help=f"Max concurrent station downloads (default {DEFAULT_WORKERS}).",
 )
 @weather_skill.argument(
+    "--reporting-interval-minutes",
+    type=int,
+    default=None,
+    help="Known reporting cadence in minutes (positive divisor of 1440). Otherwise inferred, not verified.",
+)
+@weather_skill.argument(
     "--day-start-hour",
     type=int,
     default=0,
     help=(
         "UTC hour each daily value starts at (0-23, default 0). Day D covers "
-        "D HH:00 to D+1 HH:00 UTC and is labelled D; e.g. 6 for KMD's 06 UTC rainfall day."
+        "D HH:00 to D+1 HH:00 UTC and is labelled D HH:00."
     ),
 )
 @weather_skill.argument(
@@ -265,6 +286,7 @@ def fetch(
     portal,
     workers,
     day_start_hour,
+    reporting_interval_minutes,
     list_stations,
     probe_latest,
     **kwargs,
@@ -273,8 +295,14 @@ def fetch(
     import pandas as pd
     import xarray as xr
 
+    if workers <= 0:
+        raise UsageError("--workers must be positive.")
     if not 0 <= day_start_hour <= 23:
         raise UsageError(f"--day-start-hour must be 0-23, got {day_start_hour}.")
+    if reporting_interval_minutes is not None and (
+        reporting_interval_minutes <= 0 or 1440 % reporting_interval_minutes
+    ):
+        raise UsageError("--reporting-interval-minutes must be a positive divisor of 1440.")
     if not list_stations and probe_latest is None and not station and bbox is None:
         raise UsageError("pass --station ID (repeatable) or --bbox N/W/S/E.")
 
@@ -282,6 +310,8 @@ def fetch(
     portal = portal.rstrip("/")
     instruments = pd.DataFrame(_get_json(f"{portal}/instruments.json"))
     sites = pd.DataFrame(_get_json(f"{portal}/sites.json"))
+    if instruments.empty or sites.empty:
+        raise DataError("CHORDS returned no instrument or site metadata.")
     sites = sites.rename(columns={"id": "site_id", "name": "site"})
     stations = instruments.merge(sites[["site_id", "site", "lat", "lon"]], on="site_id", how="left")
     stations["station_id"] = stations["id"].astype(str)
@@ -333,6 +363,8 @@ def fetch(
     else:
         selected = located  # --probe-latest with no stations named
 
+    if selected.empty:
+        raise DataError("no located stations selected.")
     if probe_latest is not None:
         # Ask each station for its single latest reading (CHORDS `last`), all at
         # once; downloading days of 1-minute data would take minutes. The latest
@@ -352,11 +384,18 @@ def fetch(
                 except UsageError:
                     raise
                 except Exception as exc:  # noqa: BLE001
-                    print(f"{futures[fut]}: no latest reading ({exc})", file=sys.stderr)
+                    print(
+                        f"{futures[fut]}: no latest reading ({type(exc).__name__})", file=sys.stderr
+                    )
                     continue
                 for feature in payload.get("features", []):
                     for point in feature["properties"]["data"]:
-                        t = pd.Timestamp(point["time"]).tz_convert(None)
+                        if str(point.get("test")).lower() == "true":
+                            continue
+                        t = pd.to_datetime(point.get("time"), utc=True, errors="coerce")
+                        if pd.isna(t):
+                            continue
+                        t = t.tz_convert(None)
                         # Some station clocks run ahead (one reports 2027).
                         if t <= now:
                             newest = t if newest is None else max(newest, t)
@@ -369,6 +408,11 @@ def fetch(
 
     start = pd.Timestamp(start_time)
     end = pd.Timestamp(end_time)
+    if (
+        any(pd.isna(t) or t.tzinfo is not None or t != t.normalize() for t in (start, end))
+        or end < start
+    ):
+        raise UsageError("--start-time and --end-time must be ordered UTC calendar dates.")
     print(
         f"Fetching {len(selected)} 3D-PAWS station(s) from {portal} {start:%Y-%m-%d} → "
         f"{end:%Y-%m-%d}, days starting {day_start_hour:02d}:00 UTC",
@@ -380,7 +424,14 @@ def fetch(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(
-                _station_daily, portal, row["station_id"], start, end, day_start_hour, auth
+                _station_daily,
+                portal,
+                row["station_id"],
+                start,
+                end,
+                day_start_hour,
+                auth,
+                reporting_interval_minutes,
             ): row
             for _, row in selected.iterrows()
         }
@@ -392,7 +443,7 @@ def fetch(
             except UsageError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                print(f"{sid}: DROPPED, fetch failed ({exc})", file=sys.stderr)
+                print(f"{sid}: DROPPED, fetch failed ({type(exc).__name__})", file=sys.stderr)
                 continue
             if daily is None:
                 print(f"{sid}: no readings in range", file=sys.stderr)
@@ -402,12 +453,14 @@ def fetch(
                 print(f"{sid}: no complete day for any variable", file=sys.stderr)
                 continue
             print(
-                f"{sid} ({row['name']}): reports every {interval_min} min, "
-                f"{complete}/{len(daily)} days with a complete record",
+                f"{sid} ({row['name']}): {'explicit' if reporting_interval_minutes is not None else 'inferred, unverified'} cadence {interval_min} min, "
+                f"{complete}/{len(daily)} days passing assumed-grid coverage",
                 file=sys.stderr,
             )
             daily["station_id"] = sid
             frames.append(daily)
+            row = row.copy()
+            row["reporting_interval_minutes"] = interval_min
             meta_rows.append(row)
 
     if not frames:
@@ -422,6 +475,10 @@ def fetch(
         longitude=("station_id", meta.loc[ids, "longitude"].astype(float).values),
         name=("station_id", meta.loc[ids, "name"].astype(str).values),
         site=("station_id", meta.loc[ids, "site"].fillna("").astype(str).values),
+        reporting_interval_minutes=(
+            "station_id",
+            meta.loc[ids, "reporting_interval_minutes"].astype(int).values,
+        ),
     )
     ds["latitude"].attrs.update(standard_name="latitude", units="degrees_north", axis="Y")
     ds["longitude"].attrs.update(standard_name="longitude", units="degrees_east", axis="X")
@@ -433,6 +490,9 @@ def fetch(
     ds["station_id"].attrs.update(cf_role="timeseries_id", long_name="CHORDS instrument id")
     ds["name"].attrs.update(long_name="instrument name")
     ds["site"].attrs.update(long_name="site name")
+    ds["reporting_interval_minutes"].attrs.update(
+        units="min", long_name="assumed reporting cadence"
+    )
     for var in ds.data_vars:
         std_name, units, cell_methods, long_name = CF_META[var]
         ds[var].attrs.update(
@@ -447,6 +507,11 @@ def fetch(
         Conventions="CF-1.13",
         weather_skills_source="3dpaws",
         source_url=portal,
+        cadence_source="explicit"
+        if reporting_interval_minutes is not None
+        else "inferred_unverified",
+        completeness_policy="every expected timestamp on day-start-anchored grid; off-grid day rejected",
+        rainfall_measurement_assumption="rg/rg1/rg2 are interval increments in mm, timestamped at interval starts; no counter conversion",
     )
     # A station is complete when it reported every requested day; multi-day
     # totals are only meaningful for those (missing days are never filled).
