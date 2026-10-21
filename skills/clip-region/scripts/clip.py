@@ -20,7 +20,7 @@ _SKILL_VERSION = "0.0.3"
     name="clip-region",
     version=_SKILL_VERSION,
 )
-@weather_skill.argument("-i", "--input", type=Dataset(["spatial", "point_obs"]), required=True)
+@weather_skill.argument("-i", "--input", type=Dataset(["spatial", ("point_id",)]), required=True)
 @weather_skill.argument(
     "--bbox",
     help="N/W/S/E; keeps cells whose centre is inside (mutex with --region and --geojson).",

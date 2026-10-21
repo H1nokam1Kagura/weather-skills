@@ -20,7 +20,7 @@ uv run ${CLAUDE_SKILL_DIR}/scripts/clip.py -i IN.zarr -o OUT.zarr (--bbox N/W/S/
 ```
 
 ### Arguments
-- `--input`, `-i` — input Zarr, gridded or point_obs.
+- `--input`, `-i` — input Zarr, gridded or station (stations need no time dim, e.g. after selecting one date).
 - `--output`, `-o` — output Zarr.
 - `--bbox` — `N/W/S/E` decimal degrees. Keeps cells whose centre is inside. West > east crosses the antimeridian.
 - `--region` — ISO3 (`KEN`), country name, Natural Earth region (`East Africa`), custom box (`Indian Ocean`), or `country-admin1` (`Kenya-Turkana`). Offline lookup only.
