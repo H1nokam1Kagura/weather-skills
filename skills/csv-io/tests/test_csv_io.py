@@ -186,3 +186,30 @@ def test_export_refuses_too_many_rows(tmp_path, csv_io):
     with pytest.raises(SystemExit) as exc:
         run_skill(csv_io, "-i", str(src), "-o", str(tmp_path / "out.csv"), "--max-rows", "5")
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("column", ["step", "Step", "lead_time", "prediction_timedelta"])
+def test_read_lead_alias_preserves_hours(tmp_path, csv_io, column):
+    src = _write(tmp_path, f"date,{column} [hours],lat,lon,rain [mm]\n2026-10-01,6,1,10,2\n")
+    out = tmp_path / "out.zarr"
+    run_skill(csv_io, "--csv", str(src), "-o", str(out))
+    np.testing.assert_array_equal(_open(out).step.values, [np.timedelta64(6, "h")])
+
+
+def test_read_station_ids_are_literal_not_missing_values(tmp_path, csv_io):
+    src = _write(
+        tmp_path,
+        "station,lat,lon,date,rain\nNA,1,10,2026-10-01,1\nNULL,2,11,2026-10-01,NA\n00123,3,12,2026-10-01,2\n",
+    )
+    out = tmp_path / "out.zarr"
+    run_skill(csv_io, "--csv", str(src), "-o", str(out))
+    result = _open(out)
+    assert set(result.station_id.values) == {"NA", "NULL", "00123"}
+    assert np.isnan(result.rain.sel(station_id="NULL").values).all()
+
+
+def test_read_blank_station_id_is_refused(tmp_path, csv_io):
+    src = _write(tmp_path, "station,lat,lon,date,rain\n,1,10,2026-10-01,1\n")
+    with pytest.raises(SystemExit) as exc:
+        run_skill(csv_io, "--csv", str(src), "-o", str(tmp_path / "out.zarr"))
+    assert exc.value.code == 2

@@ -137,7 +137,7 @@ def _read(path, units, na_value, date_format, point, index):
         encoding="utf-8-sig",
         na_values=na_value or None,
         skipinitialspace=True,
-        dtype=id_cols or None,
+        converters=id_cols or None,
     )
     if df.empty:
         raise UsageError(f"{path} has no rows")
@@ -169,6 +169,9 @@ def _read(path, units, na_value, date_format, point, index):
             raise UsageError(f"columns {col!r} and another both look like {role}; rename one")
         roles[col] = role
     df = df.rename(columns=roles)
+    col_units = {roles.get(name, name): unit for name, unit in col_units.items()}
+    if "station_id" in df.columns and df["station_id"].str.strip().eq("").any():
+        raise UsageError("station IDs must not be blank")
 
     if "time" in df.columns:
         # Without --date-format only ISO dates: 01/10/2026 is ambiguous (1 Oct or 10 Jan).

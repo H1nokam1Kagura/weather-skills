@@ -594,6 +594,20 @@ def test_max_lead_negative_exits_2(tmp_path, mod, fetch, capsys):
     assert "must not be negative" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("selection", [(), ("-v", "precip", "-v", "temperature_2m")])
+def test_max_lead_zero_mixed_fields_refuses_missing_initial_value(
+    tmp_path, mod, fetch, capsys, selection
+):
+    ds = _end_labelled_forecast_ds()
+    with pytest.raises(SystemExit) as exc:
+        _fetch_forecast(tmp_path, mod, fetch, ds, *selection, "--max-lead", "0h")
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "precipitation_surface has no value at lead 0" in err
+    assert "temperature_2m has no value at lead 0" not in err
+    assert not (tmp_path / "out.zarr").exists()
+
+
 @pytest.mark.parametrize("publishing", [False, True])
 def test_probe_latest_warns_only_when_last_lead_missing(mod, fetch, capsys, publishing):
     ds = _end_labelled_forecast_ds()

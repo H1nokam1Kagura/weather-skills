@@ -2,7 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #   "weather-skills-core @ git+https://github.com/weather-skills/weather-skills-core@dev",
-#   "shapely",
+#   "shapely>=2",
 # ]
 # ///
 """Add label coords to a Zarr: the region each cell or station lies in, or a time group."""
