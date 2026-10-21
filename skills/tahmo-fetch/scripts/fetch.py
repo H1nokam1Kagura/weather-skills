@@ -353,11 +353,23 @@ def fetch(
             selected = _select_stations(stations, station, bbox)
         else:
             selected = _ta_stations(stations).head(3)
+        # Today cannot be complete yet, so stop at the first station with a
+        # complete yesterday instead of downloading every station in the box.
         latest = None
-        for _, row in selected.iterrows():
-            daily = _station_frame(
-                api, row["code"], start.isoformat(), end.isoformat(), day_start_hour
+        pool = ThreadPoolExecutor(max_workers=workers)
+        futures = [
+            pool.submit(
+                _station_frame,
+                api,
+                row["code"],
+                start.isoformat(),
+                end.isoformat(),
+                day_start_hour,
             )
+            for _, row in selected.iterrows()
+        ]
+        for fut in as_completed(futures):
+            daily = fut.result()
             if daily is None:
                 continue
             observed = daily.drop(columns="station_id").dropna(how="all")
@@ -365,6 +377,9 @@ def fetch(
                 continue
             day = observed.index.max().date()
             latest = day if latest is None else max(latest, day)
+            if latest >= end - timedelta(days=1):
+                break
+        pool.shutdown(wait=False, cancel_futures=True)
         if latest is None:
             raise DataError("TAHMO probe found no recent complete days")
         print(latest.isoformat())
